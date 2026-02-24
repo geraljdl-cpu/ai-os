@@ -32,6 +32,11 @@ class LogsReq(BaseModel):
 async def health():
     return {"ok": True}
 
+
+@app.get("/version")
+async def version():
+    return {"version":"0.1"}
+
 def _openai_tools_spec() -> list[dict[str, Any]]:
     return [
         {
