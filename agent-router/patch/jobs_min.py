@@ -30,7 +30,36 @@ def new_job(payload: dict) -> dict:
     if rc != 0:
         return {"ok": False, "job_id": job_id, "error": "not a git repo", "job_dir": str(job_dir)}
 
-    for cmd in (["git","fetch","--all"], ["git","checkout", base], ["git","pull","--ff-only"], ["git","checkout","-b", branch]):
+    # fetch (only if any remote exists)
+    rc, out, err = _run(["git","remote"], cwd=repo)
+    logline(f"git remote rc={rc}\n{out}\n{err}")
+    has_remote = (rc == 0 and out.strip() != "")
+
+    if has_remote:
+        rc, o, e = _run(["git","fetch","--all"], cwd=repo)
+        logline(f"git fetch --all rc={rc}\n{o}\n{e}")
+        if rc != 0:
+            return {"ok": False, "job_id": job_id, "error": "git failed: fetch", "job_dir": str(job_dir), "branch": branch}
+
+    # checkout base
+    rc, o, e = _run(["git","checkout", base], cwd=repo)
+    logline(f"git checkout {base} rc={rc}\n{o}\n{e}")
+    if rc != 0:
+        return {"ok": False, "job_id": job_id, "error": f"git failed: checkout {base}", "job_dir": str(job_dir), "branch": branch}
+
+    # pull only if remote exists
+    if has_remote:
+        rc, o, e = _run(["git","pull","--ff-only"], cwd=repo)
+        logline(f"git pull --ff-only rc={rc}\n{o}\n{e}")
+        if rc != 0:
+            return {"ok": False, "job_id": job_id, "error": "git failed: pull --ff-only", "job_dir": str(job_dir), "branch": branch}
+
+    # create branch
+    rc, o, e = _run(["git","checkout","-b", branch], cwd=repo)
+    logline(f"git checkout -b {branch} rc={rc}\n{o}\n{e}")
+    if rc != 0:
+        return {"ok": False, "job_id": job_id, "error": f"git failed: checkout -b {branch}", "job_dir": str(job_dir), "branch": branch}
+
         rc, out, err = _run(cmd, cwd=repo)
         logline(f"{cmd} rc={rc}\n{out}\n{err}")
         if rc != 0:

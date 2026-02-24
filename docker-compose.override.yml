@@ -1,9 +1,9 @@
 services:
   agent-router:
     volumes:
-      - /home/jdl/ai-os/workspace:/workspace:rw
       - /home/jdl/ai-os:/host/ai-os:rw
       - /home/jdl/ai-os/runtime:/app/runtime:rw
       - /home/jdl/ai-os/agent-router/patch/app.py:/app/app.py:rw
       - /home/jdl/ai-os/agent-router/patch/jobs_min.py:/app/jobs_min.py:rw
+      - /home/jdl/ai-os/runtime/agent-router-root:/root:rw
       - /var/run/docker.sock:/var/run/docker.sock:rw
