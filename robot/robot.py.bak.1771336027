@@ -1,0 +1,142 @@
+import subprocess
+import os, time, json
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+
+BASE = os.getenv("AGENT_CORE", "http://agent-core:8010")
+POLL_SECS = float(os.getenv("POLL_SECS", "2.0"))
+STATE_FILE = os.getenv("STATE_FILE", "/state/last_id.txt")
+
+def http_json(method: str, url: str, payload=None, timeout=60):
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+    req = Request(url, data=data, headers=headers, method=method)
+    with urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+def read_last_id() -> int:
+    try:
+        with open(STATE_FILE, "r") as f:
+            return int((f.read().strip() or "0"))
+    except:
+        return 0
+
+def write_last_id(v: int):
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    with open(STATE_FILE, "w") as f:
+        f.write(str(v))
+
+def post_event(source, type_, payload):
+    return http_json("POST", f"{BASE}/events", {"source": source, "type": type_, "payload": payload})
+
+def think(prompt: str) -> str:
+    r = http_json("POST", f"{BASE}/think", {"mode":"local", "prompt": prompt}, timeout=120)
+    return r.get("text", "")
+
+def get_jobs():
+    return http_json("GET", f"{BASE}/jobs")
+
+def update_job(job_id, payload):
+    return http_json("POST", f"{BASE}/jobs/{job_id}/update", payload)
+
+def normalize_payload(p):
+    if isinstance(p,str):
+        try: return json.loads(p)
+        except: return {"raw":p}
+    return p
+
+
+def main():
+    last_id = read_last_id()
+    print(f"[robot] started BASE={BASE} last_id={last_id}", flush=True)
+
+    while True:
+        try:
+            # ===== JOB EXECUTOR =====
+            for job in get_jobs():
+                if job.get("status") != "queued":
+                    continue
+
+                jid = job["id"]
+                meta = job.get("meta") or {}
+                jtype = meta.get("type", "test")
+                goal = job.get("goal", "")
+
+                print(f"[robot] job {jid} type={jtype}", flush=True)
+                update_job(jid, {"status":"running"})
+
+                try:
+                    # ---------------- AI ----------------
+                    if jtype == "ai":
+                        out = think("Responde em português de Portugal. " + goal)
+                        update_job(jid, {"result":{"text": out}})
+
+                    # ---------------- SHELL ----------------
+                    elif jtype == "shell":
+                        import subprocess
+                        cmd = meta.get("command") or goal
+                        t = int(meta.get("timeout_secs") or 60)
+
+                        if not cmd.strip():
+                            raise RuntimeError("shell command vazio")
+
+                        cp = subprocess.run(
+                            ["sh","-lc",cmd],
+                            capture_output=True,
+                            text=True,
+                            timeout=t
+                        )
+
+                        update_job(jid, {"result":{
+                            "stdout": cp.stdout[:20000],
+                            "stderr": cp.stderr[:20000],
+                            "returncode": cp.returncode
+                        }})
+
+                        if cp.returncode != 0:
+                            raise RuntimeError(f"shell returncode {cp.returncode}")
+
+                    # ---------------- FALLBACK ----------------
+                    else:
+                        time.sleep(1)
+                        update_job(jid, {"meta":{"type": jtype, "ok": True}})
+
+                    update_job(jid, {"status":"done"})
+                    post_event("robot","job_done",{"job_id": jid, "type": jtype})
+
+                except Exception as e:
+                    print("[robot] ERROR job", jid, "err", str(e), flush=True)
+                    update_job(jid, {"status":"error","result":{"error":str(e)}})
+                    post_event("robot","job_error",{"job_id": jid, "err": str(e)})
+# ===== EVENT LOOP =====
+            resp = http_json("GET", f"{BASE}/events?limit=50")
+            items = sorted(resp.get("items", []), key=lambda x: x.get("id",0))
+
+            for ev in items:
+                eid = int(ev.get("id",0))
+                if eid <= last_id:
+                    continue
+                last_id = eid
+
+                typ = ev.get("type","")
+                src = ev.get("source","")
+                payload = normalize_payload(ev.get("payload"))
+
+                if typ == "step-test":
+                    post_event("robot","ack",{"based_on_id":eid})
+
+                if typ in ("alert","error"):
+                    out = think(f"Evento {typ} de {src}: {payload}. Responde 1 linha.")
+                    post_event("robot","action",{"based_on_id":eid, "ai":out})
+
+            write_last_id(last_id)
+
+        except Exception as e:
+            print("[robot] loop error:", e, flush=True)
+
+        time.sleep(POLL_SECS)
+
+if __name__ == "__main__":
+    main()

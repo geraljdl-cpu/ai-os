@@ -1,0 +1,362 @@
+{
+  "updatedAt": "2026-02-20T23:55:13.305Z",
+  "createdAt": "2026-02-20T23:36:24.314Z",
+  "id": "Eu2NsuP4K66o3IWS",
+  "name": "base_clean (API create)",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "agent",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [
+        3360,
+        5328
+      ],
+      "typeVersion": 2,
+      "id": "8dc193bb-c539-40cd-b52a-c6c3541de038"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "You are a helpful assistant with access to bash commands on the user's computer. When asked to create files, folders, or execute commands, you MUST use the bash tool. Always provide complete bash commands with full paths for desktop operations (e.g., 'mkdir -p ~/Desktop/foldername' or 'touch ~/Desktop/file.txt'). The bash tool connects to the user's local machine via their bridge at host.docker.internal:8020. IMPORTANT: Always format commands as single-line bash strings. Example: to create a folder, use exactly: mkdir -p ~/Desktop/MyFolder"
+        }
+      },
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        3648,
+        5328
+      ],
+      "typeVersion": 1.7,
+      "id": "96d95de0-3418-4953-b706-53ae2b1f215e"
+    },
+    {
+      "parameters": {
+        "model": "claude-3-haiku-20240307",
+        "options": {}
+      },
+      "name": "Claude",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "position": [
+        3584,
+        5552
+      ],
+      "typeVersion": 1.2,
+      "id": "8162a323-e656-4a7c-a533-cd42908f1554",
+      "credentials": {
+        "anthropicApi": {
+          "id": "LqZHsze3tpsn5YdF",
+          "name": "Claude"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Execute bash commands directly on the user's local computer via the bridge. Input should be a complete bash command string. Examples: 'mkdir -p ~/Desktop/MyFolder' to create a folder, 'echo \"Hello World\" > ~/Desktop/test.txt' to create a file, 'ls ~/Desktop' to list desktop contents. The command will run in the user's local shell environment with full access to the filesystem.",
+        "method": "POST",
+        "url": "http://host.docker.internal:8020/run",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"cmd\":[\"bash\",\"-c\",\"{{ $fromAI('input', 'Please provide a valid bash command') }}\"]}"
+      },
+      "name": "bash",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "position": [
+        3712,
+        5552
+      ],
+      "typeVersion": 1.1,
+      "id": "48015b3f-70b2-4fbd-b8fb-64d368c15620"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Alternative tool to execute bash commands on the local machine via bridge. Use this if the primary bash tool fails. Input is the command string to execute.",
+        "method": "POST",
+        "url": "http://host.docker.internal:8020/run",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"cmd\":[\"bash\",\"-c\",\"{{ $fromAI('input') }}\"]}"
+      },
+      "name": "HTTP Request",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "position": [
+        3840,
+        5552
+      ],
+      "typeVersion": 1.1,
+      "id": "ec1bc990-68a3-40ec-9c0b-6df3e680ab51"
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "bash": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": null,
+  "versionId": "4d3b882f-37bc-4152-8a53-e4842efb2083",
+  "activeVersionId": "4d3b882f-37bc-4152-8a53-e4842efb2083",
+  "versionCounter": 19,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-02-20T23:36:24.317Z",
+      "createdAt": "2026-02-20T23:36:24.317Z",
+      "role": "workflow:owner",
+      "workflowId": "Eu2NsuP4K66o3IWS",
+      "projectId": "FICprURwglosJx7a",
+      "project": {
+        "updatedAt": "2026-02-20T22:53:09.625Z",
+        "createdAt": "2026-02-16T11:31:25.634Z",
+        "id": "FICprURwglosJx7a",
+        "name": "João LDA <jdlaicloud@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "0985fb67-0a92-4a8d-a204-85eac3d1fc01"
+      }
+    }
+  ],
+  "tags": [],
+  "parentFolder": null,
+  "activeVersion": {
+    "updatedAt": "2026-02-20T23:53:25.931Z",
+    "createdAt": "2026-02-20T23:53:25.931Z",
+    "versionId": "4d3b882f-37bc-4152-8a53-e4842efb2083",
+    "workflowId": "Eu2NsuP4K66o3IWS",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "agent",
+          "responseMode": "lastNode",
+          "options": {}
+        },
+        "name": "Webhook Trigger",
+        "type": "n8n-nodes-base.webhook",
+        "position": [
+          3360,
+          5328
+        ],
+        "typeVersion": 2,
+        "id": "8dc193bb-c539-40cd-b52a-c6c3541de038"
+      },
+      {
+        "parameters": {
+          "options": {
+            "systemMessage": "You are a helpful assistant with access to bash commands on the user's computer. When asked to create files, folders, or execute commands, you MUST use the bash tool. Always provide complete bash commands with full paths for desktop operations (e.g., 'mkdir -p ~/Desktop/foldername' or 'touch ~/Desktop/file.txt'). The bash tool connects to the user's local machine via their bridge at host.docker.internal:8020. IMPORTANT: Always format commands as single-line bash strings. Example: to create a folder, use exactly: mkdir -p ~/Desktop/MyFolder"
+          }
+        },
+        "name": "AI Agent",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "position": [
+          3648,
+          5328
+        ],
+        "typeVersion": 1.7,
+        "id": "96d95de0-3418-4953-b706-53ae2b1f215e"
+      },
+      {
+        "parameters": {
+          "model": "claude-3-haiku-20240307",
+          "options": {}
+        },
+        "name": "Claude",
+        "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+        "position": [
+          3584,
+          5552
+        ],
+        "typeVersion": 1.2,
+        "id": "8162a323-e656-4a7c-a533-cd42908f1554",
+        "credentials": {
+          "anthropicApi": {
+            "id": "LqZHsze3tpsn5YdF",
+            "name": "Claude"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "toolDescription": "Execute bash commands directly on the user's local computer via the bridge. Input should be a complete bash command string. Examples: 'mkdir -p ~/Desktop/MyFolder' to create a folder, 'echo \"Hello World\" > ~/Desktop/test.txt' to create a file, 'ls ~/Desktop' to list desktop contents. The command will run in the user's local shell environment with full access to the filesystem.",
+          "method": "POST",
+          "url": "http://host.docker.internal:8020/run",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\"cmd\":[\"bash\",\"-c\",\"{{ $fromAI('input', 'Please provide a valid bash command') }}\"]}"
+        },
+        "name": "bash",
+        "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+        "position": [
+          3712,
+          5552
+        ],
+        "typeVersion": 1.1,
+        "id": "48015b3f-70b2-4fbd-b8fb-64d368c15620"
+      },
+      {
+        "parameters": {
+          "toolDescription": "Alternative tool to execute bash commands on the local machine via bridge. Use this if the primary bash tool fails. Input is the command string to execute.",
+          "method": "POST",
+          "url": "http://host.docker.internal:8020/run",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\"cmd\":[\"bash\",\"-c\",\"{{ $fromAI('input') }}\"]}"
+        },
+        "name": "HTTP Request",
+        "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+        "position": [
+          3840,
+          5552
+        ],
+        "typeVersion": 1.1,
+        "id": "ec1bc990-68a3-40ec-9c0b-6df3e680ab51"
+      }
+    ],
+    "connections": {
+      "Webhook Trigger": {
+        "main": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Claude": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "bash": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request": {
+        "ai_tool": [
+          [
+            {
+              "node": "AI Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "João LDA",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-02-20T23:53:39.544Z",
+        "id": 47,
+        "workflowId": "Eu2NsuP4K66o3IWS",
+        "versionId": "4d3b882f-37bc-4152-8a53-e4842efb2083",
+        "event": "activated",
+        "userId": "0985fb67-0a92-4a8d-a204-85eac3d1fc01"
+      },
+      {
+        "createdAt": "2026-02-20T23:55:22.026Z",
+        "id": 49,
+        "workflowId": "Eu2NsuP4K66o3IWS",
+        "versionId": "4d3b882f-37bc-4152-8a53-e4842efb2083",
+        "event": "activated",
+        "userId": "0985fb67-0a92-4a8d-a204-85eac3d1fc01"
+      },
+      {
+        "createdAt": "2026-02-20T23:55:22.014Z",
+        "id": 48,
+        "workflowId": "Eu2NsuP4K66o3IWS",
+        "versionId": "4d3b882f-37bc-4152-8a53-e4842efb2083",
+        "event": "deactivated",
+        "userId": "0985fb67-0a92-4a8d-a204-85eac3d1fc01"
+      }
+    ]
+  },
+  "scopes": [
+    "workflow:create",
+    "workflow:delete",
+    "workflow:execute",
+    "workflow:execute-chat",
+    "workflow:list",
+    "workflow:move",
+    "workflow:publish",
+    "workflow:read",
+    "workflow:share",
+    "workflow:unpublish",
+    "workflow:update"
+  ],
+  "checksum": "ea388ceddbee995d56fd8d6c398337fffd968d8fa792cc2bc8d25de49f575abb"
+}

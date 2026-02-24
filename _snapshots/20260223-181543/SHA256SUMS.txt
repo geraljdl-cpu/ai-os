@@ -1,0 +1,3 @@
+1d42223081fc6e376aaa8320b67fb16429c0eb312ba9e1c1a831623c2187f170  /home/jdl/ai-os/_snapshots/20260223-181543/aios.py
+e39bc6ab050b0de29ffe36e85b6524c2e4f331ad287664bf8a0a5b3ab5ff1736  /home/jdl/ai-os/_snapshots/20260223-181543/app.py
+feabbadfa23a1f7dda3a473ad5e6149ac1909adedabeb90ee45ca67c49179014  /home/jdl/ai-os/_snapshots/20260223-181543/bash_bridge.py

@@ -1,0 +1,9 @@
+{
+  "name": "AI Engineer",
+  "nodes": [
+    {"parameters":{"httpMethod":"POST","path":"ai-engineer","responseMode":"responseNode"},"name":"Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[240,300]},{"parameters":{"method":"POST","url":"https://api.openai.com/v1/chat/completions","sendHeaders":true,"headerParameters":{"parameters":[{"name":"Authorization","value":"Bearer {{$env.OPENAI_API_KEY}}"},{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"specifyBody":"json","jsonBody":"{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"system\",\"content\":\"You are an AI automation engineer.\" },{"role":"user","content":{{$json.body.message}}}]}"},"name":"OpenAI","type":"n8n-nodes-base.httpRequest","typeVersion":4,"position":[520,300]},{"parameters":{"respondWith":"json","responseBody":"={{ { reply: $node[\"OpenAI\"].json.choices[0].message.content } }}"},"name":"Respond","type":"n8n-nodes-base.respondToWebhook","typeVersion":1,"position":[800,300]}],
+  "connections":{
+    "Webhook":{"main":[[{"node":"OpenAI","type":"main","index":0}]]},
+    "OpenAI":{"main":[[{"node":"Respond","type":"main","index":0}]]}
+  }
+}

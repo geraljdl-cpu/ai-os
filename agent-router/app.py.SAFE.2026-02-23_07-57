@@ -1,0 +1,38 @@
+from __future__ import annotations
+import os
+from fastapi import FastAPI
+from pydantic import BaseModel
+from openai import OpenAI
+
+app = FastAPI()
+
+class AgentInput(BaseModel):
+    chatInput: str
+    mode: str | None = "openai"
+
+class AgentOutput(BaseModel):
+    status: str
+    mode_used: str
+    answer: str
+    steps: list
+
+@app.get("/health")
+def health():
+    return {"status":"ok"}
+
+@app.post("/agent", response_model=AgentOutput)
+def agent(inp: AgentInput):
+    client = OpenAI()
+
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role":"user","content":inp.chatInput}]
+    )
+
+    text = resp.choices[0].message.content or ""
+    return AgentOutput(
+        status="ok",
+        mode_used="openai",
+        answer=text,
+        steps=[{"assistant":text}]
+    )

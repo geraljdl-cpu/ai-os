@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AI-OS Dashboard</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 18px; }
+    .grid { display:grid; grid-template-columns: 360px 1fr; gap: 14px; align-items:start; }
+    .card { border:1px solid #ddd; border-radius:12px; padding:14px; }
+    label { display:block; font-size:12px; color:#666; margin:8px 0 6px; }
+    textarea, select, input { width:100%; padding:10px; box-sizing:border-box; }
+    textarea { min-height: 110px; }
+    button { padding:10px 12px; cursor:pointer; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { border-bottom:1px solid #eee; padding:10px 8px; vertical-align:top; font-size:14px; }
+    th { text-align:left; color:#444; font-size:12px; }
+    a { color:#0b5; text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    .pill { display:inline-block; padding:2px 8px; border:1px solid #ddd; border-radius:999px; font-size:12px; }
+    pre { background:#f6f6f6; padding:12px; border-radius:10px; overflow:auto; max-height: 420px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .muted { color:#777; font-size:12px; }
+    .ok { color:#0a7; font-weight:600; }
+    .err { color:#c00; font-weight:600; }
+  </style>
+</head>
+<body>
+  <h2>AI-OS Dashboard</h2>
+  <div class="row muted">
+    Origem: <code id="origin"></code>
+    <span id="health" class="pill">health ...</span>
+  </div>
+
+  <div class="grid" style="margin-top:12px">
+    <div class="card">
+      <h3>Criar job</h3>
+
+      <label>Tipo</label>
+      <select id="kind">
+        <option value="ai">AI</option>
+        <option value="shell">Shell</option>
+        <option value="code">Code</option>
+      </select>
+
+      <label>Goal</label>
+      <textarea id="goal" placeholder="Escreve o objetivo do job..."></textarea>
+
+      <div class="row" style="margin-top:10px">
+        <button onclick="enqueue()">Enqueue</button>
+        <button onclick="refreshAll()">Atualizar</button>
+      </div>
+
+      <div class="muted" style="margin-top:10px">
+        Dica: clica num <b>ID</b> na lista para ver detalhes.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h3 style="margin:0">Jobs</h3>
+        <button onclick="refreshAll()">Atualizar</button>
+      </div>
+
+      <div id="jobsWrap" style="margin-top:10px">
+        <div class="muted">a carregar...</div>
+      </div>
+
+      <hr style="border:none;border-top:1px solid #eee;margin:14px 0">
+
+      <div class="row" style="justify-content:space-between">
+        <h3 style="margin:0">Detalhe do Job</h3>
+        <div class="row">
+          <button onclick="copyDetail()">Copiar JSON</button>
+          <button onclick="clearDetail()">Limpar</button>
+        </div>
+      </div>
+      <div class="muted">Selecionado: <span id="selectedId">nenhum</span></div>
+      <pre id="jobDetail">{}</pre>
+    </div>
+  </div>
+
+<script>
+const ORIGIN = location.origin;
+document.getElementById("origin").textContent = ORIGIN;
+
+function pretty(obj){ return JSON.stringify(obj, null, 2); }
+
+async function jget(path){
+  const r = await fetch(path);
+  if(!r.ok) throw new Error(path+" "+r.status);
+  return r.json();
+}
+async function jpost(path, body){
+  const r = await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok) throw new Error(path+" "+r.status+" "+(await r.text()));
+  return r.json();
+}
+
+async function checkHealth(){
+  try{
+    await jget("/health");
+    const el = document.getElementById("health");
+    el.textContent = "health OK";
+    el.classList.add("ok");
+    el.classList.remove("err");
+  }catch(e){
+    const el = document.getElementById("health");
+    el.textContent = "health ERRO";
+    el.classList.add("err");
+    el.classList.remove("ok");
+  }
+}
+
+function renderJobsTable(jobs){
+  const rows = jobs.map(j => {
+    const id = j.id;
+    const type = (j.meta && j.meta.type) ? j.meta.type : "";
+    const status = j.status || "";
+    const upd = j.updated_at || j.created_at || "";
+    const goal = (j.goal || "").slice(0, 140);
+    return `
+      <tr>
+        <td><a href="#" onclick="openJob(${id}); return false;">${id}</a></td>
+        <td>${escapeHtml(type)}</td>
+        <td><span class="pill">${escapeHtml(status)}</span></td>
+        <td>${escapeHtml(upd)}</td>
+        <td>${escapeHtml(goal)}</td>
+      </tr>`;
+  }).join("");
+
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th style="width:60px">ID</th>
+          <th style="width:80px">Tipo</th>
+          <th style="width:80px">Status</th>
+          <th style="width:240px">Updated</th>
+          <th>Goal</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function escapeHtml(s){
+  return String(s ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+async function refreshJobs(){
+  const wrap = document.getElementById("jobsWrap");
+  wrap.innerHTML = `<div class="muted">a carregar...</div>`;
+  try{
+    const jobs = await jget("/jobs");
+    wrap.innerHTML = renderJobsTable(jobs);
+  }catch(e){
+    wrap.innerHTML = `<div class="err">ERRO a carregar jobs: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function openJob(id){
+  document.getElementById("selectedId").textContent = id;
+  const pre = document.getElementById("jobDetail");
+  pre.textContent = "a carregar...";
+  try{
+    const job = await jget(`/jobs/${id}`);
+    pre.textContent = pretty(job);
+  }catch(e){
+    pre.textContent = "ERRO: " + e.message;
+  }
+}
+
+function clearDetail(){
+  document.getElementById("selectedId").textContent = "nenhum";
+  document.getElementById("jobDetail").textContent = "{}";
+}
+
+async function copyDetail(){
+  const txt = document.getElementById("jobDetail").textContent;
+  try{
+    await navigator.clipboard.writeText(txt);
+    alert("Copiado ✅");
+  }catch(e){
+    alert("Falhou copiar (browser bloqueou).");
+  }
+}
+
+async function enqueue(){
+  const kind = document.getElementById("kind").value;
+  const goal = document.getElementById("goal").value.trim();
+  if(!goal){ alert("Escreve um goal."); return; }
+
+  const map = { ai:"/enqueue_ai", shell:"/enqueue_shell", code:"/enqueue_code" };
+  try{
+    const res = await jpost(map[kind], {goal});
+    alert("OK job_id=" + (res.job_id ?? JSON.stringify(res)));
+    document.getElementById("goal").value = "";
+    await refreshAll();
+    if(res.job_id) openJob(res.job_id);
+  }catch(e){
+    alert("ERRO: " + e.message);
+  }
+}
+
+async function refreshAll(){
+  await checkHealth();
+  await refreshJobs();
+}
+
+refreshAll();
+</script>
+</body>
+</html>

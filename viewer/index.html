@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>AI-OS Events</title>
+<style>
+body{font-family:Arial;margin:20px}
+.ev{border:1px solid #ddd;padding:10px;margin:10px 0;border-radius:8px}
+</style>
+</head>
+<body>
+<h2>AI-OS Event Viewer</h2>
+<div id="list"></div>
+
+<script>
+async function load(){
+ const r=await fetch("http://localhost:8010/events?limit=50");
+ const j=awai
+

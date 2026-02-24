@@ -1,0 +1,11 @@
+:5677
+
+@agent path /webhook/agent
+handle @agent {
+  rewrite * /webhook/TteCVlMnWVVmktYI/webhook/agent
+  reverse_proxy n8n:5678
+}
+
+handle {
+  reverse_proxy n8n:5678
+}

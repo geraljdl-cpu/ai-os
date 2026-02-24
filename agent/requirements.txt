@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+openai
+httpx
+asyncpg
+aiomqtt
+qdrant-client
+httpx

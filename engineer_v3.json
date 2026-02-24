@@ -1,0 +1,81 @@
+{
+  "name": "ENGINEER v3 (bash clean)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "engineer",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook ENGINEER",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8010/think",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"mode\":\"local\",\n  \"prompt\":\"És um n8n engineer. Responde APENAS com JSON válido para criar 1 workflow n8n via /api/v1/workflows. Sem texto extra. Tarefa: {{$json.body.text}}\"\n}",
+        "options": {}
+      },
+      "name": "agent-core think",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const t = $node[\"agent-core think\"].json.text || \"\";\nconst start = t.indexOf(\"{\");\nconst end = t.lastIndexOf(\"}\");\nif (start === -1 || end === -1 || end <= start) throw new Error(\"Sem JSON no output do modelo: \" + t);\nconst s = t.slice(start, end + 1).replace(/[\\u0000-\\u001F\\u007F]/g, \"\");\nlet obj;\ntry { obj = JSON.parse(s); } catch (e) { throw new Error(\"JSON inválido: \" + e.message + \" | \" + s); }\nreturn [{ json: obj }];"
+      },
+      "name": "Parse JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [760, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5679/api/v1/workflows",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-API-KEY", "value": "={{ $env.N8N_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "name": "Create workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1020, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, created: $json } }}",
+        "options": {}
+      },
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1280, 300]
+    }
+  ],
+  "connections": {
+    "Webhook ENGINEER": { "main": [[{ "node": "agent-core think", "type": "main", "index": 0 }]] },
+    "agent-core think": { "main": [[{ "node": "Parse JSON", "type": "main", "index": 0 }]] },
+    "Parse JSON": { "main": [[{ "node": "Create workflow", "type": "main", "index": 0 }]] },
+    "Create workflow": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

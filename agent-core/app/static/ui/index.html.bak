@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AI-OS Dashboard</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Arial;margin:16px;max-width:1100px}
+    h1{margin:0 0 8px}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .card{border:1px solid #ddd;border-radius:10px;padding:12px}
+    input,textarea,select,button{font:inherit}
+    textarea{width:100%;min-height:84px}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #eee;padding:8px;text-align:left;vertical-align:top}
+    .muted{color:#666}
+    .pill{padding:2px 8px;border:1px solid #ddd;border-radius:999px;display:inline-block}
+    .ok{border-color:#b6e3b6}
+    .warn{border-color:#ffd27a}
+    .bad{border-color:#ffb3b3}
+    code{background:#f6f6f6;padding:2px 6px;border-radius:6px}
+  </style>
+</head>
+<body>
+  <h1>AI-OS Dashboard</h1>
+  <div class="muted">Origem: <code id="origin"></code> · <span id="health" class="pill">health…</span></div>
+
+  <div class="row" style="margin-top:14px">
+    <div class="card" style="flex:1;min-width:320px">
+      <h3>Criar job</h3>
+      <label>Tipo</label><br/>
+      <select id="type">
+        <option value="ai">AI</option>
+        <option value="shell">Shell</option>
+        <option value="code">Code</option>
+      </select>
+      <div id="shellBox" style="display:none;margin-top:8px">
+        <label>Comando</label>
+        <input id="cmd" style="width:100%" placeholder="echo OK && date" />
+        <div class="muted" style="margin-top:6px">timeout_secs</div>
+        <input id="timeout" type="number" value="30" min="1" />
+      </div>
+      <div id="goalBox" style="margin-top:8px">
+        <label>Goal</label>
+        <textarea id="goal" placeholder="Escreve 1 frase curta sobre disciplina"></textarea>
+      </div>
+      <button id="enqueue" style="margin-top:10px">Enqueue</button>
+      <div id="enqueueOut" class="muted" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card" style="flex:2;min-width:420px">
+      <h3>Jobs</h3>
+      <button id="refresh">Atualizar</button>
+      <div class="muted" style="margin-top:8px">Clique num ID para ver detalhes.</div>
+      <table id="jobsTbl" style="margin-top:8px">
+        <thead><tr><th>ID</th><th>Tipo</th><th>Status</th><th>Updated</th><th>Goal</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h3>Detalhe do job</h3>
+    <div id="jobDetail" class="muted">—</div>
+    <pre id="jobJson" style="white-space:pre-wrap"></pre>
+  </div>
+
+<script>
+const $ = (id)=>document.getElementById(id);
+$("origin").textContent = location.origin;
+
+function pill(el, kind){
+  el.className = "pill " + (kind||"");
+}
+
+async function api(path, opts={}){
+  const r = await fetch(path, Object.assign({headers: {"Content-Type":"application/json"}}, opts));
+  const txt = await r.text();
+  let data = null;
+  try { data = JSON.parse(txt); } catch { data = txt; }
+  if(!r.ok) throw new Error((data && data.detail) ? JSON.stringify(data.detail) : txt);
+  return data;
+}
+
+async function refreshHealth(){
+  try{
+    await api("/health");
+    $("health").textContent="health OK";
+    pill($("health"), "ok");
+  }catch(e){
+    $("health").textContent="health FAIL";
+    pill($("health"), "bad");
+  }
+}
+
+function statusClass(s){
+  if(s==="done") return "ok";
+  if(s==="running") return "warn";
+  if(s==="failed") return "bad";
+  return "";
+}
+
+async function loadJobs(){
+  const tbody = $("jobsTbl").querySelector("tbody");
+  tbody.innerHTML = "<tr><td colspan='5' class='muted'>a carregar…</td></tr>";
+  let jobs = await api("/jobs");
+  // suporta formatos diferentes: {items:[...]} ou [...]
+  const items = Array.isArray(jobs) ? jobs : (jobs.items || jobs.results || []);
+  tbody.innerHTML = "";
+  for(const j of items){
+    const tr = document.createElement("tr");
+    const t = (j.meta && j.meta.type) ? j.meta.type : (j.type || "");
+    tr.innerHTML = `
+      <td><a href="#" data-id="${j.id}">${j.id}</a></td>
+      <td>${t}</td>
+      <td><span class="pill ${statusClass(j.status)}">${j.status}</span></td>
+      <td class="muted">${j.updated_at || ""}</td>
+      <td class="muted">${(j.goal||"").slice(0,80)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  tbody.querySelectorAll("a[data-id]").forEach(a=>{
+    a.addEventListener("click", async (ev)=>{
+      ev.preventDefault();
+      await showJob(a.getAttribute("data-id"));
+    });
+  });
+}
+
+async function showJob(id){
+  const j = await api(`/jobs/${id}`);
+  $("jobDetail").textContent = `Job ${id} · status=${j.status} · type=${(j.meta&&j.meta.type)||""}`;
+  $("jobJson").textContent = JSON.stringify(j, null, 2);
+}
+
+function toggleForm(){
+  const t = $("type").value;
+  $("shellBox").style.display = (t==="shell") ? "block" : "none";
+  $("goalBox").style.display = (t==="shell") ? "none" : "block";
+}
+
+$("type").addEventListener("change", toggleForm);
+toggleForm();
+
+$("enqueue").addEventListener("click", async ()=>{
+  $("enqueueOut").textContent = "a enfileirar…";
+  try{
+    const t = $("type").value;
+    let res;
+    if(t==="shell"){
+      res = await api("/enqueue_shell", {method:"POST", body: JSON.stringify({
+        command: $("cmd").value || "echo SHELL_OK && date",
+        timeout_secs: Number($("timeout").value||30)
+      })});
+    } else if(t==="code"){
+      res = await api("/enqueue_code", {method:"POST", body: JSON.stringify({
+        goal: $("goal").value || "Escreve um README.md PT-PT curto com endpoints corretos na porta 8010."
+      })});
+    } else {
+      res = await api("/enqueue_ai", {method:"POST", body: JSON.stringify({
+        goal: $("goal").value || "diz 1 frase curta sobre disciplina"
+      })});
+    }
+    $("enqueueOut").textContent = `OK · id=${res.id}`;
+    await loadJobs();
+    await showJob(res.id);
+  }catch(e){
+    $("enqueueOut").textContent = "ERRO: " + e.message;
+  }
+});
+
+$("refresh").addEventListener("click", loadJobs);
+
+refreshHealth();
+loadJobs();
+setInterval(()=>{ refreshHealth(); loadJobs(); }, 5000);
+</script>
+</body>
+</html>

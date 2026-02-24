@@ -1,0 +1,109 @@
+{
+  "name": "agent-ai",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "agent-ai",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-200, 0],
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8010/enqueue_ai",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"goal\": $json.body.goal } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [40, 0],
+      "name": "Enqueue AI"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "name": "job_id", "value": "={{$json.id}}", "type": "number" }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [260, 0],
+      "name": "Set job_id"
+    },
+    {
+      "parameters": { "amount": 2 },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [480, 0],
+      "name": "Wait"
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8010/jobs/{{$json.job_id}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [700, 0],
+      "name": "Get job",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict", "version": 3 },
+          "conditions": [
+            {
+              "leftValue": "={{$json.status}}",
+              "rightValue": "done",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [920, 0],
+      "name": "If done"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": true, \"text\": $node[\"Get job\"].json.result?.text ?? \"\" } }}",
+        "options": { "responseCode": 200 }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1140, -120],
+      "name": "Respond"
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Enqueue AI", "type": "main", "index": 0 }]] },
+    "Enqueue AI": { "main": [[{ "node": "Set job_id", "type": "main", "index": 0 }]] },
+    "Set job_id": { "main": [[{ "node": "Wait", "type": "main", "index": 0 }]] },
+    "Wait": { "main": [[{ "node": "Get job", "type": "main", "index": 0 }]] },
+    "Get job": { "main": [[{ "node": "If done", "type": "main", "index": 0 }]] },
+    "If done": {
+      "main": [
+        [{ "node": "Respond", "type": "main", "index": 0 }],
+        [{ "node": "Wait", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

@@ -1,0 +1,7 @@
+services:
+  agent-router:
+    build:
+      context: ./agent-router
+    image: ai-os-agent-router
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

@@ -1,0 +1,72 @@
+{
+  "name": "ENGINEER - Auto create workflows",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "engineer",
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook_engineer",
+      "name": "Webhook ENGINEER",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8010/think",
+        "jsonBody": "={\"mode\":\"local\",\"prompt\":\"Tu és um especialista em n8n. Converte o pedido do utilizador num workflow n8n válido em JSON puro. Pedido: {{$json.body.task}}\"}"
+      },
+      "id": "think",
+      "name": "ChatGPT via agent-core",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:5679/rest/workflows",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "jsonBody": "={{ $json.text }}"
+      },
+      "id": "create_workflow",
+      "name": "Create workflow in n8n",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, message: 'Workflow criado automaticamente 🚀' } }}"
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    }
+  ],
+  "connections": {
+    "Webhook ENGINEER": {
+      "main": [[{ "node": "ChatGPT via agent-core", "type": "main", "index": 0 }]]
+    },
+    "ChatGPT via agent-core": {
+      "main": [[{ "node": "Create workflow in n8n", "type": "main", "index": 0 }]]
+    },
+    "Create workflow in n8n": {
+      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "tasks": [
+    {
+      "id": "smoke_5min",
+      "type": "autopilot",
+      "every_seconds": 300,
+      "goal": "Faz smoke chamando HTTP POST em http://localhost:5679/smoke. NÃO uses curl nem wget. Devolve ok/results e se falhar diz o 1º erro e fix direto.",
+      "enabled": true
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+# runtime / volumes
+data/
+backups/
+runtime/state.json
+runtime/jobs/
+__pycache__/
+*.pyc
+*.log
+*.tmp
+*.swp
+.DS_Store

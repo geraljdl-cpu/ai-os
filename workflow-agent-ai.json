@@ -1,0 +1,46 @@
+{
+  "name": "Agent AI",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "agent-ai",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8010/think",
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={\"mode\":\"local\",\"prompt\":\"{{$json.body.goal}}\"}"
+      },
+      "id": "http",
+      "name": "Think",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [300, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": true, \"text\": $json.text } }}"
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [600, 0]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Think", "type": "main", "index": 0 }]] },
+    "Think": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  }
+}

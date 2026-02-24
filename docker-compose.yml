@@ -1,0 +1,138 @@
+services:
+
+  ollama:
+    gpus: all
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    volumes:
+      - ./data/ollama:/root/.ollama
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: openwebui
+    restart: unless-stopped
+    depends_on: [ollama, qdrant, postgres, redis]
+    ports: ["8080:8080"]
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - DATABASE_URL=postgresql://webui:webui@postgres:5432/webui
+      - REDIS_URL=redis://redis:6379/0
+      - VECTOR_DB=qdrant
+      - QDRANT_URI=http://qdrant:6333
+    volumes:
+      - ./data/openwebui:/app/backend/data
+
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=webui
+      - POSTGRES_PASSWORD=webui
+      - POSTGRES_DB=webui
+    ports: ["5432:5432"]
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
+
+  redis:
+    image: redis:7
+    container_name: redis
+    restart: unless-stopped
+    ports: ["6379:6379"]
+    volumes:
+      - ./data/redis:/data
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    restart: unless-stopped
+    ports: ["6333:6333"]
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    restart: unless-stopped
+    ports: ["1883:1883","9002:9001"]
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./data/mosquitto:/mosquitto/data
+
+  nodered:
+    image: nodered/node-red:latest
+    container_name: nodered
+    restart: unless-stopped
+    ports: ["1880:1880"]
+    volumes:
+      - ./data/nodered:/data
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    restart: unless-stopped
+    ports: ["5678:5678"]
+    volumes:
+      - ./data/n8n:/home/node/.n8n
+    environment:
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: "admin"
+      N8N_BASIC_AUTH_PASSWORD: "admin123"
+      N8N_ENCRYPTION_KEY: "uleqY3eVKUOG/dgByc3zEEkqrLU527vF"
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: webui
+      DB_POSTGRESDB_PASSWORD: webui
+      AGENT_CORE: http://agent-core:8010
+    depends_on:
+      - agent-core
+      - postgres
+      - redis
+
+  agent-core:
+    image: python:3.11-slim
+    container_name: agent-core
+    restart: unless-stopped
+    ports: ["8010:8010"]
+    working_dir: /app
+    volumes:
+      - ./agent-core:/app
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=qwen2.5:14b
+      - OPENAI_MODEL=gpt-4.1-mini
+      - OPENAI_API_KEY=REDACTED_OPENAI_KEY
+      - DATABASE_URL=postgresql://webui:webui@postgres:5432/aios
+      - QDRANT_URL=http://qdrant:6333
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+    command: bash -lc "pip install -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8010"
+
+
+  bash-bridge:
+      image: python:3.10-slim
+      container_name: bash-bridge
+      restart: unless-stopped
+      working_dir: /app
+      volumes:
+        - ./tools:/app/tools:ro
+        - ./workspace:/workspace
+      command: python3 /app/tools/bash_bridge.py
+      ports: ["8020:8020"]
+
+  agent-router:
+    image: ai-os-agent-router
+    container_name: agent-router
+    restart: unless-stopped
+    ports: ["5679:5679"]
+    depends_on: [agent-core, bash-bridge]
+    environment:
+      - AGENT_CORE_URL=http://agent-core:8010
+      - BASH_BRIDGE_URL=http://bash-bridge:8020
+      - WORKSPACE_ROOT=/workspace
+    volumes:
+      - ./workspace:/workspace

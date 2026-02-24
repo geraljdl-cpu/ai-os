@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+langgraph
+openai
+httpx
+paho-mqtt
+psycopg[binary]
+qdrant-client

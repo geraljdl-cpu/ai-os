@@ -1,0 +1,122 @@
+import os
+import httpx
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from openai import OpenAI
+
+app = FastAPI(title="AI-OS Agent Core")
+
+app.mount("/ui", StaticFiles(directory="app/static/ui", html=True), name="ui")
+from app.jobs import router as jobs_router
+import sys
+sys.path.append(os.getcwd())
+app.include_router(jobs_router)
+# --- EVENTS API (para o robot e debug) ---
+import json
+from app.db import fetch_all, fetch_one
+
+# --- EVENTS API (Postgres real para o robot) ---
+
+@app.get("/events")
+def events_get(limit: int = 50):
+    rows = fetch_all(
+        "SELECT * FROM events ORDER BY id DESC LIMIT %s",
+        (limit,)
+    )
+    return {"items": rows}
+
+class EventIn(BaseModel):
+    source: str = "manual"
+    type: str
+    payload: dict = {}
+
+@app.post("/events")
+def events_post(body: EventIn):
+    row = fetch_one(
+        "INSERT INTO events (source, type, payload) VALUES (%s,%s,%s::jsonb) RETURNING *",
+        (body.source, body.type, json.dumps(body.payload))
+    )
+    return row
+
+
+class ThinkIn(BaseModel):
+    prompt: str
+    mode: str | None = None  # "local" | "api" | None(auto)
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+def think_api(prompt: str) -> str:
+    key = os.getenv("OPENAI_API_KEY","").strip()
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY missing")
+    c = OpenAI(api_key=key)
+    r = c.responses.create(model=os.getenv("OPENAI_MODEL","gpt-4.1-mini"), input=prompt)
+    return r.output_text
+
+def think_local(prompt: str) -> str:
+    # chama Ollama via HTTP
+    base = os.getenv("OLLAMA_URL","http://ollama:11434")
+    model = os.getenv("OLLAMA_MODEL","qwen2.5-coder:7b")
+    with httpx.Client(timeout=120) as client:
+        r = client.post(f"{base}/api/generate", json={"model": model, "prompt": prompt, "stream": False})
+        r.raise_for_status()
+        return r.json().get("response","")
+
+@app.post("/think")
+def think(body: ThinkIn):
+    mode = (body.mode or "auto").lower()
+    if mode == "local":
+        return {"text": think_local(body.prompt)}
+    if mode == "api":
+        return {"text": think_api(body.prompt)}
+    # auto: tenta local, se falhar usa api
+    try:
+        return {"text": think_local(body.prompt)}
+    except Exception:
+        return {"text": think_api(body.prompt)}
+
+
+# --- QUICK JOB CREATOR ---
+class EnqueueAI(BaseModel):
+    goal: str
+
+@app.post("/enqueue_ai")
+def enqueue_ai(body: EnqueueAI):
+    row = fetch_one(
+        "INSERT INTO jobs (goal, status, meta) VALUES (%s,'queued', %s::jsonb) RETURNING *",
+        (body.goal, json.dumps({"type":"ai"}))
+    )
+    return row
+
+
+
+# --- QUICK JOB CREATOR (shell) ---
+class EnqueueShell(BaseModel):
+    command: str
+    timeout_secs: int = 60
+
+@app.post("/enqueue_shell")
+def enqueue_shell(body: EnqueueShell):
+    meta = {"type":"shell", "command": body.command, "timeout_secs": body.timeout_secs}
+    row = fetch_one(
+        "INSERT INTO jobs (goal, status, meta) VALUES (%s,'queued', %s::jsonb) RETURNING *",
+        (body.command, json.dumps(meta))
+    )
+    return row
+
+
+# --- QUICK JOB CREATOR (code) ---
+class EnqueueCode(BaseModel):
+    goal: str
+
+@app.post("/enqueue_code")
+def enqueue_code(body: EnqueueCode):
+    meta = {"type":"code"}
+    row = fetch_one(
+        "INSERT INTO jobs (goal, status, meta) VALUES (%s,'queued', %s::jsonb) RETURNING *",
+        (body.goal, json.dumps(meta))
+    )
+    return row

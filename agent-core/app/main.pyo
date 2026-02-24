@@ -1,0 +1,67 @@
+import os
+import httpx
+from fastapi import FastAPI
+from pydantic import BaseModel
+from openai import OpenAI
+
+app = FastAPI(title="AI-OS Agent Core")
+from jobs import router as jobs_router
+app.include_router(jobs_router)
+class ThinkIn(BaseModel):
+    prompt: str
+    mode: str | None = None  # "local" | "api" | None(auto)
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+def think_api(prompt: str) -> str:
+    key = os.getenv("OPENAI_API_KEY","").strip()
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY missing")
+    c = OpenAI(api_key=key)
+    r = c.responses.create(model=os.getenv("OPENAI_MODEL","gpt-4.1-mini"), input=prompt)
+    return r.output_text
+
+def think_local(prompt: str) -> str:
+    # chama Ollama via HTTP
+    base = os.getenv("OLLAMA_URL","http://ollama:11434")
+    model = os.getenv("OLLAMA_MODEL","qwen2.5-coder:7b")
+    with httpx.Client(timeout=120) as client:
+        r = client.post(f"{base}/api/generate", json={"model": model, "prompt": prompt, "stream": False})
+        r.raise_for_status()
+        return r.json().get("response","")
+
+@app.post("/think")
+def think(body: ThinkIn):
+    mode = (body.mode or "auto").lower()
+    if mode == "local":
+        return {"text": think_local(body.prompt)}
+    if mode == "api":
+        return {"text": think_api(body.prompt)}
+    # auto: tenta local, se falhar usa api
+    try:
+        return {"text": think_local(body.prompt)}
+    except Exception:
+        return {"text": think_api(body.prompt)}
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+class EventIn(BaseModel):
+    source: str = "manual"
+    type: str
+    payload: dict = {}
+
+@app.post("/events")
+def create_event(e: EventIn):
+    row = fetch_one(
+        "INSERT INTO events (source, type, payload) VALUES (%s, %s, %s::jsonb) RETURNING *",
+        (e.source, e.type, e.payload),
+    )
+    return row
+
+@app.get("/events")
+def list_events(limit: int = 50):
+    return {"items": fetch_all("SELECT * FROM events ORDER BY id DESC LIMIT %s", (limit,))}

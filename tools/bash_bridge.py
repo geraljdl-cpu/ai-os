@@ -1,0 +1,70 @@
+
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json, subprocess, os
+
+HOST = "0.0.0.0"
+PORT = 8020
+BASE_DIR = "/workspace"
+
+ALLOWED_PREFIXES = [
+  ["docker","compose"],
+  ["docker"],
+  ["curl"],
+  ["ls"],
+  ["pwd"],
+  ["cat"],
+  ["grep"],
+  ["jq"],
+  ["echo"],
+  ["bash"],
+  ["sh"],
+  ["python3"],
+]
+
+def allowed(cmd):
+    for prefix in ALLOWED_PREFIXES:
+        if cmd[:len(prefix)] == prefix:
+            return True
+    return False
+
+class Handler(BaseHTTPRequestHandler):
+    def _send(self, code, data):
+        self.send_response(code)
+        self.send_header("Content-Type","application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length",0))
+        body = json.loads(self.rfile.read(length) or "{}")
+
+        if self.path == "/run":
+            cmd = body.get("cmd")
+            if not cmd or not allowed(cmd):
+                return self._send(403, {"error":"cmd not allowed"})
+
+            try:
+                p = subprocess.run(cmd, capture_output=True, text=True)
+                return self._send(200, {"stdout":p.stdout, "stderr":p.stderr, "code":p.returncode})
+            except Exception as e:
+                return self._send(500, {"error":str(e)})
+
+        if self.path == "/write":
+            name = body.get("name")
+            content = body.get("content","")
+            path = os.path.join(BASE_DIR, name)
+            os.makedirs(BASE_DIR, exist_ok=True)
+            open(path,"w").write(content)
+            return self._send(200, {"ok":True})
+
+        if self.path == "/read":
+            name = body.get("name")
+            path = os.path.join(BASE_DIR, name)
+            if not os.path.exists(path):
+                return self._send(404, {"error":"not found"})
+            return self._send(200, {"content":open(path).read()})
+
+        return self._send(404, {"error":"unknown path"})
+
+print(f"bash-bridge on http://{HOST}:{PORT}  base={BASE_DIR}")
+HTTPServer((HOST,PORT), Handler).serve_forever()
