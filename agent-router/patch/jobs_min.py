@@ -28,9 +28,8 @@ def new_job(payload: dict) -> dict:
     rc, out, err = _run(["git","rev-parse","--is-inside-work-tree"], cwd=repo)
     logline(f"git_check rc={rc}\n{out}\n{err}")
     if rc != 0:
-        return {"ok": False, "job_id": job_id, "error": "not a git repo", "job_dir": str(job_dir)}
+        return {"ok": False, "job_id": job_id, "error": "not a git repo (or unsafe)", "job_dir": str(job_dir)}
 
-    # fetch (only if any remote exists)
     rc, out, err = _run(["git","remote"], cwd=repo)
     logline(f"git remote rc={rc}\n{out}\n{err}")
     has_remote = (rc == 0 and out.strip() != "")
@@ -41,29 +40,21 @@ def new_job(payload: dict) -> dict:
         if rc != 0:
             return {"ok": False, "job_id": job_id, "error": "git failed: fetch", "job_dir": str(job_dir), "branch": branch}
 
-    # checkout base
     rc, o, e = _run(["git","checkout", base], cwd=repo)
     logline(f"git checkout {base} rc={rc}\n{o}\n{e}")
     if rc != 0:
         return {"ok": False, "job_id": job_id, "error": f"git failed: checkout {base}", "job_dir": str(job_dir), "branch": branch}
 
-    # pull only if remote exists
     if has_remote:
         rc, o, e = _run(["git","pull","--ff-only"], cwd=repo)
         logline(f"git pull --ff-only rc={rc}\n{o}\n{e}")
         if rc != 0:
             return {"ok": False, "job_id": job_id, "error": "git failed: pull --ff-only", "job_dir": str(job_dir), "branch": branch}
 
-    # create branch
     rc, o, e = _run(["git","checkout","-b", branch], cwd=repo)
     logline(f"git checkout -b {branch} rc={rc}\n{o}\n{e}")
     if rc != 0:
         return {"ok": False, "job_id": job_id, "error": f"git failed: checkout -b {branch}", "job_dir": str(job_dir), "branch": branch}
-
-        rc, out, err = _run(cmd, cwd=repo)
-        logline(f"{cmd} rc={rc}\n{out}\n{err}")
-        if rc != 0:
-            return {"ok": False, "job_id": job_id, "error": f"git failed: {cmd}", "job_dir": str(job_dir), "branch": branch}
 
     target = repo / "CHANGELOG_DEV.md"
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -82,8 +73,6 @@ def new_job(payload: dict) -> dict:
     logline(f"git add rc={rc}\n{out}\n{err}")
     rc, out, err = _run(["git","commit","-m", f"aios job {job_id}: seed changes"], cwd=repo)
     logline(f"git commit rc={rc}\n{out}\n{err}")
-    if rc != 0:
-        logline("commit failed (maybe no changes). continuing.")
 
     (job_dir / "result.json").write_text(json.dumps({
         "ok": True, "job_id": job_id, "branch": branch, "repo_path": str(repo),

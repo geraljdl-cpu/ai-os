@@ -1,9 +1,16 @@
 services:
   agent-router:
+    environment:
+      - AIOS_AGENT_URL=http://127.0.0.1:5679/agent
+      - AIOS_AGENT_MODE=openai
+      - AIOS_AGENT_TIMEOUT=180
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL}
     volumes:
       - /home/jdl/ai-os:/host/ai-os:rw
       - /home/jdl/ai-os/runtime:/app/runtime:rw
       - /home/jdl/ai-os/agent-router/patch/app.py:/app/app.py:rw
       - /home/jdl/ai-os/agent-router/patch/jobs_min.py:/app/jobs_min.py:rw
+      - /home/jdl/ai-os/agent-router/patch/jobs_ai.py:/app/jobs_ai.py:rw
       - /home/jdl/ai-os/runtime/agent-router-root:/root:rw
       - /var/run/docker.sock:/var/run/docker.sock:rw

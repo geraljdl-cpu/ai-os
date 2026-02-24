@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, APIRouter
 import jobs_min
+import jobs_ai
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 
@@ -218,7 +219,7 @@ _jobs = APIRouter()
 
 @_jobs.post("/jobs/dev")
 def jobs_dev(payload: dict):
-    return jobs_min.new_job(payload)
+    return jobs_ai.new_job(payload) if payload.get("ai") else jobs_min.new_job(payload)
 
 @_jobs.post("/jobs/list")
 def jobs_list(payload: dict = None):
