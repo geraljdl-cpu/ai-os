@@ -3,6 +3,11 @@ data/
 backups/
 runtime/state.json
 runtime/jobs/
+
+# workspace (output)
+workspace/
+
+# python junk
 __pycache__/
 *.pyc
 *.log
