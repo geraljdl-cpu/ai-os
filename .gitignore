@@ -21,3 +21,8 @@ workspace/
 workspace/
 runtime/agent-router-root/
 
+
+# runtime state (generated)
+runtime/backlog.json
+runtime/state.json
+runtime/jobs/
