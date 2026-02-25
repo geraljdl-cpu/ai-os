@@ -94,16 +94,29 @@ def new_job(payload: dict) -> dict:
             "Return ONLY a unified diff in a fenced ```diff block. "
             "No explanations."
         )
+        file_contents = ""
+        for fname in files.splitlines():
+            fname = fname.strip()
+            if fname.endswith(".py") and not fname.startswith("venv/"):
+                fp = repo / fname
+                try:
+                    fc = fp.read_text(encoding="utf-8", errors="replace")
+                    if len(fc) < 8000:
+                        file_contents += "\n### " + fname + "\n```python\n" + fc + "\n```\n"
+                except Exception:
+                    pass
         user_prompt = f"""Repo: {repo}
 Branch: {branch}
-
 Task:
 {req}
-
 Files (git ls-files):
 {files}
-
+{file_contents}
 Rules:
+- Output ONLY a unified diff inside one ```diff block.
+- The diff must patch existing files, not replace them.
+- No prose.
+"""
 - Output ONLY a unified diff inside one ```diff block.
 - No prose.
 """
