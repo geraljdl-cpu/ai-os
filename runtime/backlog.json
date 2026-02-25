@@ -1,0 +1,59 @@
+{
+  "tasks": [
+    {
+      "id": "8113388a",
+      "title": "add hello endpoint",
+      "goal": "Add a GET /hello endpoint to patch/app.py that returns {\"hello\":\"world\"}",
+      "priority": 5,
+      "status": "skipped",
+      "created_at": 1772012416,
+      "updated_at": 1772013468,
+      "attempts": 1,
+      "last_error": "patch apply failed"
+    },
+    {
+      "id": "3c101601",
+      "title": "add hello endpoint",
+      "goal": "Add a GET /hello endpoint to patch/app.py that returns {\"hello\":\"world\"}",
+      "priority": 5,
+      "status": "skipped",
+      "created_at": 1772012994,
+      "updated_at": 1772013468,
+      "attempts": 1,
+      "last_error": "patch apply failed"
+    },
+    {
+      "id": "f677a18b",
+      "title": "add hello endpoint",
+      "goal": "In the file agent-router/patch/app.py, add a new FastAPI endpoint: @app.get(\"/hello\") that returns {\"hello\": \"world\"}. Do NOT rewrite the file. Only output a unified diff.",
+      "priority": 5,
+      "status": "skipped",
+      "created_at": 1772013468,
+      "updated_at": 1772013811,
+      "attempts": 1,
+      "last_error": "patch apply failed"
+    },
+    {
+      "id": "2890f55a",
+      "title": "add hello endpoint",
+      "goal": "In agent-router/patch/app.py add @app.get(\"/hello\") that returns {\"hello\": \"world\"}. Output only a unified diff.",
+      "priority": 5,
+      "status": "skipped",
+      "created_at": 1772013811,
+      "updated_at": 1772014089,
+      "attempts": 1,
+      "last_error": "patch apply failed"
+    },
+    {
+      "id": "7ac5a8c4",
+      "title": "add hello endpoint",
+      "goal": "In agent-router/patch/app.py add @app.get(\"/hello\") that returns {\"hello\": \"world\"}. Output only a unified diff.",
+      "priority": 5,
+      "status": "done",
+      "created_at": 1772014089,
+      "updated_at": 1772014144,
+      "attempts": 1,
+      "last_error": null
+    }
+  ]
+}
