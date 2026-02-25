@@ -68,6 +68,10 @@ def new_job(payload: dict) -> dict:
             if rc != 0:
                 return {"ok": False, "job_id": job_id, "error": "git failed: fetch", "job_dir": str(job_dir), "branch": branch}
 
+        rc, o, e = _run(["git","diff","--quiet"], cwd=repo)
+        if rc != 0:
+            _run(["git","stash","push","-u","-m",f"aios preflight {job_id}"], cwd=repo)
+            logline("git stash: repo was dirty, stashed")
         rc, o, e = _run(["git","checkout", base], cwd=repo)
         logline(f"git checkout {base} rc={rc}\n{o}\n{e}")
         if rc != 0:
@@ -137,8 +141,11 @@ Rules:
             return {"ok": False, "job_id": job_id, "error": "no diff found in agent answer", "job_dir": str(job_dir), "branch": branch}
 
         rc, o, e = _bash("git apply --whitespace=nowarn -", cwd=repo, input_text=diff)
-        logline(f"git apply rc={rc}\n{o}\n{e}")
+        logline("git apply rc=" + str(rc) + " o=" + o + " e=" + e)
         if rc != 0:
+            rc2, o2, e2 = _bash("git apply --reject --whitespace=nowarn -", cwd=repo, input_text=diff)
+            logline("git apply --reject rc=" + str(rc2) + " e=" + e2)
+            write("git_apply.stderr", e + " " + e2)
             return {"ok": False, "job_id": job_id, "error": "patch apply failed", "job_dir": str(job_dir), "branch": branch}
 
         rc, o, e = _bash(test_cmd, cwd=repo)
