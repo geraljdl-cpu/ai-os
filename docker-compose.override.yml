@@ -10,3 +10,6 @@ services:
       - ./runtime:/app/runtime
       - /home/jdl/ai-os:/host/ai-os
     user: "1000:1000"
+    environment:
+      - GIT_SAFE_DIR=/host/ai-os
+    command: sh -c "git config --global --add safe.directory /host/ai-os && uvicorn app:app --host 0.0.0.0 --port 5679"
