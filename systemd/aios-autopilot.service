@@ -5,4 +5,4 @@ After=network.target
 [Service]
 Type=oneshot
 User=jdl
-ExecStart=/usr/bin/curl -s -X POST http://127.0.0.1:5679/autopilot/tick
+ExecStart=/usr/bin/curl -s -X POST -H "X-AIOS-TOKEN: 44d911ff335084c78a7ac568d37a6a7ef893bd002981ab14e447f5f9a1a5ff07" http://127.0.0.1:5679/autopilot/tick

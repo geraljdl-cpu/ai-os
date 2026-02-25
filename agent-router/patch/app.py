@@ -299,3 +299,21 @@ def backlog_stats():
     by_status = dict(Counter(t["status"] for t in tasks))
     by_type = dict(Counter(t.get("type","unknown") for t in tasks))
     return {"total": len(tasks), "by_status": by_status, "by_type": by_type}
+
+# ── SECURITY MIDDLEWARE ───────────────────────────────────────────────────────
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+AIOS_TOKEN = os.environ.get("AIOS_TOKEN", "")
+PUBLIC_PATHS = {"/health", "/version"}
+
+@app.middleware("http")
+async def token_auth(request: Request, call_next):
+    if request.url.path in PUBLIC_PATHS:
+        return await call_next(request)
+    if not AIOS_TOKEN:
+        return JSONResponse(status_code=403, content={"error": "AIOS_TOKEN not set"})
+    token = request.headers.get("X-AIOS-TOKEN", "")
+    if token != AIOS_TOKEN:
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    return await call_next(request)
