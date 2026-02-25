@@ -1,0 +1,8 @@
+[Unit]
+Description=AIOS Autopilot Tick
+After=network.target
+
+[Service]
+Type=oneshot
+User=jdl
+ExecStart=/usr/bin/curl -s -X POST http://127.0.0.1:5679/autopilot/tick

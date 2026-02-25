@@ -1,0 +1,9 @@
+[Unit]
+Description=AIOS Smoke Check
+
+[Service]
+Type=oneshot
+User=jdl
+ExecStart=/usr/bin/curl -s -X POST http://127.0.0.1:5679/smoke
+StandardOutput=append:/var/log/aios-smoke.log
+StandardError=append:/var/log/aios-smoke.log

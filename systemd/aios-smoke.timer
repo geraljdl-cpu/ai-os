@@ -1,0 +1,9 @@
+[Unit]
+Description=AIOS Smoke Timer (every 5min)
+
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
