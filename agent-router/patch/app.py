@@ -235,3 +235,33 @@ try:
 except Exception:
     pass
 
+
+# ── BACKLOG ───────────────────────────────────────────────────────────────────
+from backlog import add_task, list_tasks, get_next_task, update_task
+
+@app.post("/backlog/add")
+def backlog_add(body: dict):
+    task = add_task(title=body["title"], goal=body["goal"], priority=body.get("priority", 5))
+    return {"ok": True, "task": task}
+
+@app.get("/backlog/list")
+def backlog_list():
+    return {"tasks": list_tasks()}
+
+@app.get("/backlog/next")
+def backlog_next():
+    task = get_next_task()
+    return {"task": task} if task else {"task": None, "message": "backlog empty"}
+
+@app.post("/backlog/update")
+def backlog_update(body: dict):
+    task_id = body.pop("id")
+    task = update_task(task_id, **body)
+    return {"ok": bool(task), "task": task}
+
+# ── AUTOPILOT STARTUP ─────────────────────────────────────────────────────────
+import autopilot
+from jobs_ai import new_job
+import backlog as _backlog_mod
+
+autopilot.start(new_job, _backlog_mod)
