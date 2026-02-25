@@ -5,7 +5,7 @@ RUNTIME = Path(os.environ.get("AIOS_RUNTIME", "/app/runtime"))
 JOBS = RUNTIME / "jobs"
 JOBS.mkdir(parents=True, exist_ok=True)
 
-AIOS_AGENT_URL = os.environ.get("AIOS_AGENT_URL", "http://agent-core:5679/agent")
+AIOS_AGENT_URL = os.environ.get("AIOS_AGENT_URL", "http://agent-router:5679/agent")
 AIOS_AGENT_MODE = os.environ.get("AIOS_AGENT_MODE", "openai")
 AIOS_AGENT_TIMEOUT = float(os.environ.get("AIOS_AGENT_TIMEOUT", "180"))
 
@@ -18,7 +18,7 @@ def _bash(script: str, cwd=None, input_text=None):
 
 def _http_post_json(url: str, payload: dict, timeout: float):
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type":"application/json"})
+    req = urllib.request.Request(url, data=data, headers={"Content-Type":"application/json", "X-AIOS-TOKEN": os.environ.get("AIOS_TOKEN","")})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8","replace"))
 
