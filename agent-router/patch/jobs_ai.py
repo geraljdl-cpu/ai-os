@@ -94,22 +94,58 @@ def new_job(payload: dict) -> dict:
         rc, stat, _ = _bash("git status -sb", cwd=repo)
         write("repo_status.txt", stat if rc==0 else "")
 
+        
+        def _extract_paths(text: str):
+            cand = re.findall(r'([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)', text)
+            out=[]
+            for c in cand:
+                c=c.strip().lstrip("./")
+                if ".." in c or c.startswith("/"):
+                    continue
+                out.append(c)
+            seen=set()
+            uniq=[]
+            for x in out:
+                if x not in seen:
+                    seen.add(x); uniq.append(x)
+            return uniq
+
         sys_prompt = (
             "You are a senior software engineer. "
             "Return ONLY a unified diff in a fenced ```diff block. "
             "No explanations."
         )
         file_contents = ""
-        for fname in files.splitlines():
-            fname = fname.strip()
-            if fname.endswith(".py") and not fname.startswith("venv/"):
-                fp = repo / fname
-                try:
-                    fc = fp.read_text(encoding="utf-8", errors="replace")
-                    if len(fc) < 8000:
-                        file_contents += "\n### " + fname + "\n```python\n" + fc + "\n```\n"
-                except Exception:
-                    pass
+        # Keep context small to avoid TPM blowups.
+        targets = _extract_paths(req)
+        if targets:
+            pick = targets[:5]
+        else:
+            pick = []
+            for fname in files.splitlines():
+                fname = fname.strip()
+                if fname.startswith(("venv/","runtime/")):
+                    continue
+                if fname.lower().endswith((".md",".txt",".yml",".yaml",".json")):
+                    pick.append(fname)
+                if len(pick) >= 25:
+                    break
+
+        max_total = 60_000  # hard cap bytes
+        total = 0
+        for fname in pick:
+            fp = repo / fname
+            if not fp.exists() or fp.is_dir():
+                continue
+            try:
+                fc = fp.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            chunk = f"\n### {fname}\n```\n{fc}\n```\n"
+            if total + len(chunk) > max_total:
+                break
+            file_contents += chunk
+            total += len(chunk)
         user_prompt = f"""Repo: {repo}
 Branch: {branch}
 Task:
