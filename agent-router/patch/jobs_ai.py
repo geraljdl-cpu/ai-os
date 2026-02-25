@@ -117,9 +117,6 @@ Rules:
 - The diff must patch existing files, not replace them.
 - No prose.
 """
-- Output ONLY a unified diff inside one ```diff block.
-- No prose.
-"""
 
         agent_payload = {
             "mode": payload.get("mode", AIOS_AGENT_MODE),

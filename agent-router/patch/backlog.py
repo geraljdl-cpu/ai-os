@@ -22,7 +22,13 @@ def _save(data: Dict[str, Any]) -> None:
 def list_tasks() -> List[Dict[str, Any]]:
     return _load()["tasks"]
 
+VALID_TYPES = {"DEV_TASK", "OPS_TASK", "RESEARCH_TASK"}
+TYPE_MAP = {"research": "RESEARCH_TASK", "practical": "DEV_TASK", "dev": "DEV_TASK", "ops": "OPS_TASK"}
+
 def add_task(title: str, goal: str, priority: int = 5, task_type: str = "DEV_TASK") -> Dict[str, Any]:
+    task_type = TYPE_MAP.get(task_type, task_type)
+    if task_type not in VALID_TYPES:
+        task_type = "DEV_TASK"
     data = _load()
     task = {
         "id": uuid.uuid4().hex[:8],

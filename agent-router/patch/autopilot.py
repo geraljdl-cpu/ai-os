@@ -30,6 +30,9 @@ def _run_next(jobs_fn, backlog_mod, ops_fn=None, research_fn=None):
                 "test_cmd":    DEFAULT_TESTS,
                 "request":     task["goal"],
             })
+        job_id = result.get("job_id")
+        if job_id:
+            backlog_mod.update_task(task_id, last_job_id=job_id, last_job_dir=result.get("job_dir",""))
         if result.get("ok"):
             backlog_mod.update_task(task_id, status="done", last_error=None)
             log.info(f"[autopilot] task {task_id} DONE")
