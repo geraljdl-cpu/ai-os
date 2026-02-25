@@ -9,3 +9,4 @@ services:
       - ./agent-router/patch:/app
       - ./runtime:/app/runtime
       - /home/jdl/ai-os:/host/ai-os
+    user: "1000:1000"
