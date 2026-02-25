@@ -265,3 +265,37 @@ from jobs_ai import new_job
 import backlog as _backlog_mod
 
 autopilot.start(new_job, _backlog_mod)
+
+# ── AUTOPILOT CONTROL PLANE ───────────────────────────────────────────────────
+import autopilot_api
+autopilot_api.register(app, autopilot, new_job, _backlog_mod)
+
+# ── BACKLOG UTILS ─────────────────────────────────────────────────────────────
+@app.post("/backlog/retry")
+def backlog_retry(body: dict):
+    task = update_task(body["id"], status="pending", last_error=None)
+    return {"ok": bool(task), "task": task}
+
+@app.post("/backlog/clear")
+def backlog_clear():
+    import json, shutil
+    from pathlib import Path
+    bf = Path("/app/runtime/backlog.json")
+    data = json.loads(bf.read_text())
+    keep = [t for t in data["tasks"] if t["status"] not in ("done","skipped")]
+    archive = [t for t in data["tasks"] if t["status"] in ("done","skipped")]
+    af = Path("/app/runtime/backlog.archive.json")
+    existing = json.loads(af.read_text()) if af.exists() else {"tasks":[]}
+    existing["tasks"] += archive
+    af.write_text(json.dumps(existing, indent=2))
+    data["tasks"] = keep
+    bf.write_text(json.dumps(data, indent=2))
+    return {"ok": True, "archived": len(archive), "remaining": len(keep)}
+
+@app.get("/backlog/stats")
+def backlog_stats():
+    from collections import Counter
+    tasks = list_tasks()
+    by_status = dict(Counter(t["status"] for t in tasks))
+    by_type = dict(Counter(t.get("type","unknown") for t in tasks))
+    return {"total": len(tasks), "by_status": by_status, "by_type": by_type}

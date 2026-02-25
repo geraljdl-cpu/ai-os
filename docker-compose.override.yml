@@ -14,5 +14,6 @@ services:
       - /home/jdl/ai-os/agent-router/patch/jobs_ai.py:/app/jobs_ai.py:rw
       - /home/jdl/ai-os/agent-router/patch/backlog.py:/app/backlog.py:rw
       - /home/jdl/ai-os/agent-router/patch/autopilot.py:/app/autopilot.py:rw
+      - /home/jdl/ai-os/agent-router/patch/autopilot_api.py:/app/autopilot_api.py:rw
       - /home/jdl/ai-os/runtime/agent-router-root:/root:rw
       - /var/run/docker.sock:/var/run/docker.sock:rw
