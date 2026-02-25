@@ -68,10 +68,11 @@ def new_job(payload: dict) -> dict:
             if rc != 0:
                 return {"ok": False, "job_id": job_id, "error": "git failed: fetch", "job_dir": str(job_dir), "branch": branch}
 
-        rc, o, e = _run(["git","diff","--quiet"], cwd=repo)
-        if rc != 0:
-            _run(["git","stash","push","-u","-m",f"aios preflight {job_id}"], cwd=repo)
-            logline("git stash: repo was dirty, stashed")
+        rc1, o, e = _run(["git","diff","--quiet"], cwd=repo)
+        rc2, o2, e2 = _run(["git","diff","--cached","--quiet"], cwd=repo)
+        if rc1 != 0 or rc2 != 0:
+            _run(["git","stash","push","-m",f"aios preflight {job_id}"], cwd=repo)
+            logline("git stash: repo had tracked changes, stashed")
         rc, o, e = _run(["git","checkout", base], cwd=repo)
         logline(f"git checkout {base} rc={rc}\n{o}\n{e}")
         if rc != 0:
