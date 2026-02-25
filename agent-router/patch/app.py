@@ -241,7 +241,7 @@ from backlog import add_task, list_tasks, get_next_task, update_task
 
 @app.post("/backlog/add")
 def backlog_add(body: dict):
-    task = add_task(title=body["title"], goal=body["goal"], priority=body.get("priority", 5))
+    task = add_task(title=body["title"], goal=body["goal"], priority=body.get("priority", 5), task_type=body.get("type", "DEV_TASK"))
     return {"ok": True, "task": task}
 
 @app.get("/backlog/list")

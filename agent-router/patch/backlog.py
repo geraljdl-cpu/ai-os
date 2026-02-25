@@ -22,7 +22,7 @@ def _save(data: Dict[str, Any]) -> None:
 def list_tasks() -> List[Dict[str, Any]]:
     return _load()["tasks"]
 
-def add_task(title: str, goal: str, priority: int = 5) -> Dict[str, Any]:
+def add_task(title: str, goal: str, priority: int = 5, task_type: str = "DEV_TASK") -> Dict[str, Any]:
     data = _load()
     task = {
         "id": uuid.uuid4().hex[:8],
@@ -32,6 +32,7 @@ def add_task(title: str, goal: str, priority: int = 5) -> Dict[str, Any]:
         "status": "pending",
         "created_at": _now(),
         "updated_at": _now(),
+        "type": task_type,
         "attempts": 0,
         "last_error": None,
     }
