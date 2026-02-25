@@ -32,6 +32,8 @@ def _run_next(jobs_fn, backlog_mod, ops_fn=None, research_fn=None):
             })
         if result.get("ok"):
             backlog_mod.update_task(task_id, status="done", last_error=None)
+            log.info(f"[autopilot] task {task_id} DONE")
+            _self_trigger(task, result, backlog_mod)
             log.info(f"[autopilot] task {task_id} DONE branch={result.get('branch')}")
         else:
             err = result.get("error", "unknown")
@@ -50,6 +52,25 @@ def _loop(jobs_fn, backlog_mod, ops_fn, research_fn):
         except Exception as ex:
             log.error(f"[autopilot] loop error: {ex}")
         _stop_event.wait(LOOP_INTERVAL)
+
+def _self_trigger(task, result, backlog_mod):
+    import urllib.request, json as _json
+    prompt = "Task done: " + task["title"] + ". Goal was: " + task["goal"] + ". Suggest up to 2 follow-up tasks as JSON array with fields title, goal, type. Reply ONLY with valid JSON array."
+    try:
+        url = "http://127.0.0.1:5679/agent"
+        data = _json.dumps({"chatInput": prompt, "mode": "openai"}).encode()
+        req = urllib.request.Request(url, data=data, headers={"Content-Type":"application/json"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            resp = _json.loads(r.read())
+            answer = resp.get("answer", "")
+            import re as _re
+            m = _re.search(r"\[.*\]", answer, _re.S)
+            tasks = _json.loads(m.group(0)) if m else []
+            for t in tasks[:2]:
+                backlog_mod.add_task(title=t["title"], goal=t["goal"], task_type=t.get("type","DEV_TASK"))
+                log.info("[self-trigger] added: " + t["title"])
+    except Exception as ex:
+        log.warning("[self-trigger] skipped: " + str(ex))
 
 def _ops_fn(goal: str) -> dict:
     """Executa comandos bash directamente via bash-bridge."""
