@@ -112,7 +112,10 @@ def new_job(payload: dict) -> dict:
 
         sys_prompt = (
             "You are a senior software engineer. "
-            "Return ONLY a unified diff in a fenced ```diff block. "
+            "Do NOT use any tools. "
+            "Return ONLY a VALID unified diff that git apply can apply. "
+            "Do NOT wrap in markdown fences. "
+            "The diff MUST include a diff --git header and @@ hunks. "
             "No explanations."
         )
         file_contents = ""
