@@ -72,7 +72,7 @@ async def _bashbridge_run(tokens: list[str], timeout: int | None = None) -> dict
         return r.json()
 
 async def _tool_bash(cmd: str, timeout: int | None = None) -> dict[str, Any]:
-    return await _bashbridge_run(_to_tokens(cmd), timeout=timeout)
+    return await _bashbridge_run(["bash","-lc", cmd], timeout=timeout)
 
 @app.post("/bash")
 async def bash_api(req: BashReq):
@@ -95,12 +95,15 @@ async def status():
 
 @app.get("/logs/{service}")
 async def logs(service: str, tail: int = 200):
-    import docker
-    client = docker.DockerClient(base_url="unix://var/run/docker.sock")
-    c = client.containers.get(service)
-    data = c.logs(tail=tail)
-    txt = data.decode("utf-8", errors="replace") if isinstance(data, (bytes, bytearray)) else str(data)
-    return {"service": service, "tail": tail, "logs": txt}
+    try:
+        import docker
+        client = docker.DockerClient(base_url="unix://var/run/docker.sock")
+        c = client.containers.get(service)
+        data = c.logs(tail=tail)
+        txt = data.decode("utf-8", errors="replace") if isinstance(data, (bytes, bytearray)) else str(data)
+        return {"service": service, "tail": tail, "logs": txt}
+    except Exception as e:
+        return {"service": service, "tail": tail, "error": str(e)}
 
 @app.post("/smoke")
 async def smoke():
@@ -112,11 +115,14 @@ async def smoke():
     results.append({"check": "bash_pwd", "result": await _bashbridge_run(["pwd"])})
     results.append({"check": "bash_ls", "result": await _bashbridge_run(["ls", "-la"])})
 
-    # 3) docker ps (ensures docker control path works)
-    import docker
-    client = docker.DockerClient(base_url="unix://var/run/docker.sock")
-    names = [c.name for c in client.containers.list(all=True)]
-    results.append({"check": "docker_ps", "result": {"containers": names}})
+    # 3) docker ps (best-effort; docker.sock may be missing or permission denied)
+    try:
+        import docker
+        client = docker.DockerClient(base_url="unix://var/run/docker.sock")
+        names = [c.name for c in client.containers.list(all=True)]
+        results.append({"check": "docker_ps", "result": {"containers": names}})
+    except Exception as e:
+        results.append({"check": "docker_ps", "error": str(e)})
 
     # overall
     ok = True
