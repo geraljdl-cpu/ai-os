@@ -34,3 +34,4 @@ ui/**/*.bak*
 
 # runtime autopilot
 runtime/autopilot/
+.secrets/
