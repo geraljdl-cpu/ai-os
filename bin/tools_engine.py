@@ -118,6 +118,17 @@ def run(steps, log_path=None):
         results.append({"tool": tool, "input": inp, "result": result})
     return results
 
+# Finance tools integration
+try:
+    import importlib.util, sys as _sys
+    _spec = importlib.util.spec_from_file_location("tools_finance", os.path.join(AIOS_ROOT, "bin/tools_finance.py"))
+    _fin = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_fin)
+    TOOLS.update({k: (lambda f: lambda p: f(p))(v) for k,v in _fin.TOOLS.items()})
+    log("finance tools loaded: " + str(list(_fin.TOOLS.keys())))
+except Exception as e:
+    log(f"finance tools not loaded: {e}")
+
 if __name__ == "__main__":
     data = json.load(sys.stdin)
     steps = data if isinstance(data, list) else data.get("steps", [])
