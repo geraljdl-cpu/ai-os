@@ -32,21 +32,11 @@ async def health():
 
 def _openai_tools_spec() -> list[dict[str, Any]]:
     return [
-        {
-            "type": "function",
-            "function": {
-                "name": "bash",
-                "description": "Run a command via bash-bridge. Provide cmd as a plain string like: ls -la",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "cmd": {"type": "string"},
-                        "timeout": {"type": "integer"},
-                    },
-                    "required": ["cmd"],
-                },
-            },
-        }
+        {"type":"function","function":{"name":"bash","description":"Run a bash command","parameters":{"type":"object","properties":{"cmd":{"type":"string"},"timeout":{"type":"integer"}},"required":["cmd"]}}},
+        {"type":"function","function":{"name":"toc_customers","description":"Lista clientes do Toconline","parameters":{"type":"object","properties":{"limit":{"type":"integer"},"search":{"type":"string"}}}}},
+        {"type":"function","function":{"name":"toc_invoices","description":"Lista faturas do Toconline","parameters":{"type":"object","properties":{"limit":{"type":"integer"}}}}},
+        {"type":"function","function":{"name":"toc_invoice_create","description":"Cria uma fatura no Toconline","parameters":{"type":"object","properties":{"customer_id":{"type":"integer"},"lines":{"type":"array","items":{"type":"object"}},"observations":{"type":"string"}},"required":["customer_id","lines"]}}},
+        {"type":"function","function":{"name":"toc_customer_create","description":"Cria um cliente no Toconline","parameters":{"type":"object","properties":{"name":{"type":"string"},"nif":{"type":"string"},"email":{"type":"string"}},"required":["name"]}}}
     ]
 
 def _to_tokens(cmd: str) -> list[str]:
@@ -132,8 +122,10 @@ async def run_openai_with_tools(model: str, user_text: str, max_loops: int = 8) 
         {
             "role": "system",
             "content": (
-                "És um agente executor. Se precisares correr comandos, usa a tool bash. "
-                "Quando chamares bash, passa só o comando (ex: 'ls -la', 'pwd')."
+                "És um agente executor com acesso a tools de sistema e faturação. "
+                "Para comandos do sistema usa a tool bash. "
+                "Para faturação usa as tools toc_*: toc_customers, toc_invoices, toc_invoice_create, toc_customer_create. "
+                "Quando criares faturas usa sempre toc_invoice_create com customer_id e lines."
             ),
         },
         {"role": "user", "content": user_text},
