@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>JDL UI — Command</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;background:#0b0f19;color:#e8eefc}
+    .wrap{max-width:980px;margin:0 auto;padding:24px}
+    .card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px}
+    h1{font-size:18px;margin:0 0 12px 0;font-weight:650}
+    label{font-size:12px;opacity:.8}
+    textarea{width:100%;min-height:120px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.25);color:#e8eefc;padding:12px;resize:vertical}
+    select,input,button{border-radius:12px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.25);color:#e8eefc;padding:10px 12px}
+    button{cursor:pointer;font-weight:650}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .row{display:flex;gap:12px;align-items:end;flex-wrap:wrap}
+    .grow{flex:1}
+    pre{white-space:pre-wrap;word-break:break-word;margin:0}
+    .out{margin-top:12px;padding:12px;border-radius:12px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12)}
+    a{color:#a7c7ff;text-decoration:none}
+    .hint{font-size:12px;opacity:.75;margin-top:10px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Command runner</h1>
+
+      <div class="row">
+        <div>
+          <label>Mode</label><br/>
+          <select id="mode">
+            <option value="openai">openai</option>
+            <option value="ollama">ollama</option>
+            <option value="claude">claude</option>
+          </select>
+        </div>
+
+        <div class="grow">
+          <label>Quick</label><br/>
+          <input id="quick" class="grow" placeholder='Ex.: "Responde apenas: OK"' />
+        </div>
+
+        <div>
+          <button id="run">RUN</button>
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <label>chatInput</label>
+        <textarea id="cmd" spellcheck="false" placeholder='Escreve aqui o comando para o agente...'></textarea>
+      </div>
+
+      <div class="out">
+        <label>Output</label>
+        <pre id="out">(vazio)</pre>
+      </div>
+
+      <div class="hint">
+        Usa <a href="/">/</a> para o dashboard atual. Esta página chama <code>POST /api/agent</code> e proxy para <code>http://localhost:5679/agent</code>.
+      </div>
+    </div>
+  </div>
+
+  <script src="/command.js"></script>
+</body>
+</html>

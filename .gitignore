@@ -26,3 +26,11 @@ runtime/agent-router-root/
 runtime/backlog.json
 runtime/state.json
 runtime/jobs/
+
+# ui junk
+ui/node_modules/
+ui/*.bak*
+ui/**/*.bak*
+
+# runtime autopilot
+runtime/autopilot/

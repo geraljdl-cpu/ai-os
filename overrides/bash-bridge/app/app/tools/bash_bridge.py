@@ -7,7 +7,35 @@ PORT = 8020
 BASE_DIR = "/workspace"
 
 ALLOWED_PREFIXES = [
-  ["docker","compose"],
+    "awk",
+    "cat",
+    "compose",
+    "date",
+    "df",
+    "docker",
+    "docker logs",
+    "docker ps",
+    "du",
+    "find",
+    "free",
+    "git log",
+    "git status",
+    "grep",
+    "head",
+    "id",
+    "ip a",
+    "ls",
+    "ps",
+    "pwd",
+    "sed",
+    "ss",
+    "stat",
+    "tail",
+    "uname",
+    "uptime",
+    "whoami"
+]
+,
   ["docker"],
   ["curl"],
   ["ls"],
@@ -20,30 +48,6 @@ ALLOWED_PREFIXES = [
   ["sh"],
   ["python3"],
 ]
-# JDL_SAFE_GIT_DOCKER
-def _jdl_is_allowed(args):
-    if not args:
-        return False
-    cmd = args[0]
-
-    if cmd == "git":
-        # permite: git status|diff|log [flags...]
-        if len(args) >= 2 and args[1] in ("status","diff","log"):
-            return True
-        # permite: git -C /app status|diff|log [flags...]
-        if len(args) >= 4 and args[1] == "-C" and args[2] in ("/app","/host/ai-os") and args[3] in ("status","diff","log"):
-            return True
-        # JDL_SAFE_GIT_CONFIG
-        if len(args) >= 6 and args[1] == "config" and args[2] == "--global" and args[3] == "--add" and args[4] == "safe.directory" and args[5] in ("/host/ai-os","/app"):
-            return True
-        return False
-
-    if cmd == "docker":
-        if len(args) >= 2 and args[1] in ("ps","logs"):
-            return True
-        return False
-
-    return None
 
 def allowed(cmd):
     for prefix in ALLOWED_PREFIXES:
@@ -64,15 +68,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/run":
             cmd = body.get("cmd")
-            # JDL_SAFE_GIT_DOCKER_HOOKED
-            _args = cmd if isinstance(cmd, list) else ([cmd] if isinstance(cmd, str) and cmd else [])
-            _ok = _jdl_is_allowed(_args)
-            if _ok is False:
-                return self._send(403, {"error":"cmd not allowed"})
-            elif _ok is True:
-                pass
-
-            if not cmd or (_ok is None and (not allowed(cmd))):
+            if not cmd or not allowed(cmd):
                 return self._send(403, {"error":"cmd not allowed"})
 
             try:

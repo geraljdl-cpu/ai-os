@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Engenheiro JDL — Control Center</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<style>
+:root{
+  --bg0:#050817; --bg1:#0a1333;
+  --glass:rgba(255,255,255,0.06);
+  --stroke:rgba(255,255,255,0.12);
+  --txt:#e5e7eb; --mut:#94a3b8;
+  --good:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+  --accent:#60a5fa; --accent2:#22c55e;
+  --shadow: 0 18px 70px rgba(0,0,0,.55);
+}
+*{box-sizing:border-box}
+body{
+  margin:0; color:var(--txt);
+  font-family: ui-sans-serif, system-ui, Segoe UI, Arial;
+  background:
+    radial-gradient(950px 560px at 14% 10%, rgba(96,165,250,0.22), transparent 60%),
+    radial-gradient(850px 500px at 86% 16%, rgba(34,197,94,0.16), transparent 60%),
+    radial-gradient(720px 420px at 50% 92%, rgba(245,158,11,0.10), transparent 60%),
+    linear-gradient(180deg,var(--bg0),var(--bg1));
+  min-height:100vh;
+}
+.shell{max-width:1380px;margin:0 auto;padding:18px;display:grid;grid-template-columns:360px 1fr;gap:16px}
+@media (max-width:1050px){.shell{grid-template-columns:1fr}}
+.panel{backdrop-filter: blur(16px);background: var(--glass);border:1px solid var(--stroke);border-radius:20px;box-shadow:var(--shadow)}
+.sidebar{padding:18px; position:sticky; top:18px; height: calc(100vh - 36px); overflow:auto;}
+@media (max-width:1050px){.sidebar{position:relative;height:auto}}
+.main{padding:18px;display:flex;flex-direction:column;gap:14px}
+
+.header{
+  display:flex; align-items:center; gap:12px;
+  padding:14px; border-radius:18px;
+  background: linear-gradient(180deg, rgba(96,165,250,0.16), rgba(255,255,255,0.04));
+  border:1px solid rgba(96,165,250,0.22);
+}
+.logoBox{
+  width:54px;height:54px;border-radius:16px;
+  background: rgba(0,0,0,0.25);
+  border:1px solid rgba(255,255,255,0.14);
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;
+}
+.logoBox img{max-height:44px;max-width:100%;display:block}
+.brand{display:flex;flex-direction:column;gap:2px;flex:1}
+.title{font-size:15px;font-weight:850;letter-spacing:.2px;margin:0}
+.subtitle{font-size:12px;color:var(--mut);margin:0;line-height:1.35}
+
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.hr{height:1px;background:rgba(255,255,255,0.10);margin:14px 0}
+.badge{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;border:1px solid var(--stroke);background:rgba(255,255,255,0.05);font-size:12px;color:var(--mut)}
+.dot{width:8px;height:8px;border-radius:50%}
+
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:10px;
+  padding:12px 14px;border-radius:14px;
+  border:1px solid rgba(255,255,255,0.14);
+  background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+  color:var(--txt); font-weight:800;
+  cursor:pointer; transition:.15s; user-select:none;
+}
+.btn:hover{transform:translateY(-1px);border-color:rgba(96,165,250,0.35);box-shadow:0 12px 30px rgba(0,0,0,.35)}
+.btn.primary{border-color:rgba(34,197,94,0.35);background: linear-gradient(180deg, rgba(34,197,94,0.22), rgba(255,255,255,0.06));}
+.btn.small{padding:8px 10px;border-radius:12px;font-size:12px;font-weight:850}
+.btn:disabled{opacity:.55;cursor:not-allowed;transform:none}
+.running{animation:pulse 1.0s infinite}
+@keyframes pulse{0%{box-shadow:0 0 8px rgba(245,158,11,.45)}50%{box-shadow:0 0 26px rgba(245,158,11,.75)}100%{box-shadow:0 0 8px rgba(245,158,11,.45)}}
+
+.input{width:100%;padding:12px;border-radius:14px;border:1px solid rgba(255,255,255,0.14);background:rgba(0,0,0,0.35);color:var(--txt);outline:none}
+.input::placeholder{color:rgba(148,163,184,0.75)}
+.kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+@media (max-width:1050px){.kpi{grid-template-columns:1fr}}
+.kcard{padding:14px}
+.kmut{color:var(--mut);font-size:12px}
+.kbig{font-size:16px;font-weight:900;margin-top:4px}
+.term{
+  background:#02050f;border:1px solid rgba(96,165,250,0.18);
+  border-radius:16px;padding:12px;height:330px;overflow:auto;
+  color:#7CFFCE;font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size:12px;line-height:1.35;
+}
+.mono{font-family: ui-monospace, Menlo, Consolas, monospace;font-size:12px;white-space:pre-wrap;color: rgba(226,232,240,0.96);}
+
+/* ROBÔ (SVG) — animações */
+.botWrap{
+  width:140px;height:140px;border-radius:26px;
+  border:1px solid rgba(255,255,255,0.14);
+  background: radial-gradient(circle at 30% 30%, rgba(96,165,250,0.28), rgba(255,255,255,0.05));
+  box-shadow: inset 0 0 18px rgba(96,165,250,0.18), 0 18px 40px rgba(0,0,0,.35);
+  position:relative; overflow:hidden; cursor:pointer;
+}
+.botWrap:before{
+  content:""; position:absolute; inset:-30px;
+  background: linear-gradient(90deg, transparent, rgba(96,165,250,0.18), transparent);
+  transform: rotate(14deg) translateX(-90%);
+  animation: scanbg 5.2s infinite;
+}
+@keyframes scanbg{0%{transform: rotate(14deg) translateX(-90%)}55%{transform: rotate(14deg) translateX(90%)}100%{transform: rotate(14deg) translateX(90%)}}
+
+svg#botSvg{position:absolute; inset:0; width:100%; height:100%;}
+#head{transform-origin: 70px 62px; animation: headbob 2.3s ease-in-out infinite;}
+@keyframes headbob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.5px)}}
+
+#armL, #armR{transform-origin: 0px 0px;}
+.idle #armL{transform-origin: 35px 92px; animation: armIdleL 2.8s ease-in-out infinite;}
+.idle #armR{transform-origin: 105px 92px; animation: armIdleR 3.2s ease-in-out infinite;}
+@keyframes armIdleL{0%,100%{transform:rotate(-3deg)}50%{transform:rotate(4deg)}}
+@keyframes armIdleR{0%,100%{transform:rotate(3deg)}50%{transform:rotate(-4deg)}}
+
+.working #ring{animation: ringpulse 1.0s infinite; opacity:1;}
+@keyframes ringpulse{0%{transform:scale(.96);opacity:.9}100%{transform:scale(1.12);opacity:0}}
+#ring{transform-origin: 70px 70px; opacity:0;}
+
+#scan{animation: scanline 2.1s linear infinite; opacity:.55;}
+@keyframes scanline{0%{transform:translateY(0)}50%{transform:translateY(24px)}100%{transform:translateY(0)}}
+
+#eyeL, #eyeR{transform-origin:center; animation: blink 5s infinite;}
+@keyframes blink{0%,94%,100%{transform:scaleY(1)}97%{transform:scaleY(.12)}}
+
+.wave #armR{transform-origin: 105px 92px; animation: wave 0.65s ease-in-out 4;}
+@keyframes wave{0%,100%{transform:rotate(-10deg)}50%{transform:rotate(22deg)}}
+
+.tag{
+  position:absolute; bottom:10px; left:50%;
+  transform: translateX(-50%);
+  font-size:10px; padding:4px 8px; border-radius:999px;
+  border:1px solid rgba(255,255,255,0.14);
+  background: rgba(0,0,0,0.25);
+  color: rgba(226,232,240,0.9);
+  letter-spacing:.2px;
+}
+</style>
+</head>
+
+<body>
+
+<a id="jdlOpenChatLink" href="/command.html" style="position:fixed;left:18px;bottom:18px;z-index:99998;
+  padding:10px 12px;border-radius:14px;border:1px solid rgba(255,255,255,.14);
+  background:rgba(0,0,0,.22);backdrop-filter:blur(10px);color:#e5e7eb;text-decoration:none;
+  font-weight:800;font-family:ui-sans-serif,system-ui;box-shadow:0 16px 50px rgba(0,0,0,.45)">
+OPEN CHAT
+</a>
+
+  <div class="shell">
+    <aside class="panel sidebar">
+      <div class="header">
+        <div class="logoBox">
+          <img src="/public/jdl-logo.png?v=2" />
+        </div>
+        <div class="brand">
+          <p class="title">Engenheiro JDL</p>
+          <p class="subtitle">Control Center • backlog → worker → autopilot → jobs/dev → testes → merge</p>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row" style="align-items:flex-start;gap:12px">
+        <div id="botWrap" class="botWrap idle" title="Clique para o robô acenar">
+          <svg id="botSvg" viewBox="0 0 140 140">
+            <!-- ring pulse -->
+            <circle id="ring" cx="70" cy="70" r="58" fill="none" stroke="rgba(245,158,11,0.45)" stroke-width="2" />
+            <!-- body -->
+            <g id="body">
+              <rect x="38" y="86" width="64" height="34" rx="14" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.16)"/>
+              <circle cx="54" cy="103" r="3" fill="rgba(96,165,250,0.7)"/>
+              <circle cx="86" cy="103" r="3" fill="rgba(96,165,250,0.7)"/>
+            </g>
+
+            <!-- arms -->
+            <g id="armL">
+              <rect x="22" y="92" width="18" height="10" rx="5" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.16)"/>
+              <rect x="16" y="98" width="16" height="9" rx="5" fill="rgba(255,255,255,0.09)" stroke="rgba(255,255,255,0.14)"/>
+            </g>
+            <g id="armR">
+              <rect x="100" y="92" width="18" height="10" rx="5" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.16)"/>
+              <rect x="108" y="98" width="16" height="9" rx="5" fill="rgba(255,255,255,0.09)" stroke="rgba(255,255,255,0.14)"/>
+            </g>
+
+            <!-- head -->
+            <g id="head">
+              <rect x="28" y="32" width="84" height="58" rx="18" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.18)"/>
+              <rect x="36" y="40" width="68" height="26" rx="12" fill="rgba(0,0,0,0.35)" stroke="rgba(96,165,250,0.25)"/>
+              <circle id="eyeL" cx="58" cy="53" r="6" fill="rgba(34,197,94,0.95)"/>
+              <circle id="eyeR" cx="82" cy="53" r="6" fill="rgba(34,197,94,0.95)"/>
+              <rect x="58" y="72" width="24" height="5" rx="3" fill="rgba(255,255,255,0.26)"/>
+              <rect id="scan" x="38" y="42" width="64" height="3" rx="2" fill="rgba(96,165,250,0.45)"/>
+              <!-- antenna -->
+              <g>
+                <rect x="68" y="18" width="4" height="14" rx="2" fill="rgba(255,255,255,0.35)"/>
+                <circle cx="70" cy="18" r="5" fill="rgba(96,165,250,0.9)"/>
+              </g>
+            </g>
+          </svg>
+          <div class="tag" id="botTag">READY</div>
+        </div>
+
+        <div style="flex:1">
+          <div style="font-weight:900;font-size:14px">Estado</div>
+          <div class="badge" style="margin-top:8px"><span class="dot" id="dot"></span><span id="status">…</span></div>
+          <div style="margin-top:10px" class="subtitle">Última job: <span id="lastJobId">—</span></div>
+          <div style="display:flex; gap:10px; margin-top:12px">
+            <button class="btn primary" id="runBtn" onclick="runNow()">▶ Run now</button>
+            <button class="btn" onclick="refresh()">↻</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="subtitle" style="margin-bottom:8px">Nova missão</div>
+      <div style="display:flex;gap:10px">
+        <input class="input" id="goal" placeholder="Ex.: Adicionar histórico de jobs + viewer de patch.diff" />
+        <button class="btn small primary" onclick="addTask()">Add</button>
+      </div>
+
+      <div class="subtitle" style="margin-top:10px">Dica: missões pequenas = execução consistente.</div>
+    </aside>
+
+    <main class="panel main">
+      <div class="kpi">
+        <div class="panel kcard">
+          <div class="kmut">Backlog</div>
+          <div class="kbig"><span id="backlogCount">0</span> tarefas</div>
+        </div>
+        <div class="panel kcard">
+          <div class="kmut">Último resultado</div>
+          <div class="kbig" id="lastResult">—</div>
+        </div>
+        <div class="panel kcard">
+          <div class="kmut">Testes</div>
+          <div class="kbig" id="testsRC">—</div>
+        </div>
+      </div>
+
+      <div class="panel" style="padding:16px">
+        <div class="row">
+          <div>
+            <div style="font-weight:900;font-size:14px">Logs em tempo real</div>
+            <div class="subtitle">docker logs agent-router --tail 120</div>
+          </div>
+          <button class="btn small" onclick="copyLogs()">Copy</button>
+        </div>
+        <div class="hr"></div>
+        <div class="term" id="logs">…</div>
+      </div>
+
+      <div class="panel" style="padding:16px">
+        <div class="row">
+          <div>
+            <div style="font-weight:900;font-size:14px">Última job</div>
+            <div class="subtitle">result.json</div>
+          </div>
+          <button class="btn small" onclick="copyLastJob()">Copy</button>
+        </div>
+        <div class="hr"></div>
+        <div class="mono" id="lastJobRaw">…</div>
+      </div>
+
+      <div class="panel" style="padding:16px">
+        <div class="row">
+          <div>
+            <div style="font-weight:900;font-size:14px">Backlog</div>
+            <div class="subtitle">runtime/backlog.json</div>
+          </div>
+          <button class="btn small" onclick="copyBacklog()">Copy</button>
+        </div>
+        <div class="hr"></div>
+        <div class="mono" id="backlogRaw">…</div>
+      </div>
+    </main>
+  </div>
+
+<script>
+function qs(id){return document.getElementById(id)}
+async function api(path, opts){ const r=await fetch(path, opts||{}); return await r.json(); }
+
+function setStatus(status){
+  qs("status").innerText = status;
+  const dot = qs("dot");
+  const btn = qs("runBtn");
+  const botWrap = qs("botWrap");
+  const tag = qs("botTag");
+
+  botWrap.classList.remove("idle","working");
+
+  if(status==="IDLE"){
+    dot.style.background = "var(--good)";
+    dot.style.boxShadow="0 0 14px rgba(34,197,94,0.6)";
+    btn.classList.remove("running");
+    botWrap.classList.add("idle");
+    tag.innerText="READY";
+  }else if(status==="WORKING"){
+    dot.style.background = "var(--warn)";
+    dot.style.boxShadow="0 0 14px rgba(245,158,11,0.6)";
+    btn.classList.add("running");
+    botWrap.classList.add("working");
+    tag.innerText="WORKING";
+  }else{
+    dot.style.background = "var(--bad)";
+    dot.style.boxShadow="0 0 14px rgba(239,68,68,0.6)";
+    btn.classList.remove("running");
+    botWrap.classList.add("idle");
+    tag.innerText="UNKNOWN";
+  }
+}
+
+async function refresh(){
+  const backlog = await api("/api/backlog");
+  const status = await api("/api/status");
+  const last = await api("/api/lastjob");
+  const logs = await api("/api/logs");
+
+  qs("backlogRaw").innerText = JSON.stringify(backlog,null,2);
+  qs("backlogCount").innerText = (backlog.tasks||[]).length;
+
+  setStatus(status.status||"UNKNOWN");
+
+  qs("lastJobRaw").innerText = JSON.stringify(last,null,2);
+  qs("lastJobId").innerText = last.job || "—";
+
+  const tests_rc = last?.result?.tests_rc;
+  qs("testsRC").innerText = (tests_rc===0) ? "0 (PASS)" : (tests_rc===undefined) ? "—" : String(tests_rc);
+  qs("lastResult").innerText = last?.result?.ok ? "OK" : (last?.result ? "FAIL" : "—");
+
+  qs("logs").innerText = logs.logs || "";
+  qs("logs").scrollTop = qs("logs").scrollHeight;
+}
+
+async function addTask(){
+  const goal = qs("goal").value.trim();
+  if(!goal) return;
+  await fetch("/api/add",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({goal})});
+  qs("goal").value="";
+  refresh();
+}
+
+async function runNow(){
+  const btn = qs("runBtn");
+  btn.disabled=true; btn.innerText="Running…";
+  await fetch("/api/run",{method:"POST"});
+  setTimeout(()=>{ btn.disabled=false; btn.innerText="▶ Run now"; refresh(); }, 1600);
+}
+
+async function copyText(t){ try{ await navigator.clipboard.writeText(t);}catch(e){} }
+function copyBacklog(){ copyText(qs("backlogRaw").innerText); }
+function copyLastJob(){ copyText(qs("lastJobRaw").innerText); }
+function copyLogs(){ copyText(qs("logs").innerText); }
+
+qs("botWrap").addEventListener("click", ()=>{
+  const bot = qs("botWrap");
+  bot.classList.remove("wave");
+  // restart animation
+  void bot.offsetWidth;
+  bot.classList.add("wave");
+  setTimeout(()=>bot.classList.remove("wave"), 3200);
+});
+
+setInterval(refresh, 3000);
+refresh();
+</script>
+
+<!-- JDL_ROBOT_OVERLAY_V3 -->
+<style>
+  :root{
+    --jdl-bg: rgba(9,12,22,.72);
+    --jdl-bd: rgba(255,255,255,.14);
+    --jdl-tx: rgba(235,242,255,.94);
+    --jdl-dim: rgba(235,242,255,.66);
+    --jdl-glow: rgba(120,170,255,.28);
+    --jdl-glow2: rgba(120,255,200,.16);
+    --jdl-err: rgba(255,120,120,.18);
+    --jdl-ok: rgba(120,255,200,.16);
+    --jdl-run: rgba(120,170,255,.18);
+  }
+
+  /* FAB */
+  .jdl-fab{position:fixed;right:18px;bottom:18px;z-index:99999;display:flex;gap:10px;align-items:center}
+  .jdl-chip{font-size:11px;opacity:.88;padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.20)}
+  .jdl-robotbtn{
+    width:66px;height:66px;display:grid;place-items:center;cursor:pointer;
+    border-radius:18px;border:1px solid var(--jdl-bd);
+    background:linear-gradient(180deg, rgba(20,26,44,.78), rgba(10,14,26,.64));
+    backdrop-filter:blur(10px);
+    box-shadow:0 18px 60px rgba(0,0,0,.55);
+    transition:transform .12s ease, box-shadow .12s ease;
+    position:relative; overflow:hidden;
+  }
+  .jdl-robotbtn:hover{transform:translateY(-1px)}
+  .jdl-robotbtn::after{
+    content:""; position:absolute; inset:-40%;
+    background:
+      radial-gradient(circle at 30% 20%, rgba(120,170,255,.30), transparent 55%),
+      radial-gradient(circle at 70% 70%, rgba(120,255,200,.18), transparent 60%),
+      radial-gradient(circle at 60% 35%, rgba(255,255,255,.10), transparent 55%);
+    opacity:.60; filter:blur(2px);
+  }
+
+  .jdl-robotbtn .scan{
+    position:absolute; inset:0; opacity:0; pointer-events:none;
+    background:linear-gradient(to bottom, transparent 0%, rgba(120,170,255,.18) 40%, transparent 80%);
+    transform:translateY(-120%);
+    mix-blend-mode:screen;
+  }
+  .jdl-robotbtn.running .scan{opacity:1; animation:jdlScan 1.05s linear infinite}
+  @keyframes jdlScan{ to{ transform:translateY(120%)} }
+  .jdl-robotbtn.error{box-shadow:0 18px 60px rgba(255,80,80,.16)}
+  .jdl-robotbtn.ok{box-shadow:0 18px 60px rgba(80,255,180,.14)}
+
+  .jdl-robotbtn .avatar{position:relative; z-index:1; width:42px; height:42px; filter:drop-shadow(0 10px 16px rgba(0,0,0,.35))}
+  .jdl-robotbtn .mouth{transform-origin:center;}
+  .jdl-robotbtn.speaking .mouth{animation:jdlTalk .14s ease-in-out infinite alternate}
+  @keyframes jdlTalk{ from{ transform:scaleY(.65)} to{ transform:scaleY(1.08)} }
+
+  /* PANEL */
+  .jdl-panel{
+    position:fixed; right:18px; bottom:96px; z-index:99999;
+    width:min(760px,calc(100vw - 36px)); height:min(680px,calc(100vh - 140px));
+    border-radius:20px; border:1px solid var(--jdl-bd);
+    background:
+      radial-gradient(900px 500px at 20% 0%, rgba(120,170,255,.10), transparent 55%),
+      radial-gradient(900px 500px at 80% 100%, rgba(120,255,200,.07), transparent 55%),
+      var(--jdl-bg);
+    backdrop-filter:blur(14px);
+    box-shadow:0 22px 80px rgba(0,0,0,.62);
+    overflow:hidden; display:none;
+  }
+  .jdl-panel.open{display:flex; flex-direction:column}
+
+  /* Dock (ChatGPT-like) */
+  .jdl-panel.dock{
+    right:12px; bottom:12px;
+    width:min(920px,calc(100vw - 24px));
+    height:min(860px,calc(100vh - 24px));
+    border-radius:22px;
+  }
+
+  .jdl-top{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 12px; border-bottom:1px solid rgba(255,255,255,.10)
+  }
+  .jdl-title{font-weight:900; letter-spacing:.25px; font-size:12.5px; color:var(--jdl-tx)}
+  .jdl-topright{display:flex; gap:8px; align-items:center}
+  .jdl-x,.jdl-ic{
+    cursor:pointer; border-radius:12px; border:1px solid rgba(255,255,255,.14);
+    background:rgba(0,0,0,.18); color:var(--jdl-tx); padding:8px 10px;
+  }
+  .jdl-ic{font-size:12px; opacity:.96}
+  .jdl-ic.on{border-color:rgba(120,170,255,.35); box-shadow:0 0 0 3px rgba(120,170,255,.10) inset}
+
+  .jdl-meta{display:flex; gap:10px; align-items:center}
+  .jdl-badge{font-size:11px; padding:6px 10px; border-radius:999px; border:1px solid rgba(255,255,255,.12); background:rgba(0,0,0,.18); color:var(--jdl-dim)}
+
+  .jdl-actions{display:flex; gap:8px; flex-wrap:wrap; padding:10px 12px 0 12px}
+  .jdl-pill{
+    padding:9px 11px; border-radius:14px; cursor:pointer;
+    border:1px solid rgba(255,255,255,.14); background:rgba(0,0,0,.14); color:var(--jdl-tx);
+    font-weight:820; font-size:11px;
+  }
+
+  .jdl-chat{flex:1; padding:12px; overflow:auto}
+  .jdl-msg{display:flex; margin:10px 0}
+  .jdl-msg.user{justify-content:flex-end}
+  .jdl-bubble{
+    max-width:88%;
+    padding:10px 12px; border-radius:14px;
+    border:1px solid rgba(255,255,255,.12);
+    background:rgba(0,0,0,.20);
+    color:var(--jdl-tx);
+    white-space:pre-wrap; word-break:break-word;
+    font-size:12.8px; line-height:1.35;
+  }
+  .jdl-msg.user .jdl-bubble{
+    background:rgba(120,170,255,.14);
+    border-color:rgba(120,170,255,.22);
+  }
+  .jdl-msg.assistant .jdl-bubble{background:rgba(0,0,0,.28)}
+  .jdl-msg.sys .jdl-bubble{background:rgba(255,255,255,.06); color:var(--jdl-dim)}
+
+  .jdl-bottom{
+    border-top:1px solid rgba(255,255,255,.10);
+    padding:12px; display:flex; gap:10px; align-items:end; flex-wrap:wrap;
+  }
+  .jdl-col{display:flex; flex-direction:column; gap:6px}
+  .jdl-label{font-size:10.5px; color:var(--jdl-dim); margin-left:2px}
+  .jdl-select,.jdl-input{
+    border-radius:14px; border:1px solid rgba(255,255,255,.14);
+    background:rgba(0,0,0,.18); color:var(--jdl-tx);
+    padding:10px 12px;
+  }
+  .jdl-input{
+    flex:1; min-width:280px; resize:vertical;
+    min-height:44px; max-height:160px; overflow:auto;
+  }
+  .jdl-send{
+    padding:10px 14px; border-radius:14px; font-weight:900;
+    border:1px solid rgba(255,255,255,.14); background:rgba(0,0,0,.18); color:var(--jdl-tx);
+    cursor:pointer;
+  }
+  .jdl-send:disabled{opacity:.55; cursor:not-allowed}
+</style>
+
+<div class="jdl-fab">
+  <span class="jdl-chip" id="jdlFabState">idle</span>
+  <button class="jdl-robotbtn" id="jdlRobotFab" aria-label="Robot menu" title="Robot menu (Ctrl+K)" onclick="try{var p=document.getElementById('jdlRobotPanel'); if(p){p.classList.toggle('open');}}catch(e){} return false;">
+    <div class="scan"></div>
+    <!-- pseudo-3D junior robot -->
+    <svg class="avatar" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="jdlMetal" x1="0" y1="0" x2="64" y2="64">
+          <stop stop-color="rgba(255,255,255,.95)"/>
+          <stop offset="1" stop-color="rgba(150,180,255,.86)"/>
+        </linearGradient>
+        <radialGradient id="jdlGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(32 28) rotate(90) scale(22)">
+          <stop stop-color="rgba(120,170,255,.55)"/>
+          <stop offset="1" stop-color="rgba(120,170,255,0)"/>
+        </radialGradient>
+      </defs>
+      <path d="M32 7c3 0 5 2 5 5v6h7c8 0 14 6 14 14v8c0 8-6 14-14 14H20c-8 0-14-6-14-14v-8c0-8 6-14 14-14h7v-6c0-3 2-5 5-5Z" stroke="url(#jdlMetal)" stroke-width="3" opacity=".94"/>
+      <path d="M16 28c5-6 27-7 32 0" stroke="rgba(255,255,255,.25)" stroke-width="2" opacity=".6"/>
+      <circle cx="32" cy="32" r="18" fill="url(#jdlGlow)" opacity=".35"/>
+      <path d="M22 30c0-3 2-5 5-5s5 2 5 5-2 5-5 5-5-2-5-5Zm20 0c0-3 2-5 5-5s5 2 5 5-2 5-5 5-5-2-5-5Z" fill="url(#jdlMetal)" opacity=".92"/>
+      <g class="mouth">
+        <path d="M25 45c4 4 10 4 14 0" stroke="url(#jdlMetal)" stroke-width="3" stroke-linecap="round" opacity=".88"/>
+      </g>
+    </svg>
+  </button>
+</div>
+
+<div class="jdl-panel" id="jdlRobotPanel" role="dialog" aria-label="Robot Command Panel">
+  <div class="jdl-top">
+    <div class="jdl-meta">
+      <div class="jdl-title">JDL Robot</div>
+      <span class="jdl-badge" id="jdlStateBadge">idle</span>
+    </div>
+    <div class="jdl-topright">
+      <button class="jdl-ic" id="jdlDockBtn" title="Dock (modo grande)">⤢</button>
+      <button class="jdl-ic" id="jdlClearBtn" title="Limpar chat">🧹</button>
+      <button class="jdl-ic" id="jdlTtsBtn" title="Voz (TTS)">🔊</button>
+      <button class="jdl-x" id="jdlClose">✕</button>
+    </div>
+  </div>
+
+  <div class="jdl-actions">
+    <button class="jdl-pill" data-jdl-preset="ok">OK</button>
+    <button class="jdl-pill" data-jdl-preset="smoke">SMOKE</button>
+    <button class="jdl-pill" data-jdl-preset="status">STATUS</button>
+    <button class="jdl-pill" data-jdl-preset="lastjob">LASTJOB</button>
+  </div>
+
+  <div class="jdl-chat" id="jdlChat"></div>
+
+  <div class="jdl-bottom">
+    <div class="jdl-col" style="width:150px">
+      <div class="jdl-label">mode</div>
+      <select class="jdl-select" id="jdlMode">
+        <option value="openai">openai</option>
+        <option value="ollama">ollama</option>
+        <option value="claude">claude</option>
+      </select>
+    </div>
+
+    <div class="jdl-col" style="flex:1;min-width:300px">
+      <div class="jdl-label">mensagem (Enter envia, Shift+Enter nova linha)</div>
+      <textarea class="jdl-input" id="jdlCmd" rows="2" spellcheck="false" placeholder="Escreve aqui..."></textarea>
+    </div>
+
+    <button class="jdl-send" id="jdlRun">SEND</button>
+  </div>
+</div>
+
+<!-- /JDL_ROBOT_OVERLAY_V3 -->
+
+
+
+
+
+
+<!-- JDL_MINICHAT_RUNTIME_V3 -->
+<script>
+(function(){
+  if(window.__JDL_MINICHAT_BOUND__) return;
+  window.__JDL_MINICHAT_BOUND__ = true;
+
+  const $ = (id)=>document.getElementById(id);
+  const LS = {
+    dock: "jdl_dock_on_v1",
+    mode: "jdl_mode_v1",
+    tts: "jdl_tts_on_v1"
+  };
+
+  function safeText(x){
+    if (x == null) return "";
+    if (typeof x === "string") return x;
+    try { return JSON.stringify(x, null, 2); } catch(e){ return String(x); }
+  }
+
+  function push(role, text){
+    const chat = $("jdlChat");
+    if(!chat) return;
+    const row = document.createElement("div");
+    row.className = "jdl-msg " + role;
+    const b = document.createElement("div");
+    b.className = "jdl-bubble";
+    b.textContent = String(text);
+    row.appendChild(b);
+    chat.appendChild(row);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  let ttsOn = false;
+  let voice = null;
+  let dockOn = false;
+
+  function loadPrefs(){
+    try{ dockOn = localStorage.getItem(LS.dock) === "1"; }catch(_){ }
+    try{ ttsOn  = localStorage.getItem(LS.tts)  === "1"; }catch(_){ }
+    try{ window.__JDL_MODE__ = localStorage.getItem(LS.mode) || "ollama"; }catch(_){ window.__JDL_MODE__="ollama"; }
+  }
+  function savePrefs(){
+    try{ localStorage.setItem(LS.dock, dockOn ? "1":"0"); }catch(_){}
+    try{ localStorage.setItem(LS.tts,  ttsOn  ? "1":"0"); }catch(_){}
+  }
+
+  function applyDock(){
+    const panel = $("jdlRobotPanel");
+    const btn = $("jdlDockBtn");
+    if(panel) panel.classList.toggle("dock", !!dockOn);
+    if(btn){
+      btn.classList.toggle("on", !!dockOn);
+      btn.textContent = dockOn ? "⤡" : "⤢";
+    }
+  }
+
+  function pickVoice(){
+    if(!("speechSynthesis" in window)) return null;
+    const v = window.speechSynthesis.getVoices() || [];
+    if(!v.length) return null;
+    const pt = v.find(x => (x.lang||"").toLowerCase().startsWith("pt"));
+    return pt || v[0];
+  }
+
+  async function speak(text){
+    if(!ttsOn) return;
+    if(!("speechSynthesis" in window)) return;
+    try{
+      if(!(window.speechSynthesis.getVoices()||[]).length){
+        await new Promise(res=>{
+          const on=()=>{ window.speechSynthesis.removeEventListener("voiceschanged", on); res(); };
+          window.speechSynthesis.addEventListener("voiceschanged", on);
+          setTimeout(()=>{ try{window.speechSynthesis.removeEventListener("voiceschanged", on);}catch(e){} res(); }, 700);
+        });
+      }
+      voice = voice || pickVoice();
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(String(text));
+      if(voice){ u.voice = voice; if(voice.lang) u.lang = voice.lang; }
+      const fab = $("jdlRobotFab");
+      u.onstart = ()=>fab && fab.classList.add("speaking");
+      u.onend = ()=>fab && fab.classList.remove("speaking");
+      u.onerror = ()=>fab && fab.classList.remove("speaking");
+      window.speechSynthesis.speak(u);
+    }catch(e){}
+  }
+
+  function replaceWithClone(el){
+    if(!el || !el.parentNode) return el;
+    const c = el.cloneNode(true);
+    el.parentNode.replaceChild(c, el);
+    return c;
+  }
+
+  async function runSend(){
+    const cmd = $("jdlCmd");
+    const modeSel = $("jdlMode");
+    const sendBtn = $("jdlRun");
+    if(!cmd || !modeSel || !sendBtn) return;
+
+    const chatInput = (cmd.value||"").trim();
+    if(!chatInput) return;
+
+    let m = (modeSel && modeSel.value ? modeSel.value : (window.__JDL_MODE__||"ollama")).trim();
+    let endpoint = (m === "ollama") ? "/api/ollama" : "/api/agent";
+
+    push("user", chatInput);
+    cmd.value = "";
+
+    sendBtn.disabled = true;
+    try{
+      const payload = (endpoint === "/api/ollama")
+        ? { chatInput }
+        : { mode: m, chatInput };
+
+      let r = await fetch(endpoint, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      // fallback automático: se OpenAI falhar, tenta Ollama
+      if(!r.ok && endpoint === "/api/agent"){
+        push("sys","OpenAI falhou, a tentar Ollama (fallback)...");
+        endpoint = "/api/ollama";
+        m = "ollama";
+        r = await fetch("/api/ollama", {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ chatInput })
+        });
+      }
+
+      let j = null;
+      try{ j = await r.json(); }catch(e){ j = {raw: await r.text()}; }
+
+      if(!r.ok){
+        push("sys", "HTTP " + r.status);
+        push("assistant", safeText(j));
+        return;
+      }
+
+      const ans = j?.data?.answer ?? j?.answer ?? j?.data ?? j;
+      const out = safeText(ans);
+      push("assistant", out);
+      speak(out);
+
+    }catch(e){
+      push("assistant", "ERRO: " + String(e));
+    }finally{
+      sendBtn.disabled = false;
+    }
+  }
+
+  function bindOnce(){
+    // remover listeners antigos (resolve toggles/duplos)
+    const cmd     = replaceWithClone($("jdlCmd"));
+    const sendBtn = replaceWithClone($("jdlRun"));
+    const ttsBtn  = replaceWithClone($("jdlTtsBtn"));
+    const dockBtn = replaceWithClone($("jdlDockBtn"));
+
+    if(sendBtn){
+      sendBtn.addEventListener("click", (e)=>{
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+        runSend();
+      }, true);
+    }
+
+    if(cmd){
+      cmd.addEventListener("keydown", (e)=>{
+        if(e.key === "Enter" && !e.shiftKey){
+          e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+          runSend();
+        }
+      }, true);
+    }
+
+    if(ttsBtn){
+      ttsBtn.classList.toggle("on", ttsOn);
+      ttsBtn.addEventListener("click", (e)=>{
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+        ttsOn = !ttsOn;
+        ttsBtn.classList.toggle("on", ttsOn);
+        push("sys", ttsOn ? "Voz: ON" : "Voz: OFF");
+        if(ttsOn) speak("Voz ligada.");
+        else { try{ if("speechSynthesis" in window) window.speechSynthesis.cancel(); }catch(_){} }
+        savePrefs();
+      }, true);
+    }
+
+    if(dockBtn){
+      dockBtn.addEventListener("click", (e)=>{
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+        dockOn = !dockOn;
+    
+    // default mode = ollama e persistência
+    const modeSel = $("jdlMode");
+    if(modeSel){
+      try{ modeSel.value = (window.__JDL_MODE__||"ollama"); }catch(_){}
+      modeSel.addEventListener("change", ()=>{
+        window.__JDL_MODE__ = modeSel.value || "ollama";
+        savePrefs();
+      }, true);
+    }
+
+    applyDock();
+        savePrefs();
+      }, true);
+    }
+
+    applyDock();
+
+    const chat = $("jdlChat");
+    if(chat && !chat.children.length){
+      push("sys","Dock ⤢ ativo + fallback OpenAI→Ollama. Enter envia. Shift+Enter nova linha.");
+    }
+  }
+
+  // init
+  loadPrefs();
+  try{ bindOnce(); }catch(e){}
+  document.addEventListener("DOMContentLoaded", ()=>{ try{ bindOnce(); }catch(e){} }, {once:true});
+})();
+</script>
+<!-- /JDL_MINICHAT_RUNTIME_V3 -->
+
+
+
+
+<script>
+/* JDL_EXEC_PROXY_3001 */
+(function(){
+  function splitArgs(line){ return line.trim().split(/\s+/).filter(Boolean); }
+  const _fetch = window.fetch;
+
+  async function runExec(cmdLine){
+    const args = splitArgs(cmdLine);
+    const r = await _fetch("http://127.0.0.1:3001/api/exec", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ args })
+    });
+    const data = await r.json().catch(()=>({}));
+    return {status:r.status, data};
+  }
+
+  window.addEventListener("keydown", async (e) => {
+    const t = e.target;
+    if (!t) return;
+    const ok = (t.tagName==="TEXTAREA") || (t.tagName==="INPUT" && t.type==="text");
+    if (!ok) return;
+    if (e.key!=="Enter" || e.shiftKey) return;
+
+    const v = (t.value||"").trim();
+    if (!v.startsWith("!")) return;
+
+    e.preventDefault();
+    const cmdLine = v.slice(1).trim();
+    t.value = "";
+
+    const print = (txt) => {
+      const el = document.querySelector("#jdlMiniChatMessages") || document.querySelector(".messages") || document.body;
+      const d = document.createElement("div");
+      d.style.whiteSpace = "pre-wrap";
+      d.textContent = txt;
+      el.appendChild(d);
+      if (el.scrollTop !== undefined) el.scrollTop = el.scrollHeight;
+    };
+
+    print("$ " + cmdLine);
+
+    try {
+      const {status, data} = await runExec(cmdLine);
+      if (status !== 200 || !data || data.ok !== true){
+        print((data && (data.error || JSON.stringify(data))) || ("ERR status " + status));
+        return;
+      }
+      if (data.stdout) print(data.stdout);
+      if (data.stderr) print(data.stderr);
+      if (!data.stdout && !data.stderr) print("(no output)");
+    } catch (err) {
+      print("ERR " + String(err));
+    }
+  }, true);
+})();
+</script>
+
+<script src="/public/exec_hook.js"></script>
+</body>
+</html>
