@@ -23,8 +23,13 @@ PY
 
 echo "Running goal: $GOAL"
 
+# auth token (read from agent-router container)
+TOKEN=$(docker exec agent-router sh -lc 'echo -n $AIOS_TOKEN' 2>/dev/null || true)
+[ -z "${TOKEN:-}" ] && echo "WARN: AIOS_TOKEN missing; autopilot call may fail"
+
 curl -sS -X POST http://localhost:5679/autopilot \
   -H "Content-Type: application/json" \
+  -H "X-AIOS-TOKEN: $TOKEN" \
   -d "{\"goal\":\"$GOAL\"}" >/dev/null || true
 
 # -------- AUTO MERGE --------
