@@ -134,3 +134,20 @@ app.get("/api/logs",(req,res)=>{
     res.json({logs: stdout || stderr});
   });
 });
+
+// Finance routes — Toconline
+const { execSync } = require('child_process');
+app.get('/api/finance/customers', (req,res)=>{
+  try{
+    const limit = req.query.limit || 10;
+    const out = execSync('python3 /home/jdl/ai-os/bin/tools_finance.py toc_customers ' + JSON.stringify(JSON.stringify({limit:parseInt(limit)})), {timeout:10000});
+    res.json(JSON.parse(out.toString()));
+  }catch(e){ res.json({ok:false,error:String(e)}); }
+});
+app.get('/api/finance/invoices', (req,res)=>{
+  try{
+    const limit = req.query.limit || 10;
+    const out = execSync('python3 /home/jdl/ai-os/bin/tools_finance.py toc_invoices ' + JSON.stringify(JSON.stringify({limit:parseInt(limit)})), {timeout:10000});
+    res.json(JSON.parse(out.toString()));
+  }catch(e){ res.json({ok:false,error:String(e)}); }
+});

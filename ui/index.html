@@ -525,6 +525,20 @@ svg#bot { width: 100%; height: 100%; }
       <pre class="mono-pre" id="lastJobRaw">…</pre>
     </div>
 
+
+    <-bash: jdl@DESKTOP-CPLTTV3:~/ai-os$: No such file or Finance Widget -->
+    <div class="panel" id="financePanel">
+      <div class="panel-head">
+        <span class="panel-title">Toconline — Faturas</span>
+        <div style="display:flex;gap:8px">
+          <button class="btn sm" onclick="loadFinance()">↻</button>
+          <button class="btn sm" onclick="toggleFinanceView()" id="finToggle">Clientes</button>
+        </div>
+      </div>
+      <div id="financeBody" style="padding:12px 16px">
+        <div class="backlog-empty">A carregar...</div>
+      </div>
+    </div>
   </main>
 
 </div>
@@ -818,6 +832,44 @@ document.addEventListener('keydown', e => {
     e.preventDefault(); togglePanel();
   }
 });
+
+// Finance
+let finView = 'invoices';
+async function loadFinance() {
+  const body = document.getElementById('financeBody');
+  body.innerHTML = '<div class="backlog-empty">A carregar...</div>';
+  try {
+    const ep = finView === 'invoices' ? '/api/finance/invoices?limit=10' : '/api/finance/customers?limit=10';
+    const data = await api(ep);
+    if (finView === 'invoices') {
+      const rows = (data.invoices||[]).map(inv =>
+        '<div class="job-row" style="grid-template-columns:80px 80px 1fr 80px 60px">' +
+        '<span class="job-id">' + (inv.number||inv.id) + '</span>' +
+        '<span class="tag">' + (inv.date||'') + '</span>' +
+        '<span class="job-goal">' + (inv.type||'') + '</span>' +
+        '<span class="kpi-val green" style="font-size:13px">' + (inv.total||'') + ' EUR</span>' +
+        '</div>'
+      ).join('');
+      body.innerHTML = rows || '<div class="backlog-empty">Sem faturas.</div>';
+    } else {
+      const rows = (data.customers||[]).map(c =>
+        '<div class="job-row" style="grid-template-columns:1fr 120px 160px">' +
+        '<span class="job-goal">' + (c.name||'') + '</span>' +
+        '<span class="tag">' + (c.nif||'') + '</span>' +
+        '<span class="job-id">' + (c.email||'—') + '</span>' +
+        '</div>'
+      ).join('');
+      body.innerHTML = rows || '<div class="backlog-empty">Sem clientes.</div>';
+    }
+  } catch(e) { body.innerHTML = '<div class="backlog-empty">Erro: ' + e + '</div>'; }
+}
+function toggleFinanceView() {
+  finView = finView === 'invoices' ? 'customers' : 'invoices';
+  document.getElementById('finToggle').textContent = finView === 'invoices' ? 'Clientes' : 'Faturas';
+  loadFinance();
+}
+setInterval(loadFinance, 30000);
+loadFinance();
 </script>
 
 <style>
