@@ -49,9 +49,10 @@ is_allowed(){
   return 0
 }
 
-RESPONSE=$(curl -sf -X POST http://localhost:7070/agent \
+RESPONSE=$(curl -sf -X POST http://127.0.0.1:5679/agent \
   -H "Content-Type: application/json" \
-  -d "{\"goal\": \"$GOAL\"}" 2>&1) || {
+  -H "X-AIOS-TOKEN: 6f5e83679313d999d4d36280f6d00a200130a55e63b2e2c6909dab3ecadbe377" \
+  -d "{\"chatInput\": \"$GOAL\", \"mode\": \"openai\"}" 2>&1) || {
   echo "[autopilot] agent unreachable" | tee -a "$EXEC_LOG"
   exit 0
 }
