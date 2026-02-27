@@ -125,6 +125,7 @@ services:
       ports: ["8020:8020"]
 
   agent-router:
+    build: ./agent-router
     image: ai-os-agent-router
     container_name: agent-router
     restart: unless-stopped
