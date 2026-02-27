@@ -53,7 +53,7 @@ RESPONSE=$(curl -sf -X POST http://localhost:7070/agent \
   -H "Content-Type: application/json" \
   -d "{\"goal\": \"$GOAL\"}" 2>&1) || {
   echo "[autopilot] agent unreachable" | tee -a "$EXEC_LOG"
-  exit 1
+  exit 0
 }
 
 echo "$RESPONSE" > "$JOBS_DIR/$JOB_ID/agent_response.json"
