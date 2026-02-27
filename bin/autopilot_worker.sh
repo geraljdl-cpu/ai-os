@@ -59,26 +59,12 @@ RESPONSE=$(curl -sf -X POST http://127.0.0.1:5679/agent \
 
 echo "$RESPONSE" > "$JOBS_DIR/$JOB_ID/agent_response.json"
 
-STEPS=$(echo "$RESPONSE" | python3 -c "
+# Run steps via tools engine
+echo "$RESPONSE" | python3 -c "
 import json,sys
 r=json.load(sys.stdin)
-steps=r.get('steps',r.get('response',{}).get('steps',[]))
-for s in steps:
-    inp=s.get('input',{})
-    cmd=inp.get('cmd','') if isinstance(inp,dict) else s.get('cmd','')
-    if cmd: print(cmd)
-" 2>/dev/null)
-
-while IFS= read -r cmd; do
-  [[ -z "$cmd" ]] && continue
-  echo "[step] $cmd" | tee -a "$EXEC_LOG"
-  if ! is_allowed "$cmd"; then continue; fi
-  if [[ "$AIOS_MODE" == "simulate" ]]; then
-    echo "[SIMULATE] $cmd" | tee -a "$EXEC_LOG"
-  else
-    out=$(cd "$AIOS_ROOT" && eval "$cmd" 2>&1) && code=$? || code=$?
-    echo "[exit=$code] $out" | tee -a "$EXEC_LOG"
-  fi
-done <<< "$STEPS"
+steps=r.get('steps',[])
+print(json.dumps({'steps':steps,'log_path':'$EXEC_LOG'}))
+" | AIOS_MODE="$AIOS_MODE" AIOS_ROOT="$AIOS_ROOT" python3 "$AIOS_ROOT/bin/tools_engine.py" | tee -a "$EXEC_LOG"
 
 echo "[autopilot] $JOB_ID done" | tee -a "$EXEC_LOG"
