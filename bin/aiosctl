@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+AIOS="$HOME/ai-os"
+RUNTIME="$AIOS/runtime"
+BACKLOG="$RUNTIME/backlog.json"
+JOBS="$RUNTIME/jobs"
+
+cmd="${1:-help}"; shift || true
+
+ensure_backlog() {
+  mkdir -p "$RUNTIME"
+  [ -f "$BACKLOG" ] || printf "{ \"tasks\": [] }\n" > "$BACKLOG"
+}
+
+queue() {
+  ensure_backlog
+  goal="$*"
+  [ -z "${goal// /}" ] && { echo "USO: aiosctl q <objetivo>"; exit 1; }
+  python3 - <<PY
+import json, os
+p=os.path.expanduser("$BACKLOG")
+goal=${goal@Q}
+data=json.load(open(p))
+data.setdefault("tasks", []).append({"goal": goal})
+json.dump(data, open(p,"w"), indent=2, ensure_ascii=False)
+print("QUEUED:", goal)
+PY
+}
+
+lsq() {
+  ensure_backlog
+  python3 - <<PY
+import json, os
+p=os.path.expanduser("$BACKLOG")
+d=json.load(open(p))
+tasks=d.get("tasks",[])
+print(f"tasks={len(tasks)}")
+for i,t in enumerate(tasks[:30],1):
+  print(f"{i:02d}. {t.get(goal,)}")
+PY
+}
+
+status() {
+  systemctl status aios-autopilot.timer --no-pager -l || true
+}
+
+last() {
+  [ -d "$JOBS" ] || { echo "NO_JOBS_DIR"; exit 0; }
+  ls -1t "$JOBS" 2>/dev/null | head -n1 || true
+}
+
+show() {
+  jid="$(last)"
+  [ -z "${jid:-}" ] && { echo "NO_JOBS"; exit 0; }
+  echo "JOB=$jid"
+  echo "---- result.json ----"
+  sed -n "1,200p" "$JOBS/$jid/result.json" 2>/dev/null || echo "NO_RESULT"
+  echo "---- agent_response.json ----"
+  sed -n "1,200p" "$JOBS/$jid/agent_response.json" 2>/dev/null || echo "NO_AGENT_RESPONSE"
+  echo "---- patch.diff ----"
+  sed -n "1,200p" "$JOBS/$jid/patch.diff" 2>/dev/null || echo "NO_PATCH"
+}
+
+tailf() {
+  mkdir -p "$RUNTIME"
+  touch "$RUNTIME/autopilot.log"
+  tail -f "$RUNTIME/autopilot.log"
+}
+
+merge_last() {
+  jid="$(last)"
+  [ -z "${jid:-}" ] && { echo "NO_JOBS"; exit 1; }
+  branch="$(python3 - <<PY
+import json, os
+p=os.path.expanduser("$JOBS/$jid/result.json")
+try:
+  d=json.load(open(p))
+  print(d.get("branch",""))
+except:
+  print("")
+PY
+)"
+  [ -z "${branch:-}" ] && { echo "NO_BRANCH_IN_RESULT"; exit 1; }
+
+  cd "$AIOS"
+  git checkout main >/dev/null
+  git merge "$branch" --no-edit
+  echo "MERGED:$branch"
+}
+
+pause() { sudo systemctl stop aios-autopilot.timer; echo "PAUSED"; }
+resume() { sudo systemctl start aios-autopilot.timer; echo "RESUMED"; }
+tick() { sudo systemctl start aios-autopilot.service; echo "TICK_OK"; }
+
+help() {
+  cat <<EOF
+aiosctl q "objetivo"      -> enfileirar
+aiosctl lsq               -> ver fila
+aiosctl status            -> status timer
+aiosctl tick              -> forçar 1 execução agora
+aiosctl last              -> último job_id
+aiosctl show              -> ver último job (result/agent/patch)
+aiosctl merge-last        -> merge do último branch para main
+aiosctl tail              -> seguir autopilot.log
+aiosctl pause|resume      -> parar/retomar timer
+EOF
+}
+
+case "$cmd" in
+  q) queue "$@" ;;
+  lsq) lsq ;;
+  status) status ;;
+  tick) tick ;;
+  last) last ;;
+  show) show ;;
+  merge-last) merge_last ;;
+  tail) tailf ;;
+  pause) pause ;;
+  resume) resume ;;
+  help|*) help ;;
+esac
