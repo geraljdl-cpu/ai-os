@@ -22,6 +22,7 @@ def cmd_dev(args):
         "request": args.request,
         "base_branch": args.base_branch,
         "mode": args.mode,
+        "ai": True,
     }
     out = http_post_json(f"{args.url}/jobs/dev", payload, timeout=args.timeout)
     print(json.dumps(out, indent=2, ensure_ascii=False))
