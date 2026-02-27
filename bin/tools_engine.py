@@ -87,6 +87,38 @@ def tool_git_status(cwd=None):
     r = subprocess.run("git status --short", shell=True, cwd=work_dir, capture_output=True, text=True)
     return {"ok": True, "output": r.stdout.strip()}
 
+# Tools que requerem aprovação humana antes de executar
+APPROVAL_REQUIRED = {
+    'toc_invoice_create',
+    'toc_customer_create',
+    'git_commit',
+    'write_file',
+}
+
+APPROVAL_FILE = AIOS_ROOT / 'runtime' / 'pending_approvals.json'
+
+def request_approval(tool, inp, job_id=''):
+    import json as _j
+    approvals = []
+    if APPROVAL_FILE.exists():
+        try: approvals = _j.loads(APPROVAL_FILE.read_text())
+        except: approvals = []
+    entry = {'id': f'apr_{int(__import__("time").time())}', 'tool': tool, 'input': inp, 'job_id': job_id, 'status': 'pending'}
+    approvals.append(entry)
+    APPROVAL_FILE.write_text(_j.dumps(approvals, indent=2, ensure_ascii=False))
+    log(f'APPROVAL_REQUIRED tool={tool} id={entry["id"]}')
+    return entry
+
+def check_approved(tool, inp):
+    import json as _j
+    if not APPROVAL_FILE.exists(): return False
+    try: approvals = _j.loads(APPROVAL_FILE.read_text())
+    except: return False
+    for a in approvals:
+        if a.get('tool') == tool and a.get('status') == 'approved' and a.get('input') == inp:
+            return True
+    return False
+
 TOOLS = {
     "bash_safe":   lambda p: tool_bash_safe(p.get("cmd",""), p.get("cwd")),
     "bash":        lambda p: tool_bash_safe(p.get("cmd",""), p.get("cwd")),
@@ -109,6 +141,9 @@ def run(steps, log_path=None):
         fn = TOOLS.get(tool)
         if not fn:
             result = {"ok": False, "error": f"unknown tool: {tool}"}
+        elif tool in APPROVAL_REQUIRED and AIOS_MODE == "live" and not check_approved(tool, inp):
+            entry = request_approval(tool, inp)
+            result = {"ok": False, "pending_approval": True, "approval_id": entry["id"], "msg": f"Tool {tool} requer aprovacao humana."}
         else:
             try:
                 result = fn(inp)
