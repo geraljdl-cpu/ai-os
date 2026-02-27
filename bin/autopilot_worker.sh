@@ -1,87 +1,83 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$HOME/ai-os"
-BACKLOG="$ROOT/runtime/backlog.json"
-JOBS_DIR="$ROOT/runtime/jobs"
-AR_URL="http://127.0.0.1:5679"
+AIOS_ROOT="${AIOS_ROOT:-$HOME/ai-os}"
+BACKLOG="$AIOS_ROOT/runtime/backlog.json"
+JOBS_DIR="$AIOS_ROOT/runtime/jobs"
+LOCK_FILE="$AIOS_ROOT/runtime/autopilot.lock"
+AIOS_MODE="${AIOS_MODE:-simulate}"
 
-mkdir -p "$JOBS_DIR"
+mkdir -p "$JOBS_DIR" "$AIOS_ROOT/runtime"
 
-GOAL="$(python3 - <<'PY_INNER'
-import json, os, sys
-p=os.path.expanduser("~/ai-os/runtime/backlog.json")
-d=json.load(open(p)) if os.path.exists(p) else {"tasks":[]}
-tasks=d.get("tasks",[])
-if not tasks:
-    print("")
-    sys.exit(0)
-goal=(tasks[0].get("goal","") or "").strip()
-d["tasks"]=tasks[1:]
-json.dump(d, open(p,"w"), indent=2, ensure_ascii=False)
-print(goal)
-PY_INNER
-)"
-
-if [ -z "${GOAL:-}" ]; then
-  echo "Running goal: IDLE"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "[autopilot] already running. Exiting."
   exit 0
 fi
+trap 'flock -u 9 || true; rm -f "$LOCK_FILE"' EXIT
 
-echo "Running goal: $GOAL"
+echo "[autopilot] mode=$AIOS_MODE started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-JOB_ID="$(date +%Y%m%d_%H%M%S)_$(openssl rand -hex 4)"
-JOB_PATH="$JOBS_DIR/$JOB_ID"
-mkdir -p "$JOB_PATH"
+GOAL=$(python3 -c "
+import json,sys,os
+p=os.path.expanduser('$BACKLOG')
+if not os.path.exists(p): sys.exit(2)
+d=json.load(open(p))
+tasks=d.get('tasks',[])
+pending=[t for t in tasks if t.get('status','pending')=='pending']
+if not pending: sys.exit(2)
+print(pending[0].get('goal',''))
+" 2>/dev/null) || { echo "[autopilot] no pending tasks."; exit 0; }
 
-TOKEN="$(docker exec agent-router sh -lc 'echo -n $AIOS_TOKEN' 2>/dev/null || true)"
-if [ -z "${TOKEN:-}" ]; then
-  echo "ERROR: AIOS_TOKEN missing" > "$JOB_PATH/log.txt"
+JOB_ID="job_$(date +%s)"
+mkdir -p "$JOBS_DIR/$JOB_ID"
+EXEC_LOG="$JOBS_DIR/$JOB_ID/exec.log"
+
+echo "[autopilot] job=$JOB_ID goal=$GOAL"
+echo "JOB=$JOB_ID GOAL=$GOAL MODE=$AIOS_MODE" > "$EXEC_LOG"
+
+DENIED=("rm -rf" "dd " "mkfs" "shutdown" "reboot" "sudo" "chmod 777")
+
+is_allowed(){
+  local cmd="$1"
+  for p in "${DENIED[@]}"; do
+    if echo "$cmd" | grep -qF "$p"; then
+      echo "[BLOCKED] $p" | tee -a "$EXEC_LOG"
+      return 1
+    fi
+  done
+  return 0
+}
+
+RESPONSE=$(curl -sf -X POST http://localhost:7070/agent \
+  -H "Content-Type: application/json" \
+  -d "{\"goal\": \"$GOAL\"}" 2>&1) || {
+  echo "[autopilot] agent unreachable" | tee -a "$EXEC_LOG"
   exit 1
-fi
+}
 
-REQ_JSON="$(python3 - <<PY_INNER
-import json
-print(json.dumps({"chatInput": """$GOAL""", "mode":"openai"}, ensure_ascii=False))
-PY_INNER
-)"
+echo "$RESPONSE" > "$JOBS_DIR/$JOB_ID/agent_response.json"
 
-RESP="$(curl -sS -X POST "$AR_URL/agent"   -H "Content-Type: application/json"   -H "X-AIOS-TOKEN: $TOKEN"   -d "$REQ_JSON" || true)"
+STEPS=$(echo "$RESPONSE" | python3 -c "
+import json,sys
+r=json.load(sys.stdin)
+steps=r.get('steps',r.get('response',{}).get('steps',[]))
+for s in steps:
+    inp=s.get('input',{})
+    cmd=inp.get('cmd','') if isinstance(inp,dict) else s.get('cmd','')
+    if cmd: print(cmd)
+" 2>/dev/null)
 
-echo "$RESP" > "$JOB_PATH/agent_response.json"
+while IFS= read -r cmd; do
+  [[ -z "$cmd" ]] && continue
+  echo "[step] $cmd" | tee -a "$EXEC_LOG"
+  if ! is_allowed "$cmd"; then continue; fi
+  if [[ "$AIOS_MODE" == "simulate" ]]; then
+    echo "[SIMULATE] $cmd" | tee -a "$EXEC_LOG"
+  else
+    out=$(cd "$AIOS_ROOT" && eval "$cmd" 2>&1) && code=$? || code=$?
+    echo "[exit=$code] $out" | tee -a "$EXEC_LOG"
+  fi
+done <<< "$STEPS"
 
-# Execute steps locally on HOST
-python3 - "$ROOT" "$JOB_PATH" <<'PY_INNER'
-import json, sys, pathlib, subprocess, shlex
-
-root = pathlib.Path(sys.argv[1])
-job_path = pathlib.Path(sys.argv[2])
-j = json.loads((job_path/"agent_response.json").read_text(encoding="utf-8"))
-steps = j.get("steps") or []
-
-lines = []
-for i, st in enumerate(steps, start=1):
-    tool = st.get("tool")
-    if tool != "bash":
-        lines.append(f"SKIP step{i}: tool={tool}")
-        continue
-    cmd = (st.get("input") or {}).get("cmd","").strip()
-    if not cmd:
-        lines.append(f"SKIP step{i}: empty cmd")
-        continue
-
-    # run inside repo root
-    try:
-        p = subprocess.run(["bash","-lc",cmd], cwd=str(root), capture_output=True, text=True)
-        lines.append(f"RUN step{i}: {cmd}")
-        lines.append(f"code={p.returncode}")
-        if p.stdout: lines.append(p.stdout.rstrip())
-        if p.stderr: lines.append(p.stderr.rstrip())
-    except Exception as e:
-        lines.append(f"FAIL step{i}: {cmd} :: {e}")
-
-(job_path/"exec.log.txt").write_text("\n".join(lines)+"\n", encoding="utf-8")
-PY_INNER
-
-echo "JOB_ID=$JOB_ID" > "$JOB_PATH/log.txt"
-echo "DONE"
+echo "[autopilot] $JOB_ID done" | tee -a "$EXEC_LOG"
