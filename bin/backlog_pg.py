@@ -193,7 +193,7 @@ def get_next_task() -> dict | None:
         return picked
 
 
-def update_task(task_id: str, **fields) -> dict | None:(task_id: str, **fields) -> dict | None:(task_id: str, **fields) -> dict | None:
+def update_task(task_id: str, **fields) -> dict | None:
     # normaliza field names (backlog.py compat)
     if "type" in fields:
         fields["task_type"] = fields.pop("type")
