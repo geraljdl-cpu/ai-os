@@ -54,6 +54,7 @@ RESPONSE=$(curl -sf -X POST http://127.0.0.1:5679/agent \
   -H "X-AIOS-TOKEN: 6f5e83679313d999d4d36280f6d00a200130a55e63b2e2c6909dab3ecadbe377" \
   -d "{\"chatInput\": \"$GOAL\", \"mode\": \"openai\"}" 2>&1) || {
   echo "[autopilot] agent unreachable" | tee -a "$EXEC_LOG"
+  python3 "$AIOS_ROOT/bin/alerting.py" worker_crash "$JOB_ID" 2>/dev/null || true
   exit 0
 }
 
@@ -68,3 +69,17 @@ print(json.dumps({'steps':steps,'log_path':'$EXEC_LOG'}))
 " | AIOS_MODE="$AIOS_MODE" AIOS_ROOT="$AIOS_ROOT" python3 "$AIOS_ROOT/bin/tools_engine.py" | tee -a "$EXEC_LOG"
 
 echo "[autopilot] $JOB_ID done" | tee -a "$EXEC_LOG"
+
+# Alerta se job falhou >3x
+ATTEMPTS=$(python3 -c "
+import json,os
+p=os.path.expanduser('$BACKLOG')
+try:
+    d=json.load(open(p))
+    t=next((t for t in d.get('tasks',[]) if t.get('goal','')=='''$GOAL'''), None)
+    print(t.get('attempts',0) if t else 0)
+except: print(0)
+" 2>/dev/null || echo 0)
+if [ "${ATTEMPTS:-0}" -ge 3 ]; then
+  python3 "$AIOS_ROOT/bin/alerting.py" job_failed "$JOB_ID" "$ATTEMPTS" 2>/dev/null || true
+fi

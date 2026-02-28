@@ -38,3 +38,13 @@ runtime/autopilot/
 .env.toconline
 .toc_token.json
 .toc_token_expiry
+
+# TLS — chaves privadas nunca vão para git
+tls/*.pem
+tls/*.key
+
+# Caddy binary e runtime
+bin/caddy
+runtime/secrets.json
+runtime/pending_approvals.json
+runtime/caddy_access.log

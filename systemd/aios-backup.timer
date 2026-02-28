@@ -1,0 +1,11 @@
+[Unit]
+Description=AI-OS Postgres Backup — diário às 3h UTC
+Requires=aios-backup.service
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+AccuracySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

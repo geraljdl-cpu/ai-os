@@ -1,0 +1,12 @@
+[Unit]
+Description=AI-OS Postgres Backup
+After=network.target
+
+[Service]
+Type=oneshot
+User=jdl
+WorkingDirectory=/home/jdl/ai-os
+Environment=AIOS_ROOT=/home/jdl/ai-os
+ExecStart=python3 /home/jdl/ai-os/bin/backup_pg.py backup
+StandardOutput=journal
+StandardError=journal

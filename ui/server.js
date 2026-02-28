@@ -34,6 +34,21 @@ function verifyJWT(token) {
 
 app.use(express.json({ limit: '1mb' }));
 
+// --- Rate limiting em memória: 100 req/min por IP ---
+const _rl = new Map();
+app.use((req, res, next) => {
+  const ip  = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const win = 60_000;
+  let   rec = _rl.get(ip);
+  if (!rec || now - rec.start > win) { rec = { start: now, count: 0 }; _rl.set(ip, rec); }
+  rec.count++;
+  if (rec.count > 100) {
+    return res.status(429).json({ ok: false, error: 'rate limit exceeded (100 req/min)' });
+  }
+  next();
+});
+
 // --- Auth middleware (aplica a todas as rotas /api/* excepto /api/auth/login) ---
 const AUTH_EXEMPT = new Set(['/auth/login']);
 app.use('/api', (req, res, next) => {

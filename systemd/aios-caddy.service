@@ -1,0 +1,19 @@
+[Unit]
+Description=AI-OS Caddy Reverse Proxy (HTTPS)
+After=network.target
+
+[Service]
+Type=simple
+User=jdl
+WorkingDirectory=/home/jdl/ai-os
+ExecStart=/home/jdl/ai-os/bin/caddy run --config /home/jdl/ai-os/Caddyfile.aios --adapter caddyfile
+ExecReload=/home/jdl/ai-os/bin/caddy reload --config /home/jdl/ai-os/Caddyfile.aios --adapter caddyfile
+Restart=on-failure
+RestartSec=5s
+Environment=HOME=/home/jdl
+Environment=XDG_DATA_HOME=/home/jdl/.local/share
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

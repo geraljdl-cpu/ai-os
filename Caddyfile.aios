@@ -1,0 +1,40 @@
+{
+	# Admin API só local
+	admin localhost:2019
+
+	# Sem gestão automática TLS (usamos cert próprio)
+	auto_https off
+
+	# Logs
+	log {
+		output file /home/jdl/ai-os/runtime/caddy_access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+		format json
+	}
+}
+
+# HTTPS com TLS self-signed (WSL/dev)
+localhost:8443 {
+	tls /home/jdl/ai-os/tls/aios-cert.pem /home/jdl/ai-os/tls/aios-key.pem
+
+	# Headers de segurança
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Content-Security-Policy "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src 'self';"
+		-Server
+	}
+
+	# Proxy para o Express (porta 3000, com rate limiting embutido)
+	reverse_proxy localhost:3000
+}
+
+# Redirect HTTP 8081 → HTTPS 8443
+localhost:8081 {
+	redir https://localhost:8443{uri} permanent
+}
