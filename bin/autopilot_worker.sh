@@ -64,14 +64,22 @@ RESPONSE=$(curl -sf -X POST http://127.0.0.1:5679/agent \
 echo "$RESPONSE" > "$JOBS_DIR/$JOB_ID/agent_response.json"
 
 # Run steps via tools engine
+set +e
 echo "$RESPONSE" | python3 -c "
 import json,sys
 r=json.load(sys.stdin)
 steps=r.get('steps',[])
 print(json.dumps({'steps':steps,'log_path':'$EXEC_LOG'}))
 " | AIOS_MODE="$AIOS_MODE" AIOS_ROOT="$AIOS_ROOT" python3 "$AIOS_ROOT/bin/tools_engine.py" | tee -a "$EXEC_LOG"
+PIPE_RC=${PIPESTATUS[2]:-1}
+set -e
 
 echo "[autopilot] $JOB_ID done" | tee -a "$EXEC_LOG"
+
+python3 - <<PY 2>/dev/null || true
+from bin import backlog_pg
+backlog_pg.update_task("$TASK_ID", status=("done" if int("$PIPE_RC")==0 else "failed"))
+PY
 
 # Alerta se job falhou >3x
 ATTEMPTS=$(python3 -c "
