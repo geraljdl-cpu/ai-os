@@ -35,3 +35,6 @@ ui/**/*.bak*
 # runtime autopilot
 runtime/autopilot/
 .secrets/
+.env.toconline
+.toc_token.json
+.toc_token_expiry
