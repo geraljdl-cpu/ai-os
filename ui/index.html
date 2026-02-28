@@ -219,6 +219,27 @@ body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
           <div class="kpi"><div class="kpi-lbl">Estado</div><div class="kpi-val green" id="sState">—</div></div>
         </div>
       </div>
+      <div>
+        <div class="sec-label" style="display:flex;justify-content:space-between;align-items:center">
+          <span>DMX / Art-Net</span>
+          <span id="dmxBadge" class="badge pending" style="font-size:8px">OFF</span>
+        </div>
+        <div style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap">
+          <button class="btn sm" onclick="dmxScene('red')"    style="color:#ff4466">R</button>
+          <button class="btn sm" onclick="dmxScene('green')"  style="color:#00ff9d">G</button>
+          <button class="btn sm" onclick="dmxScene('blue')"   style="color:#4f8eff">B</button>
+          <button class="btn sm" onclick="dmxScene('white')"  style="color:#e2e8f8">W</button>
+          <button class="btn sm" onclick="dmxScene('warm')"   style="color:#ffb800">WW</button>
+          <button class="btn sm" onclick="dmxScene('blackout')"style="color:var(--dim)">BLK</button>
+        </div>
+        <div id="dmxRgbBar" style="height:6px;border-radius:3px;background:rgba(0,0,0,.4);margin-bottom:6px;transition:.4s"></div>
+        <div class="kpi-grid">
+          <div class="kpi"><div class="kpi-lbl">R</div><div class="kpi-val red"   id="dmxR">0</div></div>
+          <div class="kpi"><div class="kpi-lbl">G</div><div class="kpi-val green" id="dmxG">0</div></div>
+          <div class="kpi"><div class="kpi-lbl">B</div><div class="kpi-val blue"  id="dmxB">0</div></div>
+          <div class="kpi"><div class="kpi-lbl">DIM</div><div class="kpi-val amber" id="dmxDim">0</div></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -471,6 +492,31 @@ async function loadSensors(){
 }
 setInterval(loadSensors, 3000);
 loadSensors();
+
+// DMX
+async function loadDMX(){
+  try{
+    const d=await api('/api/dmx');
+    if(!d.ok) return;
+    $('dmxR').textContent   = d.R   ?? 0;
+    $('dmxG').textContent   = d.G   ?? 0;
+    $('dmxB').textContent   = d.B   ?? 0;
+    $('dmxDim').textContent = d.dimmer ?? 0;
+    const r=d.R||0, g=d.G||0, b=d.B||0;
+    $('dmxRgbBar').style.background = `rgb(${r},${g},${b})`;
+    const badge=$('dmxBadge');
+    if(r===0&&g===0&&b===0){
+      badge.textContent='BLACKOUT'; badge.className='badge pending';
+    } else {
+      badge.textContent='LIVE'; badge.className='badge done';
+    }
+  }catch(e){}
+}
+async function dmxScene(name){
+  try{ await api('/api/dmx/scene',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene:name})}); loadDMX(); }catch(e){}
+}
+setInterval(loadDMX, 3000);
+loadDMX();
 
 setInterval(refresh,4000); setInterval(loadLogs,10000);
 refresh(); loadLogs();

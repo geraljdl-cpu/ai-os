@@ -162,6 +162,33 @@ app.get('/api/sensors', (req, res) => {
   } catch (e) { res.json({ ok: false, error: String(e) }); }
 });
 
+// DMX / Art-Net state (lê directamente o JSON — sem dependência do simulador)
+const DMX_STATE = HOME + '/ai-os/runtime/dmx_state.json';
+app.get('/api/dmx', (req, res) => {
+  try {
+    const raw  = JSON.parse(fs.readFileSync(DMX_STATE));
+    const uni  = raw.universes && raw.universes['0'] ? raw.universes['0'] : Array(512).fill(0);
+    res.json({
+      ok: true,
+      R:      uni[0] || 0,
+      G:      uni[1] || 0,
+      B:      uni[2] || 0,
+      dimmer: uni[3] || 0,
+      ch1_8:  uni.slice(0, 8),
+      active: uni.some(v => v > 0),
+      ts:     raw.ts || 0,
+    });
+  } catch { res.json({ ok: false, R:0, G:0, B:0, dimmer:0, active:false }); }
+});
+app.post('/api/dmx/scene', (req, res) => {
+  try {
+    const { scene } = req.body || {};
+    if (!scene) return res.status(400).json({ ok: false, error: 'scene required' });
+    const out = execSync(`python3 /home/jdl/ai-os/bin/tools_dmx.py dmx_scene ${JSON.stringify(JSON.stringify({ scene }))}`, { timeout: 5000 });
+    res.json(JSON.parse(out.toString()));
+  } catch (e) { res.json({ ok: false, error: String(e) }); }
+});
+
 // Approvals
 const APPROVALS = HOME + '/ai-os/runtime/pending_approvals.json';
 app.get('/api/approvals', (req, res) => {

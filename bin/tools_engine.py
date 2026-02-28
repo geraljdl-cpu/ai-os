@@ -174,6 +174,16 @@ try:
 except Exception as e:
     log(f"factory tools not loaded: {e}")
 
+# DMX / Art-Net tools integration
+try:
+    _dspec = importlib.util.spec_from_file_location("tools_dmx", os.path.join(AIOS_ROOT, "bin/tools_dmx.py"))
+    _dmx = importlib.util.module_from_spec(_dspec)
+    _dspec.loader.exec_module(_dmx)
+    TOOLS.update({k: (lambda f: lambda p: f(p))(v) for k,v in _dmx.TOOLS.items()})
+    log("dmx tools loaded: " + str(list(_dmx.TOOLS.keys())))
+except Exception as e:
+    log(f"dmx tools not loaded: {e}")
+
 if __name__ == "__main__":
     data = json.load(sys.stdin)
     steps = data if isinstance(data, list) else data.get("steps", [])
