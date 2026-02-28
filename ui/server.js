@@ -151,3 +151,5 @@ app.get('/api/finance/invoices', (req,res)=>{
     res.json(JSON.parse(out.toString()));
   }catch(e){ res.json({ok:false,error:String(e)}); }
 });
+
+app.post('/api/mode',(req,res)=>res.json({ok:true}));
