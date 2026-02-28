@@ -1,13 +1,77 @@
 const express = require("express");
-const path = require('path');
-const fs = require("fs");
+const path    = require('path');
+const fs      = require("fs");
+const crypto  = require("crypto");
 const { exec } = require("child_process");
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 
+// --- Carrega ~/.env.db para JWT_SECRET ---
+let _JWT_SECRET = 'aios-jwt-secret-2026-change-in-prod';
+try {
+  const envDb = fs.readFileSync(require('os').homedir() + '/.env.db', 'utf8');
+  envDb.split('\n').forEach(line => {
+    const [k, v] = line.split('=');
+    if (k && v && k.trim() === 'JWT_SECRET') _JWT_SECRET = v.trim();
+  });
+} catch(e) {}
+const JWT_SECRET = _JWT_SECRET;
+
+// --- JWT verification (pure Node.js, sem npm extra) ---
+function _b64url(b64) { return b64.replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_'); }
+function verifyJWT(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [h, p, sig] = parts;
+    const expected = _b64url(crypto.createHmac('sha256', JWT_SECRET).update(h+'.'+p).digest('base64'));
+    if (sig !== expected) return null;
+    const payload = JSON.parse(Buffer.from(p, 'base64').toString('utf8'));
+    if (payload.exp && Math.floor(Date.now()/1000) > payload.exp) return null;
+    return payload;
+  } catch(e) { return null; }
+}
+
+// --- Auth middleware (aplica a todas as rotas /api/* excepto /api/auth/login) ---
+const AUTH_EXEMPT = new Set(['/api/auth/login']);
+app.use('/api', (req, res, next) => {
+  if (AUTH_EXEMPT.has(req.path)) return next();
+  const auth  = req.headers['authorization'] || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (!token) return res.status(401).json({ ok: false, error: 'unauthorized' });
+  const user = verifyJWT(token);
+  if (!user) return res.status(401).json({ ok: false, error: 'token inválido ou expirado' });
+  req.user = user;
+  next();
+});
 
 // --- UI -> Agent API proxy ---
 app.use(express.json({ limit: "1mb" }));
+
+// --- Auth endpoints ---
+const { execSync } = require('child_process');
+app.post('/api/auth/login', (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    if (!username || !password) return res.status(400).json({ ok: false, error: 'username e password obrigatórios' });
+    const safe_u = JSON.stringify(username);
+    const safe_p = JSON.stringify(password);
+    const out = execSync(`python3 /home/jdl/ai-os/bin/auth.py login ${safe_u} ${safe_p}`, { timeout: 8000 });
+    res.json(JSON.parse(out.toString()));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+app.get('/api/users', (req, res) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ ok: false, error: 'apenas admin' });
+  try {
+    const out = execSync('python3 /home/jdl/ai-os/bin/auth.py users', { timeout: 5000 });
+    res.json(JSON.parse(out.toString()));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.get('/api/auth/me', (req, res) => {
+  res.json({ ok: true, user: req.user });
+});
 
 
 // ---- OLLAMA PROXY ----
@@ -136,7 +200,6 @@ app.get("/api/logs",(req,res)=>{
 });
 
 // Finance routes — Toconline
-const { execSync } = require('child_process');
 app.get('/api/finance/customers', (req,res)=>{
   try{
     const limit = req.query.limit || 10;

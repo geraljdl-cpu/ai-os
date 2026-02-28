@@ -143,6 +143,29 @@ body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
 @keyframes mpulse{0%,100%{box-shadow:0 0 0 0 rgba(255,68,102,.4)}50%{box-shadow:0 0 0 8px rgba(255,68,102,0)}}
 
 ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:rgba(100,150,255,.2);border-radius:2px}
+
+/* LOGIN OVERLAY */
+.login-overlay{position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;
+  background:var(--bg);backdrop-filter:blur(20px)}
+.login-overlay.hidden{display:none}
+.login-box{width:340px;padding:36px 32px;border-radius:20px;border:1px solid var(--edge2);
+  background:rgba(8,13,26,.9);display:flex;flex-direction:column;gap:18px;
+  box-shadow:0 0 80px rgba(79,142,255,.08)}
+.login-logo{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--cyan);letter-spacing:3px;text-align:center}
+.login-sub{font-size:11px;color:var(--dim);text-align:center;font-family:var(--mono);letter-spacing:1px}
+.login-field{display:flex;flex-direction:column;gap:5px}
+.login-field label{font-size:10px;color:var(--dim);font-family:var(--mono);text-transform:uppercase;letter-spacing:1px}
+.login-field input{padding:10px 14px;border-radius:10px;border:1px solid var(--edge2);background:rgba(0,0,0,.4);
+  color:var(--ink);font-family:var(--sans);font-size:14px;outline:none;transition:.15s}
+.login-field input:focus{border-color:rgba(0,212,255,.5)}
+.login-btn{padding:12px;border-radius:10px;border:1px solid rgba(0,255,157,.35);
+  background:rgba(0,255,157,.08);color:var(--green);font-family:var(--sans);font-weight:700;
+  font-size:14px;cursor:pointer;transition:.15s;letter-spacing:.5px}
+.login-btn:hover{background:rgba(0,255,157,.16)}
+.login-err{font-size:11px;color:var(--red);font-family:var(--mono);text-align:center;min-height:16px}
+.user-pill{display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;
+  border:1px solid var(--edge2);background:rgba(255,255,255,.03);font-family:var(--mono);font-size:10px;color:var(--dim)}
+.user-pill strong{color:var(--cyan)}
 </style>
 </head>
 <body>
@@ -154,10 +177,12 @@ body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
     <span id="modeTag" style="font-family:var(--mono);font-size:10px;color:var(--amber);letter-spacing:1px">SIM</span>
   </div>
   <div class="topbar-right">
+    <div class="user-pill" id="userPill" style="display:none"><strong id="userLabel">—</strong><span id="roleLabel" style="color:var(--dim)"></span></div>
     <button class="tb-btn" onclick="openFS()">⛶</button><button class="tb-btn" id="hideRobotBtn" onclick="toggleRobot()">🤖</button><button class="tb-btn on" id="ttsBtn" onclick="toggleTTS()">🔊 VOZ</button>
     <button class="tb-btn" id="micBtn" onclick="toggleSTT()">🎤</button>
     <button class="tb-btn sim" id="modeBtn" onclick="toggleMode()">SIM</button>
     <button class="tb-btn" onclick="runWorker()">▶ RUN</button>
+    <button class="tb-btn" id="logoutBtn" style="display:none;color:var(--red)" onclick="logout()">↩ SAIR</button>
   </div>
 </div>
 
@@ -292,6 +317,24 @@ body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
   </div>
 </div>
 
+<!-- LOGIN OVERLAY -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-box">
+    <div class="login-logo">AI — OS</div>
+    <div class="login-sub">INDUSTRIAL OPERATING SYSTEM</div>
+    <div class="login-field">
+      <label>Utilizador</label>
+      <input id="loginUser" type="text" placeholder="admin" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <div class="login-field">
+      <label>Password</label>
+      <input id="loginPass" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <button class="login-btn" id="loginBtn" onclick="doLogin()">ENTRAR</button>
+    <div class="login-err" id="loginErr"></div>
+  </div>
+</div>
+
 <!-- FULLSCREEN -->
 <div class="fs-overlay" id="fsOverlay">
   <div class="fs-robot">
@@ -316,7 +359,68 @@ body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
 
 <script>
 const $ = id => document.getElementById(id);
-const api = async (url, o={}) => { const r = await fetch(url, o); return r.json(); };
+
+// ── AUTH ────────────────────────────────────────────────────────────────────
+function _token(){ return localStorage.getItem('aios_token'); }
+
+const api = async (url, o={}) => {
+  const tok = _token();
+  if(tok) o.headers = {'Authorization':'Bearer '+tok, ...(o.headers||{})};
+  const r = await fetch(url, o);
+  if(r.status === 401){ showLogin(); return {}; }
+  return r.json();
+};
+
+function showLogin(){
+  $('loginOverlay').classList.remove('hidden');
+  $('userPill').style.display='none';
+  $('logoutBtn').style.display='none';
+}
+function hideLogin(){
+  $('loginOverlay').classList.add('hidden');
+  $('userPill').style.display='';
+  $('logoutBtn').style.display='';
+}
+
+async function doLogin(){
+  const u=$('loginUser').value.trim(), p=$('loginPass').value;
+  if(!u||!p){ $('loginErr').textContent='Preenche os campos'; return; }
+  $('loginBtn').textContent='A entrar...'; $('loginErr').textContent='';
+  try{
+    const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});
+    const j=await r.json();
+    if(!j.ok){ $('loginErr').textContent=j.error||'Erro'; $('loginBtn').textContent='ENTRAR'; return; }
+    localStorage.setItem('aios_token', j.token);
+    localStorage.setItem('aios_user', JSON.stringify({username:j.username,role:j.role}));
+    $('userLabel').textContent=j.username;
+    $('roleLabel').textContent=' ['+j.role+']';
+    hideLogin();
+    refresh(); loadLogs(); loadApprovals(); loadSensors(); loadDMX();
+  }catch(e){ $('loginErr').textContent='Erro de ligação'; }
+  $('loginBtn').textContent='ENTRAR';
+}
+
+function logout(){
+  localStorage.removeItem('aios_token');
+  localStorage.removeItem('aios_user');
+  $('loginPass').value=''; $('loginErr').textContent='';
+  showLogin();
+}
+
+function checkAuth(){
+  const tok=_token();
+  if(!tok){ showLogin(); return; }
+  // verifica localmente se token parece válido (payload JWT)
+  try{
+    const payload=JSON.parse(atob(tok.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+    if(payload.exp && Math.floor(Date.now()/1000) > payload.exp){ logout(); return; }
+    const u=JSON.parse(localStorage.getItem('aios_user')||'{}');
+    $('userLabel').textContent=u.username||payload.username||'?';
+    $('roleLabel').textContent=u.role?' ['+u.role+']':'';
+    hideLogin();
+  }catch(e){ logout(); }
+}
+checkAuth();
 
 // MODE
 let mode = localStorage.getItem('aios_mode') || 'simulate';
@@ -326,7 +430,7 @@ function applyMode(){
   $('modeBtn').className = 'tb-btn ' + (s ? 'sim' : 'live');
   $('modeTag').textContent = s ? 'SIM' : 'LIVE';
   $('modeTag').style.color = s ? 'var(--amber)' : 'var(--green)';
-  fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})}).catch(()=>{});
+  api('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})}).catch(()=>{});
 }
 function toggleMode(){ mode = mode==='simulate'?'live':'simulate'; localStorage.setItem('aios_mode',mode); applyMode(); }
 applyMode();
