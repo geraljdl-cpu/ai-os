@@ -165,15 +165,35 @@ def get_next_task() -> dict | None:
         finally:
             s.close()
     except Exception:
-        tasks = [_j_to_dict(t) for t in _j_load().get("tasks", [])
-                 if t.get("status") == "pending"]
-        if not tasks:
+        data = _j_load()
+        tasks = data.get("tasks", [])
+
+        # filtra pending e escolhe pelo mesmo critério
+        pending = []
+        for t in tasks:
+            if (t.get("status") or "pending") == "pending":
+                pending.append(_j_to_dict(t))
+
+        if not pending:
             return None
-        return sorted(tasks, key=lambda x: (x.get("priority", 999),
-                                             x.get("created_at", 0)))[0]
+
+        picked = sorted(pending, key=lambda x: (x.get("priority", 999), x.get("created_at", 0)))[0]
+        picked_id = picked.get("id")
+
+        # CLAIM/ACK no JSON: marca running e grava
+        now = int(time.time())
+        for t in tasks:
+            if t.get("id") == picked_id:
+                t["status"] = "running"
+                t["updated_at"] = now
+                break
+        data["tasks"] = tasks
+        _j_save(data)
+
+        return picked
 
 
-def update_task(task_id: str, **fields) -> dict | None:
+def update_task(task_id: str, **fields) -> dict | None:(task_id: str, **fields) -> dict | None:(task_id: str, **fields) -> dict | None:
     # normaliza field names (backlog.py compat)
     if "type" in fields:
         fields["task_type"] = fields.pop("type")
