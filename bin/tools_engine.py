@@ -164,6 +164,16 @@ try:
 except Exception as e:
     log(f"finance tools not loaded: {e}")
 
+# Factory / Modbus tools integration
+try:
+    _fspec = importlib.util.spec_from_file_location("tools_factory", os.path.join(AIOS_ROOT, "bin/tools_factory.py"))
+    _fac = importlib.util.module_from_spec(_fspec)
+    _fspec.loader.exec_module(_fac)
+    TOOLS.update({k: (lambda f: lambda p: f(p))(v) for k,v in _fac.TOOLS.items()})
+    log("factory tools loaded: " + str(list(_fac.TOOLS.keys())))
+except Exception as e:
+    log(f"factory tools not loaded: {e}")
+
 if __name__ == "__main__":
     data = json.load(sys.stdin)
     steps = data if isinstance(data, list) else data.get("steps", [])

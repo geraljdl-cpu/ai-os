@@ -1,0 +1,19 @@
+[
+  {
+    "id": "apr_1772234817",
+    "tool": "toc_invoice_create",
+    "input": {
+      "customer_id": 4118326,
+      "lines": [
+        {
+          "description": "Teste",
+          "quantity": 1,
+          "unit_price": 50,
+          "tax_id": 1
+        }
+      ]
+    },
+    "job_id": "",
+    "status": "pending"
+  }
+]

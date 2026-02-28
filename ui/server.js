@@ -153,3 +153,32 @@ app.get('/api/finance/invoices', (req,res)=>{
 });
 
 app.post('/api/mode',(req,res)=>res.json({ok:true}));
+
+// Factory / Modbus sensors
+app.get('/api/sensors', (req, res) => {
+  try {
+    const out = execSync('python3 /home/jdl/ai-os/bin/tools_factory.py factory_status {}', { timeout: 5000 });
+    res.json(JSON.parse(out.toString()));
+  } catch (e) { res.json({ ok: false, error: String(e) }); }
+});
+
+// Approvals
+const APPROVALS = HOME + '/ai-os/runtime/pending_approvals.json';
+app.get('/api/approvals', (req, res) => {
+  try {
+    const data = JSON.parse(fs.readFileSync(APPROVALS));
+    res.json({ approvals: data.filter(a => a.status === 'pending') });
+  } catch { res.json({ approvals: [] }); }
+});
+app.post('/api/approve', (req, res) => {
+  try {
+    const { id } = req.body || {};
+    if (!id) return res.status(400).json({ ok: false, error: 'id required' });
+    const data = JSON.parse(fs.readFileSync(APPROVALS));
+    const item = data.find(a => a.id === id);
+    if (!item) return res.status(404).json({ ok: false, error: 'not found' });
+    item.status = 'approved';
+    fs.writeFileSync(APPROVALS, JSON.stringify(data, null, 2));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e) }); }
+});

@@ -1,0 +1,14 @@
+[Unit]
+Description=AI-OS Modbus TCP Simulator (Fase 4)
+After=network.target
+
+[Service]
+Type=simple
+User=jdl
+ExecStart=/usr/bin/python3 /home/jdl/ai-os/bin/modbus_simulator.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

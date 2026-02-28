@@ -47,7 +47,7 @@ body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
 
 /* AVATAR */
 .av-section{padding:20px;display:flex;flex-direction:column;align-items:center;gap:10px;border-bottom:1px solid var(--edge)}
-.av-wrap{position:relative;width:160px;height:160px;cursor:pointer}
+.av-wrap{position:relative;width:160px;height:160px;cursor:pointer;overflow:hidden}
 .av-wrap canvas{width:100%;height:100%;border-radius:50%;border:1px solid rgba(0,212,255,.2);box-shadow:0 0 40px rgba(79,142,255,.2)}
 .av-ring{position:absolute;inset:-6px;border-radius:50%;border:1px solid rgba(0,212,255,.12);animation:spin 8s linear infinite;pointer-events:none}
 .av-ring2{position:absolute;inset:-14px;border-radius:50%;border:1px dashed rgba(79,142,255,.07);animation:spin 20s linear infinite reverse;pointer-events:none}
@@ -114,6 +114,10 @@ body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
 
 /* BACKLOG */
 .bl-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:var(--r);border:1px solid var(--edge);background:rgba(255,255,255,.01);margin-bottom:5px}
+/* APPROVAL CARD */
+.apr-card{display:flex;flex-direction:column;gap:5px;padding:8px 10px;border-radius:var(--r);border:1px solid rgba(255,68,102,.25);background:rgba(255,68,102,.04);margin-bottom:6px}
+.apr-head{display:flex;align-items:center;gap:6px}
+.apr-pre{font-size:9px;font-family:var(--mono);color:var(--dim);white-space:pre-wrap;word-break:break-all;margin:0;padding:5px 7px;background:rgba(0,0,0,.35);border-radius:6px;max-height:90px;overflow-y:auto}
 .bl-goal{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 
 /* FULLSCREEN */
@@ -189,6 +193,12 @@ body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
       </div>
       <div>
         <div class="sec-label" style="display:flex;justify-content:space-between;align-items:center">
+          <span>Aprovações <span id="aprBadge" style="display:none;background:rgba(255,68,102,.15);border:1px solid rgba(255,68,102,.3);color:var(--red);font-family:var(--mono);font-size:9px;padding:1px 6px;border-radius:5px"></span></span>
+        </div>
+        <div id="aprList"><div class="empty">—</div></div>
+      </div>
+      <div>
+        <div class="sec-label" style="display:flex;justify-content:space-between;align-items:center">
           <span>Toconline</span>
           <div style="display:flex;gap:4px">
             <button class="btn sm" onclick="loadFin('invoices')">FT</button>
@@ -196,6 +206,18 @@ body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
           </div>
         </div>
         <div id="finQuick" class="empty">—</div>
+      </div>
+      <div>
+        <div class="sec-label" style="display:flex;justify-content:space-between;align-items:center">
+          <span>Fábrica — Sensores</span>
+          <span id="factoryBadge" class="badge pending" style="font-size:8px">—</span>
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi"><div class="kpi-lbl">Temp</div><div class="kpi-val blue" id="sTemp">—</div></div>
+          <div class="kpi"><div class="kpi-lbl">Pressão</div><div class="kpi-val blue" id="sPress">—</div></div>
+          <div class="kpi"><div class="kpi-lbl">RPM</div><div class="kpi-val amber" id="sRPM">—</div></div>
+          <div class="kpi"><div class="kpi-lbl">Estado</div><div class="kpi-val green" id="sState">—</div></div>
+        </div>
       </div>
     </div>
   </div>
@@ -430,8 +452,58 @@ async function loadFin(type){
   }catch(e){ el.innerHTML='<div class="empty">Erro</div>'; }
 }
 
+// SENSORS
+async function loadSensors(){
+  try{
+    const d=await api('/api/sensors');
+    if(!d.ok) return;
+    $('sTemp').textContent  = d.temperatura || '—';
+    $('sPress').textContent = d.pressao     || '—';
+    $('sRPM').textContent   = d.rpm !== undefined ? d.rpm : '—';
+    const st = d.status || 'unknown';
+    const stEl = $('sState');
+    stEl.textContent  = st.toUpperCase();
+    stEl.className    = 'kpi-val ' + (st==='alarm'?'red':st==='on'?'green':'amber');
+    const badge = $('factoryBadge');
+    badge.textContent = st.toUpperCase();
+    badge.className   = 'badge ' + (st==='alarm'?'failed':st==='on'?'done':'running');
+  }catch(e){}
+}
+setInterval(loadSensors, 3000);
+loadSensors();
+
 setInterval(refresh,4000); setInterval(loadLogs,10000);
 refresh(); loadLogs();
+
+// APPROVALS
+async function loadApprovals(){
+  try{
+    const d = await api('/api/approvals');
+    const list = (d.approvals||[]);
+    const el = $('aprList'), badge = $('aprBadge');
+    if(!list.length){
+      el.innerHTML='<div class="empty">Sem aprovações pendentes.</div>';
+      badge.style.display='none'; return;
+    }
+    badge.textContent=list.length; badge.style.display='';
+    el.innerHTML=list.map(a=>`
+      <div class="apr-card">
+        <div class="apr-head">
+          <span class="badge running">${a.tool}</span>
+          <span style="flex:1;font-size:9px;font-family:var(--mono);color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.id}</span>
+          <button class="btn sm primary" onclick="approveItem('${a.id}')">✓ Aprovar</button>
+        </div>
+        <pre class="apr-pre">${JSON.stringify(a.input,null,2).substring(0,300)}</pre>
+      </div>`).join('');
+  }catch(e){}
+}
+async function approveItem(id){
+  try{ await api('/api/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); }
+  catch(e){}
+  loadApprovals();
+}
+setInterval(loadApprovals,5000);
+loadApprovals();
 
 // 3D ROBOT
 let botState='idle';
@@ -529,13 +601,13 @@ function initRobot(canvasId, size){
   const canvas=$(canvasId); if(!canvas||!window.THREE) return null;
   canvas.width=size; canvas.height=size;
   const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
-  renderer.setSize(size,size);
+  renderer.setSize(size,size,false); // false = não sobrescreve CSS; deixa width:100%/height:100% controlar o display
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
   renderer.toneMapping=THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure=1.2;
   const scene=new THREE.Scene();
   const camera=new THREE.PerspectiveCamera(40,1,0.1,50);
-  camera.position.set(0,0.3,6.5);
+  camera.position.set(0,-0.1,6.2); // centrado no robô (centro visual y≈-0.1, pés y≈-2.0, antena y≈1.8)
   scene.add(new THREE.AmbientLight(0x112244,2));
   const k=new THREE.DirectionalLight(0x66aaff,4); k.position.set(2,4,3); scene.add(k);
   const f=new THREE.DirectionalLight(0x00ffaa,1.5); f.position.set(-3,0,-2); scene.add(f);
