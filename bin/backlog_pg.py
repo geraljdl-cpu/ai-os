@@ -301,6 +301,42 @@ def get_status() -> dict:
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+
+# --- JSON-forced helpers (source of truth: runtime/backlog.json) ---
+def _j_find_and_update(task_id: str, **fields):
+    d = _j_load()
+    tasks = d.get("tasks", [])
+    hit = None
+    for t in tasks:
+        if t.get("id") == task_id:
+            t.update(fields)
+            hit = t
+            break
+    if hit is not None:
+        _j_save(d)
+    return _j_to_dict(hit) if hit else None
+
+def update_task_json(task_id: str, **fields) -> dict | None:
+    """Atualiza task no backlog.json (ignora Postgres)."""
+    return _j_find_and_update(task_id, **fields)
+
+def get_next_task_json() -> dict | None:
+    """Claim da próxima task pending no backlog.json (ignora Postgres)."""
+    d = _j_load()
+    tasks = d.get("tasks", [])
+    pending = [t for t in tasks if (t.get("status") or "pending") == "pending"]
+    if not pending:
+        return None
+    # escolhe por priority/created_at se existir, senão ordem natural
+    def _k(t):
+        return (int(t.get("priority", 999)), int(t.get("created_at", 0)))
+    picked = sorted(pending, key=_k)[0]
+    picked["status"] = "running"
+    import time as _time
+    picked["updated_at"] = int(_time.time())
+    _j_save(d)
+    return _j_to_dict(picked)
+
 if __name__ == "__main__":
     cmd    = sys.argv[1] if len(sys.argv) > 1 else "status"
     params = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
