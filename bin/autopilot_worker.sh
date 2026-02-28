@@ -18,16 +18,19 @@ trap 'flock -u 9 || true; rm -f "$LOCK_FILE"' EXIT
 
 echo "[autopilot] mode=$AIOS_MODE started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-GOAL=$(python3 -c "
-import json,sys,os
-p=os.path.expanduser('$BACKLOG')
-if not os.path.exists(p): sys.exit(2)
-d=json.load(open(p))
-tasks=d.get('tasks',[])
-pending=[t for t in tasks if t.get('status','pending')=='pending']
-if not pending: sys.exit(2)
-print(pending[0].get('goal',''))
-" 2>/dev/null) || { echo "[autopilot] no pending tasks."; exit 0; }
+  # claim next task (Postgres source of truth)
+  TASK_LINE=$(python3 - <<'PY' 2>/dev/null
+from bin import backlog_pg
+t = backlog_pg.get_next_task()
+if not t:
+    raise SystemExit(2)
+print(f"{t.get('id','')}\t{t.get('goal','')}")
+PY
+  ) || { echo "[autopilot] no pending tasks."; exit 0; }
+
+  TASK_ID="${TASK_LINE%%$'\t'*}"
+  GOAL="${TASK_LINE#*$'\t'}"
+
 
 JOB_ID="job_$(date +%s)"
 mkdir -p "$JOBS_DIR/$JOB_ID"
@@ -51,7 +54,7 @@ is_allowed(){
 
 RESPONSE=$(curl -sf -X POST http://127.0.0.1:5679/agent \
   -H "Content-Type: application/json" \
-  -H "X-AIOS-TOKEN: 6f5e83679313d999d4d36280f6d00a200130a55e63b2e2c6909dab3ecadbe377" \
+  -H "X-AIOS-TOKEN: ${AIOS_TOKEN:-}" \
   -d "{\"chatInput\": \"$GOAL\", \"mode\": \"openai\"}" 2>&1) || {
   echo "[autopilot] agent unreachable" | tee -a "$EXEC_LOG"
   python3 "$AIOS_ROOT/bin/alerting.py" worker_crash "$JOB_ID" 2>/dev/null || true
