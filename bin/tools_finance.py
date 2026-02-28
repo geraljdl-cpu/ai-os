@@ -76,12 +76,12 @@ def tool_toc_customer_create(params):
     body = {"data":{"type":"customers","attributes":{"business_name":params.get("name",""),"tax_registration_number":params.get("nif",""),"email":params.get("email",""),"phone_number":params.get("phone","")}}}
     return toc_post("/api/customers", body)
 
-TOOLS = {"toc_customers":tool_toc_customers,"toc_invoices":tool_toc_invoices,"toc_invoice_create":tool_toc_invoice_create,"toc_customer_create":tool_toc_customer_create}
-
+# EMERGENCY STOP — TOCONLINE COMPLETAMENTE DESATIVADO
+TOOLS = {
+    "toc_customers":     lambda p: {"ok": False, "error": "TOCONLINE DESATIVADO"},
+    "toc_invoices":      lambda p: {"ok": False, "error": "TOCONLINE DESATIVADO"},
+    "toc_invoice_create":lambda p: {"ok": False, "error": "TOCONLINE DESATIVADO"},
+    "toc_customer_create":lambda p: {"ok": False, "error": "TOCONLINE DESATIVADO"},
+}
 if __name__ == "__main__":
-    import sys
-    cmd = sys.argv[1] if len(sys.argv)>1 else "toc_customers"
-    p = json.loads(sys.argv[2]) if len(sys.argv)>2 else {}
-    fn = TOOLS.get(cmd)
-    if not fn: print(json.dumps({"ok":False,"error":"tool desconhecida: "+cmd}))
-    else: print(json.dumps(fn(p), indent=2, ensure_ascii=False))
+    print('{"ok": false, "error": "TOCONLINE DESATIVADO"}')
