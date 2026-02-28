@@ -32,8 +32,10 @@ function verifyJWT(token) {
   } catch(e) { return null; }
 }
 
+app.use(express.json({ limit: '1mb' }));
+
 // --- Auth middleware (aplica a todas as rotas /api/* excepto /api/auth/login) ---
-const AUTH_EXEMPT = new Set(['/api/auth/login']);
+const AUTH_EXEMPT = new Set(['/auth/login']);
 app.use('/api', (req, res, next) => {
   if (AUTH_EXEMPT.has(req.path)) return next();
   const auth  = req.headers['authorization'] || '';
@@ -46,8 +48,6 @@ app.use('/api', (req, res, next) => {
 });
 
 // --- UI -> Agent API proxy ---
-app.use(express.json({ limit: "1mb" }));
-
 // --- Auth endpoints ---
 const { execSync } = require('child_process');
 app.post('/api/auth/login', (req, res) => {
@@ -123,7 +123,6 @@ app.post("/api/agent", async (req, res) => {
 });
 // --- end proxy ---
 
-app.use(express.json());
 
 
 app.post("/api/exec", async (req, res) => {
@@ -189,7 +188,6 @@ app.get("/api/lastjob",(req,res)=>{
 
 
 
-app.listen(3000,()=>console.log("UI http://localhost:3000"));
 
 // últimos logs do agent-router
 app.get("/api/logs",(req,res)=>{
@@ -272,3 +270,5 @@ app.post('/api/approve', (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: String(e) }); }
 });
+
+app.listen(3000,()=>console.log("UI http://localhost:3000"));
