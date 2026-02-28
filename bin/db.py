@@ -7,7 +7,7 @@ audit_log é imutável (apenas INSERT — UPDATE/DELETE bloqueados via evento OR
 import os, pathlib, datetime
 from sqlalchemy import (
     create_engine, event, Column, Integer, String, Text,
-    DateTime, Boolean, ForeignKey,
+    DateTime, Boolean, ForeignKey, Index,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -55,22 +55,35 @@ class User(Base):
 class Job(Base):
     __tablename__ = "jobs"
     id         = Column(String(64), primary_key=True)
+    title      = Column(String(256), nullable=True)
     goal       = Column(Text, nullable=True)
-    status     = Column(String(32), default="pending")
+    status     = Column(String(32), default="pending")   # pending/running/done/failed/waiting_approval/archived
+    priority   = Column(Integer, default=5)
+    task_type  = Column(String(32), default="DEV_TASK")
+    attempts   = Column(Integer, default=0)
+    last_error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow,
                         onupdate=datetime.datetime.utcnow)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    __table_args__ = (
+        Index("ix_jobs_status",     "status"),
+        Index("ix_jobs_created_at", "created_at"),
+    )
 
 
 class Step(Base):
     __tablename__ = "steps"
-    id     = Column(Integer, primary_key=True, autoincrement=True)
-    job_id = Column(String(64), ForeignKey("jobs.id"), nullable=False)
-    tool   = Column(String(64), nullable=False)
-    input  = Column(Text, nullable=True)
-    result = Column(Text, nullable=True)
-    ts     = Column(DateTime, default=datetime.datetime.utcnow)
+    id       = Column(Integer, primary_key=True, autoincrement=True)
+    job_id   = Column(String(64), ForeignKey("jobs.id"), nullable=False)
+    tool     = Column(String(64), nullable=False)
+    input    = Column(Text, nullable=True)
+    result   = Column(Text, nullable=True)
+    status   = Column(String(32), default="done")  # done/pending_approval/skipped
+    ts       = Column(DateTime, default=datetime.datetime.utcnow)
+    __table_args__ = (
+        Index("ix_steps_job_id", "job_id"),
+    )
 
 
 class Approval(Base):

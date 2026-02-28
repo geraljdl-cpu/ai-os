@@ -151,16 +151,22 @@ const JOBS = HOME + "/ai-os/runtime/jobs";
 app.get("/", (req,res)=> res.sendFile(__dirname + "/index.html"));
 
 app.get("/api/backlog",(req,res)=>{
-  try{ res.json(JSON.parse(fs.readFileSync(BACKLOG))); }
-  catch{ res.json({tasks:[]}); }
+  try{
+    const out = execSync('python3 /home/jdl/ai-os/bin/backlog_pg.py list', {timeout:5000});
+    res.json(JSON.parse(out.toString()));
+  }catch{ res.json({tasks:[]}); }
 });
 
 app.post("/api/add",(req,res)=>{
-  const {goal}=req.body;
-  const data=JSON.parse(fs.readFileSync(BACKLOG));
-  data.tasks.push({id:Date.now().toString(),goal});
-  fs.writeFileSync(BACKLOG,JSON.stringify(data,null,2));
-  res.json({ok:true});
+  try {
+    const {goal, title, priority, task_type} = req.body || {};
+    const params = JSON.stringify({
+      goal: goal||'', title: title||goal||'',
+      priority: priority||5, task_type: task_type||'DEV_TASK'
+    });
+    const out = execSync(`python3 /home/jdl/ai-os/bin/backlog_pg.py add ${JSON.stringify(params)}`, {timeout:5000});
+    res.json(JSON.parse(out.toString()));
+  } catch(e) { res.json({ok:false, error:String(e)}); }
 });
 
 app.post("/api/run",(req,res)=>{
@@ -170,9 +176,8 @@ app.post("/api/run",(req,res)=>{
 
 app.get("/api/status",(req,res)=>{
   try{
-    const backlog=JSON.parse(fs.readFileSync(BACKLOG));
-    const running = backlog.tasks.length > 0 ? "WORKING" : "IDLE";
-    res.json({status:running});
+    const out = execSync('python3 /home/jdl/ai-os/bin/backlog_pg.py status', {timeout:5000});
+    res.json(JSON.parse(out.toString()));
   }catch{ res.json({status:"UNKNOWN"}); }
 });
 
@@ -251,23 +256,28 @@ app.post('/api/dmx/scene', (req, res) => {
 });
 
 // Approvals
-const APPROVALS = HOME + '/ai-os/runtime/pending_approvals.json';
 app.get('/api/approvals', (req, res) => {
   try {
-    const data = JSON.parse(fs.readFileSync(APPROVALS));
-    res.json({ approvals: data.filter(a => a.status === 'pending') });
+    const out = execSync('python3 /home/jdl/ai-os/bin/approval_pg.py list', {timeout:5000});
+    res.json(JSON.parse(out.toString()));
   } catch { res.json({ approvals: [] }); }
 });
 app.post('/api/approve', (req, res) => {
   try {
     const { id } = req.body || {};
     if (!id) return res.status(400).json({ ok: false, error: 'id required' });
-    const data = JSON.parse(fs.readFileSync(APPROVALS));
-    const item = data.find(a => a.id === id);
-    if (!item) return res.status(404).json({ ok: false, error: 'not found' });
-    item.status = 'approved';
-    fs.writeFileSync(APPROVALS, JSON.stringify(data, null, 2));
-    res.json({ ok: true });
+    const uid = req.user?.sub || '';
+    const out = execSync(`python3 /home/jdl/ai-os/bin/approval_pg.py approve ${JSON.stringify(id)} ${uid}`, {timeout:5000});
+    res.json(JSON.parse(out.toString()));
+  } catch (e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+app.post('/api/reject', (req, res) => {
+  try {
+    const { id } = req.body || {};
+    if (!id) return res.status(400).json({ ok: false, error: 'id required' });
+    const uid = req.user?.sub || '';
+    const out = execSync(`python3 /home/jdl/ai-os/bin/approval_pg.py reject ${JSON.stringify(id)} ${uid}`, {timeout:5000});
+    res.json(JSON.parse(out.toString()));
   } catch (e) { res.status(500).json({ ok: false, error: String(e) }); }
 });
 

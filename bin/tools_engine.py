@@ -97,19 +97,49 @@ APPROVAL_REQUIRED = {
 
 APPROVAL_FILE = AIOS_ROOT / 'runtime' / 'pending_approvals.json'
 
+# Tenta carregar approval_pg; se falhar usa fallback JSON
+_apr_mod = None
+def _get_apr():
+    global _apr_mod
+    if _apr_mod is None:
+        try:
+            import importlib.util as _ilu
+            _spec = _ilu.spec_from_file_location("approval_pg", AIOS_ROOT / "bin" / "approval_pg.py")
+            _apr_mod = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_apr_mod)
+        except Exception:
+            _apr_mod = False
+    return _apr_mod if _apr_mod else None
+
 def request_approval(tool, inp, job_id=''):
+    apr = _get_apr()
+    if apr:
+        try:
+            entry = apr.request_approval(tool=tool, inp=inp, job_id=job_id)
+            log(f'APPROVAL_REQUIRED tool={tool} id={entry["id"]} (pg)')
+            return entry
+        except Exception as e:
+            log(f'approval_pg error: {e}, fallback JSON')
+    # fallback JSON
     import json as _j
     approvals = []
     if APPROVAL_FILE.exists():
         try: approvals = _j.loads(APPROVAL_FILE.read_text())
-        except: approvals = []
+        except: pass
     entry = {'id': f'apr_{int(__import__("time").time())}', 'tool': tool, 'input': inp, 'job_id': job_id, 'status': 'pending'}
     approvals.append(entry)
     APPROVAL_FILE.write_text(_j.dumps(approvals, indent=2, ensure_ascii=False))
-    log(f'APPROVAL_REQUIRED tool={tool} id={entry["id"]}')
+    log(f'APPROVAL_REQUIRED tool={tool} id={entry["id"]} (json)')
     return entry
 
 def check_approved(tool, inp):
+    apr = _get_apr()
+    if apr:
+        try:
+            return apr.check_approved(tool=tool, inp=inp)
+        except Exception:
+            pass
+    # fallback JSON
     import json as _j
     if not APPROVAL_FILE.exists(): return False
     try: approvals = _j.loads(APPROVAL_FILE.read_text())
