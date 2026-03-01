@@ -1,122 +1,48 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+from bin import backlog_pg
 
-AIOS="$HOME/ai-os"
-RUNTIME="$AIOS/runtime"
-BACKLOG="$RUNTIME/backlog.json"
-JOBS="$RUNTIME/jobs"
+def cmd_queue_add(args):
+    t = backlog_pg.add_task(args.title, args.goal, priority=args.priority, task_type=args.task_type)
+    print(json.dumps(t, ensure_ascii=False))
 
-cmd="${1:-help}"; shift || true
+def cmd_queue_list(_args):
+    tasks = backlog_pg.list_tasks()
+    # mostrar só campos úteis
+    out = [{"id":t["id"],"status":t["status"],"priority":t.get("priority"),"title":t.get("title")} for t in tasks[:50]]
+    print(json.dumps(out, ensure_ascii=False, indent=2))
 
-ensure_backlog() {
-  mkdir -p "$RUNTIME"
-  [ -f "$BACKLOG" ] || printf "{ \"tasks\": [] }\n" > "$BACKLOG"
-}
+def cmd_status(_args):
+    tasks = backlog_pg.list_tasks()
+    counts = {}
+    for t in tasks:
+        counts[t["status"]] = counts.get(t["status"], 0) + 1
+    print(json.dumps({"counts": counts, "total": len(tasks)}, ensure_ascii=False, indent=2))
 
-queue() {
-  ensure_backlog
-  goal="$*"
-  [ -z "${goal// /}" ] && { echo "USO: aiosctl q <objetivo>"; exit 1; }
-  python3 - <<PY
-import json, os
-p=os.path.expanduser("$BACKLOG")
-goal=${goal@Q}
-data=json.load(open(p))
-data.setdefault("tasks", []).append({"goal": goal})
-json.dump(data, open(p,"w"), indent=2, ensure_ascii=False)
-print("QUEUED:", goal)
-PY
-}
+def main():
+    p = argparse.ArgumentParser(prog="aiosctl")
+    sub = p.add_subparsers(dest="cmd", required=True)
 
-lsq() {
-  ensure_backlog
-  python3 - <<PY
-import json, os
-p=os.path.expanduser("$BACKLOG")
-d=json.load(open(p))
-tasks=d.get("tasks",[])
-print(f"tasks={len(tasks)}")
-for i,t in enumerate(tasks[:30],1):
-  print(f"{i:02d}. {t.get(goal,)}")
-PY
-}
+    q = sub.add_parser("queue", help="queue operations (Postgres)")
+    qsub = q.add_subparsers(dest="qcmd", required=True)
 
-status() {
-  systemctl status aios-autopilot.timer --no-pager -l || true
-}
+    qadd = qsub.add_parser("add", help="add a task")
+    qadd.add_argument("title")
+    qadd.add_argument("goal")
+    qadd.add_argument("--priority", type=int, default=5)
+    qadd.add_argument("--task-type", default="DEV_TASK")
+    qadd.set_defaults(fn=cmd_queue_add)
 
-last() {
-  [ -d "$JOBS" ] || { echo "NO_JOBS_DIR"; exit 0; }
-  ls -1t "$JOBS" 2>/dev/null | head -n1 || true
-}
+    qlist = qsub.add_parser("list", help="list tasks")
+    qlist.set_defaults(fn=cmd_queue_list)
 
-show() {
-  jid="$(last)"
-  [ -z "${jid:-}" ] && { echo "NO_JOBS"; exit 0; }
-  echo "JOB=$jid"
-  echo "---- result.json ----"
-  sed -n "1,200p" "$JOBS/$jid/result.json" 2>/dev/null || echo "NO_RESULT"
-  echo "---- agent_response.json ----"
-  sed -n "1,200p" "$JOBS/$jid/agent_response.json" 2>/dev/null || echo "NO_AGENT_RESPONSE"
-  echo "---- patch.diff ----"
-  sed -n "1,200p" "$JOBS/$jid/patch.diff" 2>/dev/null || echo "NO_PATCH"
-}
+    st = sub.add_parser("status", help="show task counts")
+    st.set_defaults(fn=cmd_status)
 
-tailf() {
-  mkdir -p "$RUNTIME"
-  touch "$RUNTIME/autopilot.log"
-  tail -f "$RUNTIME/autopilot.log"
-}
+    args = p.parse_args()
+    return args.fn(args)
 
-merge_last() {
-  jid="$(last)"
-  [ -z "${jid:-}" ] && { echo "NO_JOBS"; exit 1; }
-  branch="$(python3 - <<PY
-import json, os
-p=os.path.expanduser("$JOBS/$jid/result.json")
-try:
-  d=json.load(open(p))
-  print(d.get("branch",""))
-except:
-  print("")
-PY
-)"
-  [ -z "${branch:-}" ] && { echo "NO_BRANCH_IN_RESULT"; exit 1; }
-
-  cd "$AIOS"
-  git checkout main >/dev/null
-  git merge "$branch" --no-edit
-  echo "MERGED:$branch"
-}
-
-pause() { sudo systemctl stop aios-autopilot.timer; echo "PAUSED"; }
-resume() { sudo systemctl start aios-autopilot.timer; echo "RESUMED"; }
-tick() { sudo systemctl start aios-autopilot.service; echo "TICK_OK"; }
-
-help() {
-  cat <<EOF
-aiosctl q "objetivo"      -> enfileirar
-aiosctl lsq               -> ver fila
-aiosctl status            -> status timer
-aiosctl tick              -> forçar 1 execução agora
-aiosctl last              -> último job_id
-aiosctl show              -> ver último job (result/agent/patch)
-aiosctl merge-last        -> merge do último branch para main
-aiosctl tail              -> seguir autopilot.log
-aiosctl pause|resume      -> parar/retomar timer
-EOF
-}
-
-case "$cmd" in
-  q) queue "$@" ;;
-  lsq) lsq ;;
-  status) status ;;
-  tick) tick ;;
-  last) last ;;
-  show) show ;;
-  merge-last) merge_last ;;
-  tail) tailf ;;
-  pause) pause ;;
-  resume) resume ;;
-  help|*) help ;;
-esac
+if __name__ == "__main__":
+    raise SystemExit(main())
