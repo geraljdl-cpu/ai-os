@@ -5,7 +5,7 @@ AIOS_ROOT="${AIOS_ROOT:-$HOME/ai-os}"
 BACKLOG="$AIOS_ROOT/runtime/backlog.json"
 JOBS_DIR="$AIOS_ROOT/runtime/jobs"
 LOCK_FILE="$AIOS_ROOT/runtime/autopilot.lock"
-AIOS_MODE="${AIOS_MODE:-simulate}"
+AIOS_MODE=""
 
 mkdir -p "$JOBS_DIR" "$AIOS_ROOT/runtime"
 
