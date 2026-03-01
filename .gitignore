@@ -48,3 +48,9 @@ bin/caddy
 runtime/secrets.json
 runtime/pending_approvals.json
 runtime/caddy_access.log
+
+# secrets / tokens (NEVER COMMIT)
+.env*
+.toc_token.json
+.toc_token_expiry
+runtime/*
