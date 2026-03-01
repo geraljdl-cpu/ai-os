@@ -94,3 +94,7 @@ except: print(0)
 if [ "${ATTEMPTS:-0}" -ge 3 ]; then
   python3 "$AIOS_ROOT/bin/alerting.py" job_failed "$JOB_ID" "$ATTEMPTS" 2>/dev/null || true
 fi
+# ensure token when running via systemd
+if [ -z "$AIOS_TOKEN" ]; then
+  AIOS_TOKEN=$(docker exec agent-router sh -lc 'echo -n $AIOS_TOKEN' 2>/dev/null || true)
+fi
