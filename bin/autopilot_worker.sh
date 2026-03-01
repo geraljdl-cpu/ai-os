@@ -31,6 +31,9 @@ PY
   TASK_ID="${TASK_LINE%%$'\t'*}"
   GOAL="${TASK_LINE#*$'\t'}"
 
+  # sanitize goal (avoid breaking JSON payload)
+  GOAL=$(echo "$GOAL" | tr "\n" " " | sed -E 's/[[:space:]]+/ /g' | sed -E 's/^ +| +$//g')
+
 
 JOB_ID="job_$(date +%s)"
 mkdir -p "$JOBS_DIR/$JOB_ID"
@@ -52,14 +55,24 @@ is_allowed(){
   return 0
 }
 
-RESPONSE=$(curl -sf -X POST http://127.0.0.1:5679/agent \
-  -H "Content-Type: application/json" \
-  -H "X-AIOS-TOKEN: ${AIOS_TOKEN:-}" \
-  -d "{\"chatInput\": \"$GOAL\", \"mode\": \"openai\"}" 2>&1) || {
-  echo "[autopilot] agent unreachable" | tee -a "$EXEC_LOG"
-  python3 "$AIOS_ROOT/bin/alerting.py" worker_crash "$JOB_ID" 2>/dev/null || true
-  exit 0
-}
+PAYLOAD=$(python3 -c 'import json,sys; print(json.dumps({"chatInput": sys.argv[1], "mode":"openai"}))' "$GOAL")
+
+  # auth token (read from agent-router container; avoids systemd/env issues)
+  AIOS_TOKEN=$(docker exec agent-router sh -lc 'echo -n $AIOS_TOKEN' 2>/dev/null || true)
+
+  PAYLOAD=$(python3 -c 'import json,sys; print(json.dumps({"chatInput": sys.argv[1], "mode":"openai"}))' "$GOAL")
+
+  # auth token (read from agent-router container; avoids systemd/env issues)
+  AIOS_TOKEN=$(docker exec agent-router sh -lc 'echo -n $AIOS_TOKEN' 2>/dev/null || true)
+
+  RESPONSE=$(curl -sS -X POST http://127.0.0.1:5679/agent \
+    -H "Content-Type: application/json" \
+    -H "X-AIOS-TOKEN: ${AIOS_TOKEN:-}" \
+    -d "$PAYLOAD" 2>&1) || {
+    echo "[autopilot] agent unreachable" | tee -a "$EXEC_LOG"
+    python3 "$AIOS_ROOT/bin/alerting.py" worker_crash "$JOB_ID" 2>/dev/null || true
+    exit 0
+  }
 
 echo "$RESPONSE" > "$JOBS_DIR/$JOB_ID/agent_response.json"
 
