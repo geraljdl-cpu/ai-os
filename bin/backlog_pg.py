@@ -360,3 +360,102 @@ if __name__ == "__main__":
         print(json.dumps(t or {}))
     else:
         print(json.dumps({"ok": False, "error": f"unknown: {cmd}"}))
+# ---------------------------------------------------------------------
+# SAFE UTILITIES (peek + requeue stuck running)
+# ---------------------------------------------------------------------
+
+import time
+from typing import Optional, Dict, Any, List, Tuple
+
+def _as_int_ts(v):
+    if v is None:
+        return None
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        return int(v)
+    if isinstance(v, str) and v.strip().isdigit():
+        return int(v.strip())
+    return None
+
+
+def peek_next_task_json(task_type: str = "DEV_TASK") -> Optional[Dict[str, Any]]:
+    """
+    Vê a próxima task pending SEM dar claim.
+    """
+    try:
+        tasks = list_tasks()
+    except Exception:
+        return None
+
+    pendings = []
+    for t in tasks or []:
+        if t.get("status") != "pending":
+            continue
+        if task_type and t.get("task_type") != task_type:
+            continue
+        pendings.append(t)
+
+    if not pendings:
+        return None
+
+    def key(t):
+        pr = int(t.get("priority", 5))
+        ca = _as_int_ts(t.get("created_at")) or 0
+        return (pr, ca)
+
+    pendings.sort(key=key)
+    return pendings[0]
+
+
+def requeue_stuck_running(max_age_secs: int = 900) -> List[Dict[str, Any]]:
+    """
+    Volta a pending tasks presas em running.
+    """
+    now = int(time.time())
+    try:
+        tasks = list_tasks()
+    except Exception:
+        return []
+
+    reset = []
+    for t in tasks or []:
+        if t.get("status") != "running":
+            continue
+
+        ts = _as_int_ts(t.get("updated_at")) or _as_int_ts(t.get("created_at"))
+        if not ts:
+            continue
+
+        if now - ts > max_age_secs:
+            update_task_json(t["id"], status="pending", last_error="requeued stuck running")
+            reset.append(t)
+
+    return reset
+
+
+def autofill_if_empty(n: int = 42) -> int:
+    """
+    Enche o backlog quando estiver vazio (sem chamar o worker).
+    Retorna quantas tasks foram criadas.
+    """
+    try:
+        pending = list_tasks(status="pending", limit=1)
+        if pending:
+            return 0
+    except TypeError:
+        # se list_tasks não suportar status/limit, faz fallback simples
+        tasks = list_tasks()
+        if any(t.get("status") == "pending" for t in tasks):
+            return 0
+
+    created = 0
+    for i in range(int(n)):
+        add_task(
+            title=f"AUTOREFILL_{i+1}",
+            goal="Criar tabela workers e atualizar last_seen em cada execução [autofill]",
+            priority=5,
+            task_type="DEV_TASK",
+        )
+        created += 1
+    return created
