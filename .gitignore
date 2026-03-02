@@ -64,3 +64,4 @@ dashboard/
 dashboards/
 backlog/
 *_dashboard.html
+bin/autofill.py
