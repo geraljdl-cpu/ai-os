@@ -54,3 +54,13 @@ runtime/caddy_access.log
 .toc_token.json
 .toc_token_expiry
 runtime/*
+
+# local/runtime noise
+tmp/
+runtime/
+*.bak.*
+bin/*.bak.*
+dashboard/
+dashboards/
+backlog/
+*_dashboard.html
