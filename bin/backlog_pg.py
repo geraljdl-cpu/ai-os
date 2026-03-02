@@ -434,28 +434,79 @@ def requeue_stuck_running(max_age_secs: int = 900) -> List[Dict[str, Any]]:
     return reset
 
 
-def autofill_if_empty(n: int = 42) -> int:
+def autofill_if_empty(n: int = 4) -> int:
     """
-    Enche o backlog quando estiver vazio (sem chamar o worker).
+    Enche o backlog com tarefas housekeeping seguras quando não há tasks pending.
+    Só usa ferramentas presentes na allowlist (echo, cat, python3, ls, find, wc).
+    NÃO cria tarefas com SQL/mysql/psql/npm/git/CREATE/DROP.
+    Não chama o worker — apenas cria tasks.
     Retorna quantas tasks foram criadas.
     """
-    try:
-        pending = list_tasks(status="pending", limit=1)
-        if pending:
-            return 0
-    except TypeError:
-        # se list_tasks não suportar status/limit, faz fallback simples
-        tasks = list_tasks()
-        if any(t.get("status") == "pending" for t in tasks):
-            return 0
+    # Não enfileira se já há pending
+    tasks = list_tasks()
+    if any(t.get("status") == "pending" for t in tasks):
+        return 0
 
+    # Lista fixa de tarefas housekeeping executáveis no stack actual.
+    # Goals escritos para o agent-router: só bash_safe/python3/write_file.
+    HOUSEKEEPING: list[dict] = [
+        {
+            "title": "Ops: aiosctl status",
+            "goal": (
+                "Verificar bin/aiosctl e garantir que o comando 'status' mostra: "
+                "service aios-worker activo, contagem de tasks pending/done/failed do Postgres, "
+                "e o id do último job. Usar python3 para ler backlog_pg. "
+                "Não usar npm, git, mysql, psql, sed ou CREATE."
+            ),
+            "task_type": "OPS_TASK",
+        },
+        {
+            "title": "Ops: worker heartbeat",
+            "goal": (
+                "Garantir que autopilot_loop.sh escreve o timestamp UTC em "
+                "runtime/worker.last_seen em cada ciclo. "
+                "Usar python3 -c para escrever o ficheiro (não usar sed, awk ou git). "
+                "Exemplo: python3 -c \"import datetime,pathlib; "
+                "pathlib.Path('runtime/worker.last_seen')"
+                ".write_text(datetime.datetime.utcnow().isoformat())\" . "
+                "Verificar que o ficheiro existe após a escrita com cat."
+            ),
+            "task_type": "OPS_TASK",
+        },
+        {
+            "title": "Docs: README arquitectura",
+            "goal": (
+                "Criar ou actualizar README.md (máx 60 linhas) com: "
+                "componentes do AI-OS (Express porta 3000, agent-router 5679, "
+                "Postgres 5432, Modbus 5020, Art-Net 6454), "
+                "flow do autopilot (backlog → worker → tools_engine → Postgres), "
+                "e comandos de operação (aiosctl, systemctl --user, journalctl). "
+                "Usar write_file ou python3 para escrever. Não usar git ou npm."
+            ),
+            "task_type": "DEV_TASK",
+        },
+        {
+            "title": "Cleanup: jobs antigos",
+            "goal": (
+                "Criar script bin/cleanup_jobs.sh que lista (dry-run por default) "
+                "directorias em runtime/jobs/ com mais de 30 dias usando find. "
+                "Com argumento --delete apaga-as. "
+                "Usar apenas find, echo, wc e rm (sem npm, git, mysql ou psql). "
+                "Escrever o script com python3 write_file ou cat, torná-lo executável "
+                "com python3 -c 'import os; os.chmod(\"bin/cleanup_jobs.sh\", 0o755)'."
+            ),
+            "task_type": "OPS_TASK",
+        },
+    ]
+
+    catalogue = HOUSEKEEPING[:int(n)]
     created = 0
-    for i in range(int(n)):
+    for spec in catalogue:
         add_task(
-            title=f"AUTOREFILL_{i+1}",
-            goal="Criar tabela workers e atualizar last_seen em cada execução [autofill]",
-            priority=5,
-            task_type="DEV_TASK",
+            title=spec["title"],
+            goal=spec["goal"],
+            priority=6,
+            task_type=spec.get("task_type", "OPS_TASK"),
         )
         created += 1
     return created
