@@ -271,6 +271,25 @@ def cmd_syshealth(_args):
     print(json.dumps(out, ensure_ascii=False))
 
 
+# ── worker_jobs_enqueue ───────────────────────────────────────────────────────
+
+def cmd_worker_jobs_enqueue(args):
+    """Enfileira job. Args: <kind> <payload_json> [target_worker_id|-]"""
+    if len(args) < 2:
+        raise ValueError("usage: worker_jobs_enqueue <kind> <payload_json> [target_worker_id]")
+    kind    = args[0]
+    payload = json.loads(args[1])
+    target  = args[2] if len(args) > 2 and args[2] != "-" else None
+    engine, text = _conn()
+    with engine.begin() as c:
+        row = c.execute(text(
+            "INSERT INTO public.worker_jobs (ts_created, status, kind, payload, target_worker_id) "
+            "VALUES (NOW(), 'queued', :kind, :payload, :target) RETURNING id"
+        ), {"kind": kind, "payload": json.dumps(payload), "target": target})
+        job_id = row.scalar()
+    print(json.dumps({"ok": True, "job_id": job_id}))
+
+
 # ── worker_token_check ────────────────────────────────────────────────────────
 
 def cmd_worker_token_check(args):
@@ -298,6 +317,7 @@ CMDS = {
     "events":            cmd_events,
     "backlog_recent":       cmd_backlog_recent,
     "syshealth":            cmd_syshealth,
+    "worker_jobs_enqueue":  cmd_worker_jobs_enqueue,
     "worker_token_check":   cmd_worker_token_check,
 }
 

@@ -6,16 +6,25 @@ const { exec } = require("child_process");
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- Carrega ~/.env.db para JWT_SECRET ---
+// --- Carrega ~/.env.db e /etc/aios.env ---
 let _JWT_SECRET = 'aios-jwt-secret-2026-change-in-prod';
-try {
-  const envDb = fs.readFileSync(require('os').homedir() + '/.env.db', 'utf8');
-  envDb.split('\n').forEach(line => {
-    const [k, v] = line.split('=');
-    if (k && v && k.trim() === 'JWT_SECRET') _JWT_SECRET = v.trim();
-  });
-} catch(e) {}
+let _OPS_TOKEN  = '';
+function _loadEnvFile(path) {
+  try {
+    fs.readFileSync(path, 'utf8').split('\n').forEach(line => {
+      const eq = line.indexOf('=');
+      if (eq < 1) return;
+      const k = line.slice(0, eq).trim();
+      const v = line.slice(eq + 1).trim();
+      if (k === 'JWT_SECRET')    _JWT_SECRET = v;
+      if (k === 'AIOS_OPS_TOKEN') _OPS_TOKEN  = v;
+    });
+  } catch(e) {}
+}
+_loadEnvFile(require('os').homedir() + '/.env.db');
+_loadEnvFile('/etc/aios.env');
 const JWT_SECRET = _JWT_SECRET;
+const OPS_TOKEN  = _OPS_TOKEN || process.env.AIOS_OPS_TOKEN || '';
 
 // --- JWT verification (pure Node.js, sem npm extra) ---
 function _b64url(b64) { return b64.replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_'); }
@@ -60,6 +69,8 @@ const AUTH_EXEMPT = new Set([
   '/workers', '/workers/register',
   // Worker pull-model: bypass JWT mas requerem requireWorkerAuth (X-AIOS-WORKER-TOKEN)
   '/worker_jobs/lease', '/worker_jobs/report',
+  // Enqueue: bypass JWT mas requer X-AIOS-OPS-TOKEN (ou JWT)
+  '/worker_jobs/enqueue',
 ]);
 app.use('/api', (req, res, next) => {
   if (AUTH_EXEMPT.has(req.path)) return next();
@@ -432,27 +443,19 @@ app.post('/api/worker_jobs/report', requireWorkerAuth, (req, res) => {
 });
 
 app.post('/api/worker_jobs/enqueue', (req, res) => {
-  // Auth obrigatório (está fora do AUTH_EXEMPT)
+  // Aceita JWT (via middleware) OU X-AIOS-OPS-TOKEN
+  if (!req.user) {
+    const opsTok = String(req.headers['x-aios-ops-token'] || '').trim();
+    if (!OPS_TOKEN || opsTok !== OPS_TOKEN)
+      return res.status(401).json({ ok: false, error: 'ops_token_required' });
+  }
   const { kind, payload, target_worker_id } = req.body || {};
   if (!kind) return res.status(400).json({ ok: false, error: 'kind required' });
-  try {
-    const DB_URL = process.env.DATABASE_URL || 'postgresql://aios_user:jdl@127.0.0.1:5432/aios';
-    const py = `
-import json, os
-import sqlalchemy as sa
-engine = sa.create_engine(${JSON.stringify(DB_URL)})
-with engine.begin() as c:
-    r = c.execute(sa.text(
-        "INSERT INTO public.worker_jobs (ts_created, status, kind, payload, target_worker_id) "
-        "VALUES (NOW(), 'queued', :kind, :payload, :target) RETURNING id"
-    ), {"kind": ${JSON.stringify(kind)}, "payload": json.dumps(${JSON.stringify(payload || {})}), "target": ${JSON.stringify(target_worker_id || null)}})
-    print(r.scalar())
-`;
-    const out = execSync(`python3 -c "${py.replace(/\n/g, '; ')}"`, { timeout: 5000, encoding: 'utf8' }).trim();
-    res.json({ ok: true, job_id: parseInt(out, 10) });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message.slice(0, 200) });
-  }
+  const payloadJson = JSON.stringify(payload || {}).replace(/'/g, '"');
+  const target      = target_worker_id || '-';
+  const result      = nocExec(`worker_jobs_enqueue ${kind} '${payloadJson}' ${target}`);
+  if (result.error) return res.status(500).json({ ok: false, error: result.error });
+  res.json(result);
 });
 
 // Acções de controlo (requerem auth — não estão em AUTH_EXEMPT)
