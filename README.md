@@ -1,22 +1,16 @@
 # AI-OS Components
 
-## Componentes
+## Components
+- Express (port 3000)
+- agent-router (port 5679)
+- Postgres (port 5432)
+- Modbus (port 5020)
+- Art-Net (port 6454)
 
-- Express: porta 3000
-- Agent-Router: porta 5679
-- Postgres: porta 5432
-- Modbus: porta 5020
-- Art-Net: porta 6454
+## Autopilot Flow
+- backlog → worker → tools_engine → Postgres
 
-## Flow do Autopilot
-
-1. Backlog
-2. Worker
-3. Tools Engine
-4. Postgres
-
-## Comandos de Operação
-
+## Operation Commands
 - aiosctl
 - systemctl --user
 - journalctl
