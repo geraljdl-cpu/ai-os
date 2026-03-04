@@ -297,3 +297,4 @@ app.post('/api/reject', (req, res) => {
 });
 
 app.listen(3000,()=>console.log("UI http://localhost:3000"));
+app.get('/api/version', (req, res) => { res.json({ version: '1.0.0', name: 'ai-os' }); });
