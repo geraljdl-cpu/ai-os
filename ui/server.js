@@ -58,7 +58,7 @@ const AUTH_EXEMPT = new Set([
   '/syshealth', '/telemetry', '/telemetry/history',
   '/backlog/recent', '/jobs/recent', '/watchdog/events',
   '/workers', '/workers/register',
-  // Worker pull-model (sem JWT nos workers remotos)
+  // Worker pull-model: bypass JWT mas requerem requireWorkerAuth (X-AIOS-WORKER-TOKEN)
   '/worker_jobs/lease', '/worker_jobs/report',
 ]);
 app.use('/api', (req, res, next) => {
@@ -312,6 +312,29 @@ const AIOS_ROOT = process.env.AIOS_ROOT || require('os').homedir() + '/ai-os';
 const NOC_PY = `python3 ${AIOS_ROOT}/bin/noc_query.py`;
 const DB_ENV = `DATABASE_URL=${process.env.DATABASE_URL || 'postgresql://aios_user:jdl@127.0.0.1:5432/aios'}`;
 
+// ---- Worker auth: valida X-AIOS-WORKER-ID + X-AIOS-WORKER-TOKEN contra DB ----
+function requireWorkerAuth(req, res, next) {
+  const wid = String(req.headers['x-aios-worker-id'] || '').trim();
+  const tok = String(req.headers['x-aios-worker-token'] || '').trim();
+  if (!wid || !tok) return res.status(403).json({ ok: false, error: 'worker_auth_missing' });
+  // apenas alfanumérico + hifens (ex: DESKTOP-CPLTTV3-agent)
+  if (!/^[\w\-]{1,64}$/.test(wid)) return res.status(403).json({ ok: false, error: 'worker_id_invalid' });
+  try {
+    const DB_URL = process.env.DATABASE_URL || 'postgresql://aios_user:jdl@127.0.0.1:5432/aios';
+    const NOC    = `${require('os').homedir()}/ai-os/bin/noc_query.py`;
+    const out    = execSync(
+      `DATABASE_URL=${DB_URL} python3 ${NOC} worker_token_check ${wid}`,
+      { timeout: 5000, encoding: 'utf8' }
+    );
+    const dbtok  = (JSON.parse(out).token || '');
+    if (!dbtok || dbtok !== tok) return res.status(403).json({ ok: false, error: 'worker_auth_denied' });
+    req.worker_id = wid;
+    next();
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'worker_auth_error' });
+  }
+}
+
 function nocExec(cmd, timeout = 8000) {
   try {
     const out = execSync(`${DB_ENV} ${NOC_PY} ${cmd}`, { timeout, encoding: 'utf8' });
@@ -395,13 +418,13 @@ app.get('/api/worker_jobs', (req, res) => {
   res.json(nocExec(`worker_jobs ${limit}`));
 });
 
-app.get('/api/worker_jobs/lease', (req, res) => {
-  const { worker_id } = req.query;
-  if (!worker_id) return res.status(400).json({ ok: false, error: 'worker_id required' });
-  res.json(nocExec(`worker_jobs_lease ${worker_id}`));
+app.get('/api/worker_jobs/lease', requireWorkerAuth, (req, res) => {
+  const wid = req.worker_id || String(req.query.worker_id || '');
+  if (!wid) return res.status(400).json({ ok: false, error: 'worker_id required' });
+  res.json(nocExec(`worker_jobs_lease ${wid}`));
 });
 
-app.post('/api/worker_jobs/report', (req, res) => {
+app.post('/api/worker_jobs/report', requireWorkerAuth, (req, res) => {
   const { job_id, status, result } = req.body || {};
   if (!job_id || !status) return res.status(400).json({ ok: false, error: 'job_id, status required' });
   const resultJson = JSON.stringify(result || {}).replace(/'/g, '"');

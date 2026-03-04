@@ -271,6 +271,20 @@ def cmd_syshealth(_args):
     print(json.dumps(out, ensure_ascii=False))
 
 
+# ── worker_token_check ────────────────────────────────────────────────────────
+
+def cmd_worker_token_check(args):
+    if not args:
+        raise ValueError("usage: worker_token_check <worker_id>")
+    wid = args[0]
+    engine, text = _conn()
+    with engine.connect() as c:
+        row = c.execute(text(
+            "SELECT token FROM public.workers WHERE id=:wid LIMIT 1"
+        ), {"wid": wid}).mappings().first()
+    print(json.dumps({"token": row["token"] if row and row["token"] else None}))
+
+
 # ── dispatch ──────────────────────────────────────────────────────────────────
 
 CMDS = {
@@ -282,8 +296,9 @@ CMDS = {
     "worker_jobs_lease": cmd_worker_jobs_lease,
     "worker_jobs_report":cmd_worker_jobs_report,
     "events":            cmd_events,
-    "backlog_recent":    cmd_backlog_recent,
-    "syshealth":         cmd_syshealth,
+    "backlog_recent":       cmd_backlog_recent,
+    "syshealth":            cmd_syshealth,
+    "worker_token_check":   cmd_worker_token_check,
 }
 
 if __name__ == "__main__":
