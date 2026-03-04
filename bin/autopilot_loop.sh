@@ -36,5 +36,8 @@ while true; do
         SLEEP=$SLEEP_IDLE
     fi
 
+    python3 -c "import datetime,pathlib; pathlib.Path('$AIOS_ROOT/runtime/worker.last_seen').write_text(datetime.datetime.utcnow().isoformat())"
+    cat "$AIOS_ROOT/runtime/worker.last_seen"
+
     sleep "$SLEEP"
 done
