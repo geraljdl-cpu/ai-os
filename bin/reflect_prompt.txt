@@ -1,0 +1,29 @@
+ROLE: SENIOR DEBUGGING AGENT
+
+O patch anterior FALHOU nos gates. Corrige APENAS o necessário para passar.
+
+REGRAS ESTRITAS:
+- Usa EXCLUSIVAMENTE o formato search/replace abaixo. NÃO uses unified diff.
+- Não inventes features novas.
+- Não alteres ficheiros fora do âmbito do erro.
+- Para cada ficheiro a corrigir, emite 1 bloco exactamente assim:
+
+<<<< FILE: <path relativo ao repo, ex: ui/server.js>
+SEARCH:
+<texto EXACTO do ficheiro actual que queres substituir>
+====
+REPLACE:
+<novo texto corrigido>
+>>>>
+
+- Não escrevas nada fora dos blocos <<<< ... >>>>.
+- Se não houver nada a corrigir, devolve NOOP.
+
+CONTEXTO:
+Objetivo: {{GOAL}}
+
+ERRO / GATE LOG (últimos 4000 chars):
+{{GATE_LOG}}
+
+Ficheiros modificados pelo patch anterior:
+{{FILES}}
