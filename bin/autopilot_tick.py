@@ -59,7 +59,8 @@ def log(msg: str, job_log: pathlib.Path | None = None) -> None:
 
 def pg_peek() -> dict | None:
     from bin import backlog_pg
-    return backlog_pg.peek_next_task_json()
+    # task_type=None → devolve qualquer tipo (DEV/OPS/RESEARCH)
+    return backlog_pg.peek_next_task_json(task_type=None)
 
 
 def pg_mark(task_id: str, status: str, last_error: str | None = None) -> None:
@@ -137,6 +138,19 @@ def _collect_file_context(goal: str, max_lines: int = 300) -> str:
     return "\n\n".join(sections)
 
 
+def _resolve_file_path(rel: str) -> pathlib.Path | None:
+    """Tenta resolver path relativo com variações comuns (com/sem bin/, ui/)."""
+    candidates = [
+        AIOS_ROOT / rel,
+        AIOS_ROOT / "bin" / pathlib.Path(rel).name,
+        AIOS_ROOT / "ui"  / pathlib.Path(rel).name,
+    ]
+    for c in candidates:
+        if c.is_file():
+            return c
+    return None
+
+
 def _apply_search_replace(raw: str) -> list[str]:
     """Aplica blocos <<<< FILE. Devolve ficheiros alterados ou [] se sem blocos."""
     blocks = list(_SR_BLOCK_RE.finditer(raw))
@@ -147,22 +161,24 @@ def _apply_search_replace(raw: str) -> list[str]:
         rel  = m.group("file").strip()
         srch = m.group("search")
         repl = m.group("replace")
-        tgt  = AIOS_ROOT / rel
-        if not tgt.is_file():
+        tgt  = _resolve_file_path(rel)
+        if tgt is None:
             if srch.strip():
                 raise RuntimeError(f"search/replace: ficheiro não existe: {rel}")
+            # ficheiro novo — usa path tal qual
+            tgt = AIOS_ROOT / rel
             tgt.parent.mkdir(parents=True, exist_ok=True)
             tgt.write_text(repl, encoding="utf-8")
-            changed.append(rel)
+            changed.append(str(tgt.relative_to(AIOS_ROOT)))
             continue
         orig = tgt.read_text(encoding="utf-8", errors="replace")
         if srch not in orig:
             raise RuntimeError(
-                f"search/replace: padrão não encontrado em {rel}\n"
+                f"search/replace: padrão não encontrado em {tgt.relative_to(AIOS_ROOT)}\n"
                 f"SEARCH[:200]: {srch[:200]!r}"
             )
         tgt.write_text(orig.replace(srch, repl, 1), encoding="utf-8")
-        changed.append(rel)
+        changed.append(str(tgt.relative_to(AIOS_ROOT)))
     return changed
 
 
@@ -347,10 +363,11 @@ def run_cycle() -> str:
             log(f"gates falhou — reflect round {rounds}/{MAX_REFLECT}", jlog)
             (job_dir / f"reflect_round_{rounds}.txt").write_text(gate_log_txt, encoding="utf-8", errors="replace")
 
+            prev_files = patch_files[:]   # guarda antes de reset
             git_abort_and_reset(patch_files)
             patch_files = []
 
-            reflect_prompt = build_reflect_prompt(goal, gate_log_txt, patch_files)
+            reflect_prompt = build_reflect_prompt(goal, gate_log_txt, prev_files)
             (job_dir / f"reflect_prompt_{rounds}.txt").write_text(reflect_prompt, encoding="utf-8")
 
             inc_path = job_dir / f"patch_reflect_{rounds}.diff"

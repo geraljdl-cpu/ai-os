@@ -40,12 +40,12 @@ else
   git diff --check 2>&1 | tee -a "$LOG" || fail "whitespace errors"
 fi
 
-# 3. Python syntax
-echo "[gate] python compileall" | tee -a "$LOG"
-COMPILE_OUT=$(python3 -m compileall -q . 2>&1 || true)
+# 3. Python syntax — exclui runtime/ (ficheiros gerados por runs anteriores)
+echo "[gate] python compileall (bin/ e ui/)" | tee -a "$LOG"
+COMPILE_OUT=$(python3 -m compileall -q bin/ 2>&1 || true)
 echo "$COMPILE_OUT" | tee -a "$LOG"
 if echo "$COMPILE_OUT" | grep -qi "SyntaxError"; then
-  fail "python SyntaxError detected"
+  fail "python SyntaxError in bin/"
 fi
 
 # 4. Smoke: syshealth (tolerante a timeout)
