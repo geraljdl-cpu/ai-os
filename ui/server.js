@@ -308,7 +308,6 @@ app.post('/api/reject', (req, res) => {
 
 // ── NOC endpoints ─────────────────────────────────────────────────────────────
 
-const { execSync } = require('child_process');
 const AIOS_ROOT = process.env.AIOS_ROOT || require('os').homedir() + '/ai-os';
 const NOC_PY = `python3 ${AIOS_ROOT}/bin/noc_query.py`;
 const DB_ENV = `DATABASE_URL=${process.env.DATABASE_URL || 'postgresql://aios_user:jdl@127.0.0.1:5432/aios'}`;
