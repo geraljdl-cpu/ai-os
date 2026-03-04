@@ -68,6 +68,21 @@ def pg_mark(task_id: str, status: str, last_error: str | None = None) -> None:
     backlog_pg.update_task(task_id, status=status, last_error=last_error)
 
 
+def pg_event(level: str, kind: str, message: str) -> None:
+    """Insere evento em public.events (best-effort, nunca crasha o tick)."""
+    try:
+        import sqlalchemy as sa
+        db_url = os.environ.get("DATABASE_URL", "postgresql://aios_user:jdl@127.0.0.1:5432/aios")
+        engine = sa.create_engine(db_url, pool_pre_ping=True, future=True)
+        with engine.begin() as c:
+            c.execute(sa.text(
+                "INSERT INTO public.events (ts, level, source, kind, message) "
+                "VALUES (NOW(), :level, 'autopilot', :kind, :msg)"
+            ), {"level": level, "kind": kind, "msg": message[:500]})
+    except Exception:
+        pass
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Git
 # ──────────────────────────────────────────────────────────────────────────────
@@ -307,6 +322,15 @@ def make_job_id() -> str:
 
 def run_cycle() -> str:
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Guard: worktree sujo → abortar (evita git add -A capturar ficheiros WIP)
+    dirty = sh("git status --porcelain", check=False).stdout.strip()
+    if dirty:
+        lines = dirty.splitlines()
+        summary = f"{len(lines)} ficheiro(s) modificado(s): {lines[0][:80]}"
+        print(f"[tick] IDLE — worktree dirty ({summary})")
+        pg_event("warn", "worktree_dirty", f"tick abortado: {summary}")
+        return "IDLE"
 
     task = pg_peek()
     if not task:
