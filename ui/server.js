@@ -49,8 +49,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- Auth middleware (aplica a todas as rotas /api/* excepto /api/auth/login) ---
-const AUTH_EXEMPT = new Set(['/auth/login']);
+// --- Auth middleware ---
+// NOC endpoints são públicos (dashboard/cluster workers não têm JWT)
+// Actions e endpoints de escrita requerem auth
+const AUTH_EXEMPT = new Set([
+  '/auth/login',
+  // NOC read (dashboard)
+  '/syshealth', '/telemetry', '/telemetry/history',
+  '/backlog/recent', '/jobs/recent', '/watchdog/events',
+  '/workers', '/workers/register',
+  // Worker pull-model (sem JWT nos workers remotos)
+  '/worker_jobs/lease', '/worker_jobs/report',
+]);
 app.use('/api', (req, res, next) => {
   if (AUTH_EXEMPT.has(req.path)) return next();
   const auth  = req.headers['authorization'] || '';
@@ -296,5 +306,173 @@ app.post('/api/reject', (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: String(e) }); }
 });
 
-app.listen(3000,()=>console.log("UI http://localhost:3000"));
-app.get('/api/version', (req, res) => { res.json({ version: '1.0.0', name: 'ai-os' }); });
+// ── NOC endpoints ─────────────────────────────────────────────────────────────
+
+const { execSync } = require('child_process');
+const AIOS_ROOT = process.env.AIOS_ROOT || require('os').homedir() + '/ai-os';
+const NOC_PY = `python3 ${AIOS_ROOT}/bin/noc_query.py`;
+const DB_ENV = `DATABASE_URL=${process.env.DATABASE_URL || 'postgresql://aios_user:jdl@127.0.0.1:5432/aios'}`;
+
+function nocExec(cmd, timeout = 8000) {
+  try {
+    const out = execSync(`${DB_ENV} ${NOC_PY} ${cmd}`, { timeout, encoding: 'utf8' });
+    return JSON.parse(out);
+  } catch (e) {
+    return { error: (e.stderr || e.message || String(e)).slice(0, 300) };
+  }
+}
+
+// Serve ops.html
+app.get('/ops', (req, res) => res.sendFile(__dirname + '/ops.html'));
+
+// System health: containers + timers + backlog
+app.get('/api/syshealth', (req, res) => res.json(nocExec('syshealth')));
+
+// Telemetria live (última leitura por host)
+app.get('/api/telemetry', (req, res) => res.json(nocExec('telemetry_live')));
+
+// Histórico de telemetria
+app.get('/api/telemetry/history', (req, res) => {
+  const n    = parseInt(req.query.n || '120', 10);
+  const host = req.query.host ? ` ${req.query.host}` : '';
+  res.json(nocExec(`telemetry_history ${n}${host}`));
+});
+
+// Backlog recente
+app.get('/api/backlog/recent', (req, res) => {
+  const limit = parseInt(req.query.limit || '20', 10);
+  res.json(nocExec(`backlog_recent ${limit}`));
+});
+
+// Jobs filesystem (últimos job dirs)
+app.get('/api/jobs/recent', (req, res) => {
+  const limit = parseInt(req.query.limit || '15', 10);
+  try {
+    const jobsDir = AIOS_ROOT + '/runtime/jobs';
+    const dirs = require('fs').readdirSync(jobsDir)
+      .filter(d => /^\d{8}_\d{6}_/.test(d))
+      .sort().reverse().slice(0, limit)
+      .map(d => {
+        try {
+          const finalPath = `${jobsDir}/${d}/final.json`;
+          const final = require('fs').existsSync(finalPath)
+            ? JSON.parse(require('fs').readFileSync(finalPath, 'utf8')) : {};
+          const goalPath = `${jobsDir}/${d}/goal.txt`;
+          const goal = require('fs').existsSync(goalPath)
+            ? require('fs').readFileSync(goalPath, 'utf8').trim().slice(0, 80) : '';
+          return { job_id: d, ok: final.ok, rounds: final.rounds, error: final.error, goal };
+        } catch { return { job_id: d }; }
+      });
+    res.json(dirs);
+  } catch (e) {
+    res.json({ error: e.message });
+  }
+});
+
+// Eventos
+app.get('/api/watchdog/events', (req, res) => {
+  const n = parseInt(req.query.n || '30', 10);
+  res.json(nocExec(`events ${n}`));
+});
+
+// Workers
+app.get('/api/workers', (req, res) => res.json(nocExec('workers')));
+
+// Registo de worker (GET ou POST)
+app.get('/api/workers/register', (req, res) => {
+  const { id, hostname, role } = req.query;
+  if (!id || !hostname || !role) return res.status(400).json({ ok: false, error: 'id, hostname, role required' });
+  res.json(nocExec(`worker_register ${id} ${hostname} ${role}`));
+});
+app.post('/api/workers/register', (req, res) => {
+  const { id, hostname, role } = { ...req.query, ...req.body };
+  if (!id || !hostname || !role) return res.status(400).json({ ok: false, error: 'id, hostname, role required' });
+  res.json(nocExec(`worker_register ${id} ${hostname} ${role}`));
+});
+
+// Worker jobs
+app.get('/api/worker_jobs', (req, res) => {
+  const limit = parseInt(req.query.limit || '30', 10);
+  res.json(nocExec(`worker_jobs ${limit}`));
+});
+
+app.get('/api/worker_jobs/lease', (req, res) => {
+  const { worker_id } = req.query;
+  if (!worker_id) return res.status(400).json({ ok: false, error: 'worker_id required' });
+  res.json(nocExec(`worker_jobs_lease ${worker_id}`));
+});
+
+app.post('/api/worker_jobs/report', (req, res) => {
+  const { job_id, status, result } = req.body || {};
+  if (!job_id || !status) return res.status(400).json({ ok: false, error: 'job_id, status required' });
+  const resultJson = JSON.stringify(result || {}).replace(/'/g, '"');
+  res.json(nocExec(`worker_jobs_report ${job_id} ${status} '${resultJson}'`));
+});
+
+app.post('/api/worker_jobs/enqueue', (req, res) => {
+  // Auth obrigatório (está fora do AUTH_EXEMPT)
+  const { kind, payload, target_worker_id } = req.body || {};
+  if (!kind) return res.status(400).json({ ok: false, error: 'kind required' });
+  try {
+    const DB_URL = process.env.DATABASE_URL || 'postgresql://aios_user:jdl@127.0.0.1:5432/aios';
+    const py = `
+import json, os
+import sqlalchemy as sa
+engine = sa.create_engine(${JSON.stringify(DB_URL)})
+with engine.begin() as c:
+    r = c.execute(sa.text(
+        "INSERT INTO public.worker_jobs (ts_created, status, kind, payload, target_worker_id) "
+        "VALUES (NOW(), 'queued', :kind, :payload, :target) RETURNING id"
+    ), {"kind": ${JSON.stringify(kind)}, "payload": json.dumps(${JSON.stringify(payload || {})}), "target": ${JSON.stringify(target_worker_id || null)}})
+    print(r.scalar())
+`;
+    const out = execSync(`python3 -c "${py.replace(/\n/g, '; ')}"`, { timeout: 5000, encoding: 'utf8' }).trim();
+    res.json({ ok: true, job_id: parseInt(out, 10) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message.slice(0, 200) });
+  }
+});
+
+// Acções de controlo (requerem auth — não estão em AUTH_EXEMPT)
+app.post('/api/actions/tick', (req, res) => {
+  exec(`sudo systemctl start aios-autopilot.service 2>&1 || python3 ${AIOS_ROOT}/bin/autopilot_tick.py`, (err, out) => {
+    res.json({ ok: !err, output: (out || '').slice(0, 200) });
+  });
+});
+
+app.post('/api/actions/watchdog', (req, res) => {
+  exec(`sudo systemctl start aios-watchdog.service 2>&1`, (err, out) => {
+    res.json({ ok: !err, output: (out || '').slice(0, 200) });
+  });
+});
+
+app.post('/api/actions/healthcheck', (req, res) => {
+  exec(`${AIOS_ROOT}/bin/aios_health.sh 2>&1`, { timeout: 10000 }, (err, out) => {
+    res.json({ ok: !err, output: (out || '').slice(0, 1000) });
+  });
+});
+
+// Retenção: elimina dados antigos (>N dias) — chamado manualmente ou por timer
+app.post('/api/maintenance/cleanup', (req, res) => {
+  const days = parseInt(req.body?.days || '30', 10);
+  try {
+    const out = execSync(`${DB_ENV} python3 -c "
+import sqlalchemy as sa, os
+engine = sa.create_engine(os.environ['DATABASE_URL'])
+with engine.begin() as c:
+    t=c.execute(sa.text('DELETE FROM public.telemetry WHERE ts < NOW() - INTERVAL \\':days days\\''), {'days': ${days}}).rowcount
+    e=c.execute(sa.text('DELETE FROM public.events WHERE ts < NOW() - INTERVAL \\':days days\\''), {'days': ${days}}).rowcount
+    w=c.execute(sa.text('DELETE FROM public.worker_jobs WHERE ts_created < NOW() - INTERVAL \\':days days\\''), {'days': ${days}}).rowcount
+    print(t, e, w)
+"`, { timeout: 15000, encoding: 'utf8' }).trim().split(' ');
+    res.json({ ok: true, deleted: { telemetry: +out[0], events: +out[1], worker_jobs: +out[2] } });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message.slice(0, 200) });
+  }
+});
+
+// ── versão e boot ─────────────────────────────────────────────────────────────
+
+app.get('/api/version', (req, res) => res.json({ version: '1.0.0', name: 'ai-os' }));
+
+app.listen(3000, () => console.log("UI http://localhost:3000"));

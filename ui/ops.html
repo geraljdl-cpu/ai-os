@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-OS NOC</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#04060f;--panel:#0b0f1e;--border:#1a2040;
+  --blue:#4f8eff;--cyan:#00d4ff;--green:#22c55e;
+  --yellow:#fbbf24;--red:#f87171;--gray:#64748b;
+  --ink:#e2e8f8;--ink2:#8892b0;
+  --font:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:13px;min-height:100vh}
+a{color:var(--blue);text-decoration:none}
+
+/* TOPBAR */
+#topbar{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 20px;background:var(--panel);
+  border-bottom:1px solid var(--border);
+  position:sticky;top:0;z-index:100;
+}
+#topbar h1{font-size:15px;color:var(--cyan);letter-spacing:2px}
+#topbar .ts{font-size:11px;color:var(--gray);margin-left:auto}
+#topbar .badge{
+  padding:2px 8px;border-radius:4px;font-size:11px;
+  background:#1a2040;color:var(--cyan);
+}
+
+/* GRID */
+#grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(340px,1fr));
+  gap:16px;padding:16px;
+}
+
+/* PANEL */
+.card{
+  background:var(--panel);border:1px solid var(--border);
+  border-radius:8px;overflow:hidden;
+}
+.card-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 14px;border-bottom:1px solid var(--border);
+  font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--ink2);
+}
+.card-head span:first-child{color:var(--cyan)}
+.card-body{padding:14px}
+
+/* METRIC CARDS */
+#metrics-row{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  gap:16px;padding:16px 16px 0;
+}
+.metric{
+  background:var(--panel);border:1px solid var(--border);
+  border-radius:8px;padding:16px;text-align:center;
+}
+.metric .val{font-size:32px;font-weight:700;color:var(--cyan)}
+.metric .lbl{font-size:10px;color:var(--gray);text-transform:uppercase;letter-spacing:1px;margin-top:4px}
+.metric .sub{font-size:10px;color:var(--ink2);margin-top:2px}
+
+/* CHART */
+.chart-wrap{position:relative;height:160px}
+
+/* TABLE */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{color:var(--gray);text-transform:uppercase;font-size:10px;letter-spacing:1px;
+   padding:4px 8px;border-bottom:1px solid var(--border);text-align:left}
+td{padding:5px 8px;border-bottom:1px solid #0d1128;word-break:break-all}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#0d1325}
+
+/* BADGES */
+.b{padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600}
+.b-ok,.b-done,.b-online{background:#052e16;color:var(--green)}
+.b-warn,.b-running,.b-queued{background:#422006;color:var(--yellow)}
+.b-err,.b-failed,.b-offline,.b-stale{background:#3f0f0f;color:var(--red)}
+.b-info,.b-pending{background:#0f1f3f;color:var(--blue)}
+
+/* EVENTS */
+.ev{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid #0d1128;font-size:11px}
+.ev:last-child{border-bottom:none}
+.ev-ts{color:var(--gray);flex-shrink:0;width:120px}
+.ev-msg{color:var(--ink2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* CTRL BUTTONS */
+.btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:7px 14px;border-radius:5px;border:1px solid var(--border);
+  background:#0f1325;color:var(--ink);cursor:pointer;
+  font-family:var(--font);font-size:12px;transition:background 0.15s;
+}
+.btn:hover{background:var(--blue);color:#fff;border-color:var(--blue)}
+.btn:active{opacity:.8}
+.btn-row{display:flex;flex-wrap:wrap;gap:8px}
+
+/* STATUS dot */
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
+.dot-ok{background:var(--green)}
+.dot-warn{background:var(--yellow)}
+.dot-err{background:var(--red)}
+
+/* LOG pre */
+pre.log{
+  background:#020408;border-radius:4px;padding:10px;
+  font-size:11px;color:var(--ink2);max-height:180px;
+  overflow-y:auto;white-space:pre-wrap;word-break:break-all;
+}
+
+/* SCROLLBAR */
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div id="topbar">
+  <h1>AI-OS NOC</h1>
+  <span class="badge" id="health-badge">●</span>
+  <span class="badge" id="backlog-badge">backlog —</span>
+  <span class="ts" id="ts">—</span>
+</div>
+
+<!-- METRIC CARDS -->
+<div id="metrics-row">
+  <div class="metric">
+    <div class="val" id="m-cpu">—</div>
+    <div class="lbl">CPU</div>
+    <div class="sub" id="m-cpu-host">—</div>
+  </div>
+  <div class="metric">
+    <div class="val" id="m-ram">—</div>
+    <div class="lbl">RAM</div>
+    <div class="sub" id="m-ram-sub">—</div>
+  </div>
+  <div class="metric">
+    <div class="val" id="m-disk">—</div>
+    <div class="lbl">DISK</div>
+    <div class="sub" id="m-disk-sub">—</div>
+  </div>
+</div>
+
+<!-- GRID -->
+<div id="grid">
+
+  <!-- CHART CPU/RAM -->
+  <div class="card" style="grid-column:span 2">
+    <div class="card-head">
+      <span>Telemetria histórica</span>
+      <span>
+        <select id="chart-host" style="background:#0b0f1e;color:#8892b0;border:1px solid #1a2040;padding:2px 6px;border-radius:3px;font-size:11px">
+          <option value="">todos</option>
+        </select>
+      </span>
+    </div>
+    <div class="card-body">
+      <div class="chart-wrap"><canvas id="chart-cpu"></canvas></div>
+      <div class="chart-wrap" style="margin-top:10px"><canvas id="chart-ram"></canvas></div>
+    </div>
+  </div>
+
+  <!-- WORKERS -->
+  <div class="card">
+    <div class="card-head"><span>Cluster Workers</span><span id="workers-count">—</span></div>
+    <div class="card-body">
+      <table id="workers-table">
+        <thead><tr><th>ID</th><th>Host</th><th>Role</th><th>Status</th><th>Last seen</th></tr></thead>
+        <tbody id="workers-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- TASK QUEUE -->
+  <div class="card" style="grid-column:span 2">
+    <div class="card-head"><span>Task Queue (backlog recente)</span><a href="#" onclick="loadBacklog();return false">↻</a></div>
+    <div class="card-body">
+      <table id="backlog-table">
+        <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Pri</th><th>Goal</th></tr></thead>
+        <tbody id="backlog-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- WORKER JOBS -->
+  <div class="card">
+    <div class="card-head"><span>Worker Jobs</span><a href="#" onclick="loadWJobs();return false">↻</a></div>
+    <div class="card-body">
+      <table id="wjobs-table">
+        <thead><tr><th>ID</th><th>Kind</th><th>Status</th><th>Worker</th></tr></thead>
+        <tbody id="wjobs-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- CONTAINERS -->
+  <div class="card">
+    <div class="card-head"><span>Containers</span><a href="#" onclick="loadHealth();return false">↻</a></div>
+    <div class="card-body">
+      <table id="containers-table">
+        <thead><tr><th>Nome</th><th>State</th><th>Status</th></tr></thead>
+        <tbody id="containers-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- EVENTS -->
+  <div class="card" style="grid-column:span 2">
+    <div class="card-head"><span>Events / Alerts</span><a href="#" onclick="loadEvents();return false">↻</a></div>
+    <div class="card-body" id="events-body" style="max-height:220px;overflow-y:auto"></div>
+  </div>
+
+  <!-- CONTROLO -->
+  <div class="card">
+    <div class="card-head"><span>Controlo</span></div>
+    <div class="card-body">
+      <div class="btn-row">
+        <button class="btn" onclick="action('tick')">▶ Tick</button>
+        <button class="btn" onclick="action('watchdog')">🔍 Watchdog</button>
+        <button class="btn" onclick="action('healthcheck')">❤ Health</button>
+      </div>
+      <pre class="log" id="action-log" style="margin-top:12px">—</pre>
+      <div style="margin-top:12px;font-size:11px;color:var(--gray)">
+        Retenção:
+        <button class="btn" style="font-size:11px;padding:4px 10px" onclick="doCleanup(30)">Limpar >30d</button>
+        <button class="btn" style="font-size:11px;padding:4px 10px" onclick="doCleanup(7)">Limpar >7d</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- AUTOPILOT JOBS -->
+  <div class="card">
+    <div class="card-head"><span>Autopilot Jobs recentes</span><a href="#" onclick="loadJobs();return false">↻</a></div>
+    <div class="card-body">
+      <table id="jobs-table">
+        <thead><tr><th>Job ID</th><th>OK</th><th>Rounds</th><th>Goal</th></tr></thead>
+        <tbody id="jobs-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /grid -->
+
+<script>
+// ── UTILS ─────────────────────────────────────────────────────────────────────
+
+const $ = id => document.getElementById(id);
+const API = url => fetch(url).then(r => r.json()).catch(e => ({error: String(e)}));
+const API_AUTH = (url, opts={}) => {
+  const tok = localStorage.getItem('aios_token');
+  return fetch(url, { ...opts, headers: { 'Authorization': tok ? 'Bearer '+tok : '', 'Content-Type':'application/json', ...(opts.headers||{}) }}).then(r=>r.json()).catch(e=>({error:String(e)}));
+};
+
+function relTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  const age = Math.round((Date.now() - d) / 1000);
+  if (age < 60) return age + 's ago';
+  if (age < 3600) return Math.round(age/60) + 'm ago';
+  return Math.round(age/3600) + 'h ago';
+}
+
+function badge(status) {
+  const s = (status||'').toLowerCase();
+  const cls = ['done','ok','online'].includes(s) ? 'b-ok'
+            : ['running','queued','pending'].includes(s) ? 'b-warn'
+            : ['failed','offline'].includes(s) ? 'b-err'
+            : 'b-info';
+  return `<span class="b ${cls}">${status||'—'}</span>`;
+}
+
+function workerBadge(ageSecs) {
+  if (ageSecs < 120) return `<span class="dot dot-ok"></span>online`;
+  if (ageSecs < 600) return `<span class="dot dot-warn"></span>stale`;
+  return `<span class="dot dot-err"></span>dead`;
+}
+
+// ── CHARTS ────────────────────────────────────────────────────────────────────
+
+let cpuChart, ramChart;
+const CHART_OPTS = (label, color) => ({
+  type: 'line',
+  data: { labels: [], datasets: [{ label, data: [], borderColor: color, borderWidth: 1.5,
+    pointRadius: 0, fill: true,
+    backgroundColor: color + '18', tension: 0.3 }] },
+  options: {
+    animation: false, responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { display: false },
+      y: { grid: { color: '#1a2040' }, ticks: { color: '#8892b0', font: { size: 10 } } }
+    }
+  }
+});
+
+function initCharts() {
+  cpuChart = new Chart($('chart-cpu').getContext('2d'), CHART_OPTS('CPU %', '#4f8eff'));
+  ramChart = new Chart($('chart-ram').getContext('2d'), CHART_OPTS('RAM GB', '#00d4ff'));
+}
+
+function updateCharts(rows) {
+  if (!rows || rows.error) return;
+  // filtra por host seleccionado
+  const host = $('chart-host').value;
+  const filtered = host ? rows.filter(r => r.hostname === host) : rows;
+  // ordena por ts asc
+  const sorted = [...filtered].sort((a,b) => a.ts < b.ts ? -1 : 1);
+  const labels = sorted.map(r => r.ts.slice(11,19));
+  const cpus   = sorted.map(r => +(r.cpu_pct||0).toFixed(1));
+  const rams   = sorted.map(r => +((r.mem_used_mb||0)/1024).toFixed(2));
+
+  cpuChart.data.labels = labels;
+  cpuChart.data.datasets[0].data = cpus;
+  cpuChart.update('none');
+
+  ramChart.data.labels = labels;
+  ramChart.data.datasets[0].data = rams;
+  ramChart.update('none');
+}
+
+function populateHostSelect(rows) {
+  if (!rows || rows.error) return;
+  const hosts = [...new Set(rows.map(r => r.hostname))].sort();
+  const sel = $('chart-host');
+  const cur = sel.value;
+  // mantém opções existentes
+  const existing = new Set([...sel.options].map(o => o.value));
+  hosts.forEach(h => {
+    if (!existing.has(h)) {
+      const o = document.createElement('option');
+      o.value = h; o.textContent = h;
+      sel.appendChild(o);
+    }
+  });
+  if (cur) sel.value = cur;
+}
+
+// ── LOADERS ───────────────────────────────────────────────────────────────────
+
+let _telHistory = [];
+
+async function loadTelemetry() {
+  const [live, history] = await Promise.all([
+    API('/api/telemetry'),
+    API('/api/telemetry/history?n=120')
+  ]);
+
+  // live metric cards (usa dados do host local — primeiro da lista)
+  const row = Array.isArray(live) ? live[0] : null;
+  if (row) {
+    $('m-cpu').textContent = (row.cpu_pct||0).toFixed(1) + '%';
+    $('m-cpu-host').textContent = row.hostname || '';
+    const ramPct = row.mem_total_mb > 0 ? (row.mem_used_mb/row.mem_total_mb*100).toFixed(0)+'%' : '—';
+    $('m-ram').textContent = ramPct;
+    $('m-ram-sub').textContent = `${(row.mem_used_mb/1024).toFixed(1)} / ${(row.mem_total_mb/1024).toFixed(1)} GB`;
+    const diskPct = row.disk_total_gb > 0 ? (row.disk_used_gb/row.disk_total_gb*100).toFixed(0)+'%' : '—';
+    $('m-disk').textContent = diskPct;
+    $('m-disk-sub').textContent = `${row.disk_used_gb.toFixed(0)} / ${row.disk_total_gb.toFixed(0)} GB`;
+  }
+
+  if (Array.isArray(history)) {
+    _telHistory = history;
+    populateHostSelect(history);
+    updateCharts(history);
+  }
+}
+
+async function loadWorkers() {
+  const data = await API('/api/workers');
+  if (!Array.isArray(data)) return;
+  $('workers-count').textContent = data.length + ' worker(s)';
+  const tb = $('workers-body');
+  tb.innerHTML = data.map(w => `
+    <tr>
+      <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${w.id}">${w.id.slice(0,18)}</td>
+      <td>${w.hostname||'—'}</td>
+      <td>${w.role||'—'}</td>
+      <td>${workerBadge(w.age_secs||9999)}</td>
+      <td style="color:var(--gray)">${relTime(w.last_seen)}</td>
+    </tr>`).join('');
+}
+
+async function loadHealth() {
+  const data = await API('/api/syshealth');
+  if (!data || data.error) return;
+
+  // containers
+  const cb = $('containers-body');
+  const containers = data.containers || [];
+  cb.innerHTML = containers.map(c => {
+    const ok = (c.state||'').toLowerCase() === 'running';
+    const dot = ok ? 'dot-ok' : 'dot-err';
+    return `<tr>
+      <td><span class="dot ${dot}"></span>${c.name||'?'}</td>
+      <td>${badge(c.state)}</td>
+      <td style="color:var(--gray);font-size:11px">${(c.status||'').slice(0,30)}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="3" style="color:var(--gray)">sem containers</td></tr>';
+
+  // backlog badge
+  const bl = data.backlog || {};
+  const pending = bl.pending || 0;
+  const failed  = bl.failed  || 0;
+  const bb = $('backlog-badge');
+  bb.textContent = `backlog ${pending}p / ${failed}f`;
+  bb.style.color  = failed > 0 ? 'var(--red)' : pending > 0 ? 'var(--yellow)' : 'var(--green)';
+
+  // health badge
+  const allOk = containers.every(c => (c.state||'').toLowerCase() === 'running');
+  const hb = $('health-badge');
+  hb.textContent = allOk ? '● HEALTHY' : '● DEGRADED';
+  hb.style.color  = allOk ? 'var(--green)' : 'var(--red)';
+}
+
+async function loadBacklog() {
+  const data = await API('/api/backlog/recent?limit=20');
+  if (!Array.isArray(data)) return;
+  const tb = $('backlog-body');
+  tb.innerHTML = data.map(t => `
+    <tr>
+      <td style="font-family:monospace;color:var(--gray)">${(t.id||'').slice(0,10)}</td>
+      <td style="color:var(--ink2);font-size:11px">${(t.task_type||'').replace('_TASK','')}</td>
+      <td>${badge(t.status)}</td>
+      <td style="text-align:center">${t.priority||5}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(t.goal||'').replace(/"/g,'&quot;')}">${(t.goal||t.title||'').slice(0,60)}</td>
+    </tr>`).join('') || '<tr><td colspan="5" style="color:var(--gray)">sem tasks</td></tr>';
+}
+
+async function loadEvents() {
+  const data = await API('/api/watchdog/events?n=30');
+  if (!Array.isArray(data)) return;
+  const body = $('events-body');
+  body.innerHTML = data.map(e => {
+    const lvl = (e.level||'info').toLowerCase();
+    const color = lvl === 'critical' ? 'var(--red)' : lvl === 'warning' ? 'var(--yellow)' : 'var(--ink2)';
+    return `<div class="ev">
+      <span class="ev-ts">${(e.ts||'').slice(0,19).replace('T',' ')}</span>
+      <span class="b b-info" style="font-size:10px;padding:1px 4px">${e.source||'?'}</span>
+      <span class="ev-msg" style="color:${color}" title="${(e.message||'').replace(/"/g,'')}">${e.message||'—'}</span>
+    </div>`;
+  }).join('') || '<div style="color:var(--gray);font-size:12px">sem eventos</div>';
+}
+
+async function loadWJobs() {
+  const data = await API('/api/worker_jobs?limit=20');
+  if (!Array.isArray(data)) return;
+  const tb = $('wjobs-body');
+  tb.innerHTML = data.map(j => `
+    <tr>
+      <td style="color:var(--gray)">${j.id}</td>
+      <td>${j.kind||'—'}</td>
+      <td>${badge(j.status)}</td>
+      <td style="font-size:11px;color:var(--ink2)">${(j.assigned_worker_id||j.target_worker_id||'—').slice(0,20)}</td>
+    </tr>`).join('') || '<tr><td colspan="4" style="color:var(--gray)">sem jobs</td></tr>';
+}
+
+async function loadJobs() {
+  const data = await API('/api/jobs/recent?limit=12');
+  if (!Array.isArray(data)) return;
+  const tb = $('jobs-body');
+  tb.innerHTML = data.map(j => `
+    <tr>
+      <td style="font-family:monospace;font-size:10px;color:var(--gray)">${(j.job_id||'').slice(9,25)}</td>
+      <td>${j.ok === true ? '<span class="b b-ok">✓</span>' : j.ok === false ? '<span class="b b-err">✗</span>' : '—'}</td>
+      <td style="text-align:center;color:var(--ink2)">${j.rounds ?? '—'}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink2)" title="${(j.goal||'').replace(/"/g,'')}">
+        ${(j.goal||'—').slice(0,50)}</td>
+    </tr>`).join('') || '<tr><td colspan="4" style="color:var(--gray)">sem jobs</td></tr>';
+}
+
+// ── ACTIONS ───────────────────────────────────────────────────────────────────
+
+async function action(name) {
+  $('action-log').textContent = `[${name}] a executar...`;
+  const data = await API_AUTH(`/api/actions/${name}`, { method:'POST', body:'{}' });
+  $('action-log').textContent = data.output || data.error || JSON.stringify(data);
+}
+
+async function doCleanup(days) {
+  $('action-log').textContent = `[cleanup] a eliminar dados >${days} dias...`;
+  const data = await API_AUTH('/api/maintenance/cleanup', { method:'POST', body: JSON.stringify({days}) });
+  $('action-log').textContent = data.ok
+    ? `Eliminado: telemetry=${data.deleted?.telemetry} events=${data.deleted?.events} worker_jobs=${data.deleted?.worker_jobs}`
+    : (data.error || 'erro');
+}
+
+// ── MAIN LOOP ─────────────────────────────────────────────────────────────────
+
+async function refreshAll() {
+  $('ts').textContent = new Date().toISOString().slice(0,19).replace('T',' ') + ' UTC';
+  await Promise.all([
+    loadTelemetry(),
+    loadWorkers(),
+    loadHealth(),
+    loadBacklog(),
+    loadEvents(),
+    loadWJobs(),
+    loadJobs(),
+  ]);
+}
+
+$('chart-host').addEventListener('change', () => updateCharts(_telHistory));
+
+initCharts();
+refreshAll();
+setInterval(refreshAll, 15_000);   // refresh automático a cada 15s
+</script>
+</body>
+</html>
