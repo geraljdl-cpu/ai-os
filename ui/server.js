@@ -67,6 +67,9 @@ const AUTH_EXEMPT = new Set([
   '/syshealth', '/telemetry', '/telemetry/history',
   '/backlog/recent', '/jobs/recent', '/watchdog/events',
   '/workers', '/workers/register',
+  '/twin/approvals', '/twin/cases', '/twin/cable_batch',
+  '/twin/batch', '/twin/batch/by-token',
+  '/actions/tick', '/actions/watchdog', '/actions/healthcheck',
   // Worker pull-model: bypass JWT mas requerem requireWorkerAuth (X-AIOS-WORKER-TOKEN)
   '/worker_jobs/lease', '/worker_jobs/report',
   // Enqueue: bypass JWT mas requer X-AIOS-OPS-TOKEN (ou JWT)
@@ -74,6 +77,8 @@ const AUTH_EXEMPT = new Set([
 ]);
 app.use('/api', (req, res, next) => {
   if (AUTH_EXEMPT.has(req.path)) return next();
+  if (req.path.startsWith('/twin/batch'))  return next();  // auth própria em cada endpoint
+  if (req.path.startsWith('/twin/client')) return next(); // client portal — token validado no noc_query
   const auth  = req.headers['authorization'] || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
   if (!token) return res.status(401).json({ ok: false, error: 'unauthorized' });
@@ -83,7 +88,25 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// --- UI -> Agent API proxy ---
+// --- requireRole middleware ---
+// RBAC: admin > supervisor > operator/factory > finance > viewer > show > cliente
+const ROLE_LEVEL = { admin:100, supervisor:80, operator:60, factory:60, finance:50, viewer:30, worker:25, show:20, cliente:10 };
+function requireRole(...roles) {
+  return (req, res, next) => {
+    // OPS token bypasses role check (system/bot calls)
+    const opsTok = String(req.headers['x-aios-ops-token'] || '').trim();
+    if (OPS_TOKEN && opsTok === OPS_TOKEN) return next();
+    if (!req.user) return res.status(401).json({ ok: false, error: 'unauthorized' });
+    if (roles.includes(req.user.role)) return next();
+    // Also allow admin/supervisor for any role-protected endpoint
+    const userLevel  = ROLE_LEVEL[req.user.role] || 0;
+    const minLevel   = Math.min(...roles.map(r => ROLE_LEVEL[r] || 999));
+    if (userLevel >= 80) return next(); // admin/supervisor pass everything
+    if (userLevel >= minLevel) return next();
+    return res.status(403).json({ ok: false, error: `role insuficiente. Requer: ${roles.join(' | ')}` });
+  };
+}
+
 // --- Auth endpoints ---
 const { execSync } = require('child_process');
 app.post('/api/auth/login', (req, res) => {
@@ -97,10 +120,28 @@ app.post('/api/auth/login', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
 });
 
-app.get('/api/users', (req, res) => {
-  if (req.user?.role !== 'admin') return res.status(403).json({ ok: false, error: 'apenas admin' });
+app.get('/api/users', requireRole('admin'), (req, res) => {
   try {
     const out = execSync('python3 /home/jdl/ai-os/bin/auth.py users', { timeout: 5000 });
+    res.json(JSON.parse(out.toString()));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.post('/api/users/create', requireRole('admin'), (req, res) => {
+  try {
+    const { username, password, role } = req.body || {};
+    if (!username || !password) return res.status(400).json({ ok: false, error: 'username e password obrigatórios' });
+    const r = role ? ` ${JSON.stringify(role)}` : '';
+    const out = execSync(`python3 /home/jdl/ai-os/bin/auth.py create ${JSON.stringify(username)} ${JSON.stringify(password)}${r}`, { timeout: 8000 });
+    res.json(JSON.parse(out.toString()));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.post('/api/users/deactivate', requireRole('admin'), (req, res) => {
+  try {
+    const { username } = req.body || {};
+    if (!username) return res.status(400).json({ ok: false, error: 'username obrigatório' });
+    const out = execSync(`python3 /home/jdl/ai-os/bin/auth.py deactivate ${JSON.stringify(username)}`, { timeout: 5000 });
     res.json(JSON.parse(out.toString()));
   } catch(e) { res.json({ ok: false, error: String(e) }); }
 });
@@ -356,7 +397,17 @@ function nocExec(cmd, timeout = 8000) {
 }
 
 // Serve ops.html
-app.get('/ops', (req, res) => res.sendFile(__dirname + '/ops.html'));
+app.get('/ops',     (req, res) => res.sendFile(__dirname + '/ops.html'));
+app.get('/factory', (req, res) => res.sendFile(__dirname + '/factory.html'));
+app.get('/tenders', (req, res) => res.sendFile(__dirname + '/tenders.html'));
+app.get('/worker',  (req, res) => res.sendFile(__dirname + '/worker.html'));
+app.get('/finance', (req, res) => res.sendFile(__dirname + '/finance.html'));
+app.get('/login',   (req, res) => res.sendFile(__dirname + '/login.html'));
+
+// Serve cliente.html (portal cliente público por token) — legado
+app.get('/lote/:token',   (req, res) => res.sendFile(__dirname + '/cliente.html'));
+// Serve client.html (novo portal cliente G sprint)
+app.get('/client/:token', (req, res) => res.sendFile(__dirname + '/client.html'));
 
 // System health: containers + timers + backlog
 app.get('/api/syshealth', (req, res) => res.json(nocExec('syshealth')));
@@ -406,6 +457,207 @@ app.get('/api/jobs/recent', (req, res) => {
 app.get('/api/watchdog/events', (req, res) => {
   const n = parseInt(req.query.n || '30', 10);
   res.json(nocExec(`events ${n}`));
+});
+
+// Twin Approvals
+app.get('/api/twin/approvals', (req, res) => {
+  const limit = parseInt(req.query.limit || '20', 10);
+  try {
+    const DB_URL = process.env.DATABASE_URL || 'postgresql://aios_user:jdl@127.0.0.1:5432/aios';
+    const out = execSync(
+      `DATABASE_URL=${DB_URL} python3 -c "
+import os, json, sqlalchemy as sa
+e = sa.create_engine(os.environ['DATABASE_URL'])
+with e.connect() as c:
+    rows = c.execute(sa.text('SELECT id, action, summary, status, requested_at, decided_at FROM public.twin_approvals ORDER BY requested_at DESC LIMIT :n'), {'n': ${limit}}).mappings().all()
+    print(json.dumps([dict(r) for r in rows], default=str))
+"`, { timeout: 8000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out.trim()));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+// Twin Approvals — set status (requer role supervisor ou superior)
+app.post('/api/twin/approvals/:id/set', requireRole('supervisor'), (req, res) => {
+  const id     = parseInt(req.params.id, 10);
+  const status = String(req.body?.status || '').trim();
+  if (!id || !['approved', 'rejected'].includes(status))
+    return res.status(400).json({ ok: false, error: 'id e status (approved|rejected) obrigatórios' });
+  try {
+    const DB_URL = process.env.DATABASE_URL || 'postgresql://aios_user:jdl@127.0.0.1:5432/aios';
+    const out = execSync(
+      `DATABASE_URL=${DB_URL} python3 -c "
+import os, json, sqlalchemy as sa
+from datetime import datetime
+e = sa.create_engine(os.environ['DATABASE_URL'])
+with e.begin() as c:
+    r = c.execute(sa.text('UPDATE public.twin_approvals SET status=:s, decided_at=:d WHERE id=:id RETURNING id, action, status, decided_at'), {'s': '${status}', 'd': datetime.utcnow(), 'id': ${id}}).mappings().all()
+    if r:
+        print(json.dumps({'ok': True, 'approval': dict(r[0])}, default=str))
+    else:
+        print(json.dumps({'ok': False, 'error': 'approval não encontrada'}))
+"`, { timeout: 8000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out.trim()));
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+// Twin Cases (lista)
+app.get('/api/twin/cases', (req, res) => {
+  const limit = parseInt(req.query.limit || '20', 10);
+  res.json(nocExec(`twin_cases ${limit}`));
+});
+
+// Twin Batch — portal cliente (público, por token)
+app.get('/api/twin/batch/by-token/:token', (req, res) => {
+  const token = String(req.params.token || '').replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!token) return res.status(400).json({ error: 'token inválido' });
+  res.json(nocExec(`twin_batch_by_token ${token}`));
+});
+
+// Twin Batch — ver lote
+app.get('/api/twin/batch/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'id inválido' });
+  res.json(nocExec(`twin_batch_get ${id}`));
+});
+
+// Twin Batch — avançar estado (OPS/JWT)
+app.post('/api/twin/batch/:id/advance', (req, res) => {
+  if (!req.user) {
+    const opsTok = String(req.headers['x-aios-ops-token'] || '').trim();
+    if (!OPS_TOKEN || opsTok !== OPS_TOKEN)
+      return res.status(401).json({ ok: false, error: 'ops_token_required' });
+  }
+  const id   = parseInt(req.params.id, 10);
+  const nota = String((req.body || {}).nota || '').replace(/"/g, '').slice(0, 100);
+  if (!id) return res.status(400).json({ error: 'id inválido' });
+  res.json(nocExec(`twin_batch_advance ${id} "${nota}"`, 10000));
+});
+
+// Twin Batch — faturar (cria approval)
+app.post('/api/twin/batch/:id/faturar', (req, res) => {
+  if (!req.user) {
+    const opsTok = String(req.headers['x-aios-ops-token'] || '').trim();
+    if (!OPS_TOKEN || opsTok !== OPS_TOKEN)
+      return res.status(401).json({ ok: false, error: 'ops_token_required' });
+  }
+  const id      = parseInt(req.params.id, 10);
+  const preco   = parseFloat((req.body || {}).preco_kg);
+  if (!id) return res.status(400).json({ error: 'id inválido' });
+  if (isNaN(preco)) return res.status(400).json({ ok: false, error: 'preco_kg obrigatório' });
+  res.json(nocExec(`twin_batch_faturar ${id} ${preco}`, 10000));
+});
+
+// Twin Batch — faturar_ok (chamado após approval aprovada)
+app.post('/api/twin/batch/:id/faturar_ok', (req, res) => {
+  if (!req.user) {
+    const opsTok = String(req.headers['x-aios-ops-token'] || '').trim();
+    if (!OPS_TOKEN || opsTok !== OPS_TOKEN)
+      return res.status(401).json({ ok: false, error: 'ops_token_required' });
+  }
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'id inválido' });
+  res.json(nocExec(`twin_batch_faturar_ok ${id}`, 10000));
+});
+
+// Twin Factory stats — requer role factory/supervisor/admin
+app.get('/api/twin/factory/stats', requireRole('factory'), (req, res) => {
+  res.json(nocExec('twin_factory_stats'));
+});
+
+// Twin Tenders (radar nacional) — requer role viewer ou superior
+app.get('/api/twin/tenders', requireRole('viewer'), (req, res) => {
+  const limit  = parseInt(req.query.limit, 10) || 100;
+  const source = String(req.query.source || '').replace(/[^a-z]/g, '');
+  const srcArg = source ? ` --source ${source}` : '';
+  res.json(nocExec(`twin_tenders ${limit}${srcArg}`));
+});
+
+// Twin Tender — actualizar estado (requer role operator ou superior)
+app.post('/api/twin/tender/:id/estado', requireRole('operator'), (req, res) => {
+  const id     = parseInt(req.params.id, 10);
+  const estado = String(req.body?.estado || '').trim();
+  if (!id || !estado) return res.status(400).json({ ok: false, error: 'id e estado obrigatórios' });
+  res.json(nocExec(`twin_tender_update ${id} ${estado}`, 8000));
+});
+
+// Twin Batch — guia pública via client_token (portal cliente)
+// Rota: GET /api/twin/batch/by-token/:token/doc/guia
+app.get('/api/twin/batch/by-token/:token/doc/guia', (req, res) => {
+  const token = String(req.params.token || '').replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!token) return res.status(400).json({ error: 'token inválido' });
+  // Descobrir entity_id pelo token
+  const lookup = nocExec(`twin_batch_by_token ${token}`);
+  if (lookup.error || !lookup.entity_id)
+    return res.status(404).json({ error: 'lote não encontrado' });
+  const id = parseInt(lookup.entity_id, 10);
+  try {
+    const out = execSync(`python3 /home/jdl/ai-os/bin/doc_engine.py guia ${id}`, { timeout: 15000 });
+    const result = JSON.parse(out.toString());
+    if (!result.ok) return res.status(500).json(result);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${result.filename}"`);
+    res.send(fs.readFileSync(result.path));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+// Twin Batch — gerar doc PDF (guia | fatura) — requer OPS token ou JWT
+app.get('/api/twin/batch/:id/doc/:type', (req, res) => {
+  // Nota: /twin/batch bypassa o middleware global, por isso verificamos JWT manualmente
+  const opsTok = String(req.headers['x-aios-ops-token'] || '').trim();
+  const opsOk  = OPS_TOKEN && opsTok === OPS_TOKEN;
+  const auth   = req.headers['authorization'] || '';
+  const tok    = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  const jwtOk  = tok ? !!verifyJWT(tok) : false;
+  if (!opsOk && !jwtOk)
+    return res.status(401).json({ ok: false, error: 'autenticação necessária para aceder a documentos' });
+
+  const id   = parseInt(req.params.id, 10);
+  const type = req.params.type;
+  if (!id || !['guia','fatura'].includes(type))
+    return res.status(400).json({ error: 'id ou tipo inválido' });
+  try {
+    const out = execSync(`python3 /home/jdl/ai-os/bin/doc_engine.py ${type} ${id}`, { timeout: 15000 });
+    const result = JSON.parse(out.toString());
+    if (!result.ok) return res.status(422).json(result);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    res.send(fs.readFileSync(result.path));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+// Twin Batch — registar resultado (OPS/JWT)
+app.post('/api/twin/batch/:id/resultado', (req, res) => {
+  if (!req.user) {
+    const opsTok = String(req.headers['x-aios-ops-token'] || '').trim();
+    if (!OPS_TOKEN || opsTok !== OPS_TOKEN)
+      return res.status(401).json({ ok: false, error: 'ops_token_required' });
+  }
+  const id  = parseInt(req.params.id, 10);
+  const { kg_cobre, kg_plastico } = req.body || {};
+  if (!id) return res.status(400).json({ error: 'id inválido' });
+  if (kg_cobre == null || kg_plastico == null)
+    return res.status(400).json({ ok: false, error: 'kg_cobre e kg_plastico obrigatórios' });
+  res.json(nocExec(`twin_batch_resultado ${id} ${parseFloat(kg_cobre)} ${parseFloat(kg_plastico)}`, 10000));
+});
+
+// Twin Cable Batch (criar lote — OPS/JWT)
+app.post('/api/twin/cable_batch', (req, res) => {
+  if (!req.user) {
+    const opsTok = String(req.headers['x-aios-ops-token'] || '').trim();
+    if (!OPS_TOKEN || opsTok !== OPS_TOKEN)
+      return res.status(401).json({ ok: false, error: 'ops_token_required' });
+  }
+  const { kg, client } = req.body || {};
+  if (!kg || !client) return res.status(400).json({ ok: false, error: 'kg e client obrigatórios' });
+  const result = nocExec(`twin_cable_batch_create ${parseFloat(kg)} "${String(client).replace(/"/g,'')}"`, 10000);
+  if (result.error) return res.status(500).json({ ok: false, error: result.error });
+  res.json(result);
 });
 
 // Workers
@@ -458,20 +710,27 @@ app.post('/api/worker_jobs/enqueue', (req, res) => {
   res.json(result);
 });
 
-// Acções de controlo (requerem auth — não estão em AUTH_EXEMPT)
-app.post('/api/actions/tick', (req, res) => {
+// Acções de controlo — requerem JWT ou OPS token
+function requireActionAuth(req, res, next) {
+  if (req.user) return next();  // JWT já validado pelo middleware global
+  const opsTok = String(req.headers['x-aios-ops-token'] || '').trim();
+  if (OPS_TOKEN && opsTok === OPS_TOKEN) return next();
+  return res.status(401).json({ ok: false, error: 'auth_required' });
+}
+
+app.post('/api/actions/tick', requireActionAuth, (req, res) => {
   exec(`sudo systemctl start aios-autopilot.service 2>&1 || python3 ${AIOS_ROOT}/bin/autopilot_tick.py`, (err, out) => {
     res.json({ ok: !err, output: (out || '').slice(0, 200) });
   });
 });
 
-app.post('/api/actions/watchdog', (req, res) => {
+app.post('/api/actions/watchdog', requireActionAuth, (req, res) => {
   exec(`sudo systemctl start aios-watchdog.service 2>&1`, (err, out) => {
     res.json({ ok: !err, output: (out || '').slice(0, 200) });
   });
 });
 
-app.post('/api/actions/healthcheck', (req, res) => {
+app.post('/api/actions/healthcheck', requireActionAuth, (req, res) => {
   exec(`${AIOS_ROOT}/bin/aios_health.sh 2>&1`, { timeout: 10000 }, (err, out) => {
     res.json({ ok: !err, output: (out || '').slice(0, 1000) });
   });
@@ -494,6 +753,134 @@ with engine.begin() as c:
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message.slice(0, 200) });
   }
+});
+
+// ── client portal (token-based, public) ───────────────────────────────────────
+
+// POST /api/twin/client/:token/approve/:id  — cliente aprova/rejeita via portal
+app.post('/api/twin/client/:token/approve/:id', (req, res) => {
+  const token  = String(req.params.token || '').replace(/[^a-zA-Z0-9_-]/g, '');
+  const id     = parseInt(req.params.id, 10);
+  const action = String(req.body?.action || '').trim();
+  if (!token || !id || !['approved', 'rejected'].includes(action))
+    return res.status(400).json({ ok: false, error: 'token, id e action (approved|rejected) obrigatórios' });
+  res.json(nocExec(`client_approve ${token} ${id} ${action}`, 10000));
+});
+
+// ── worker app (twin tasks) ────────────────────────────────────────────────────
+const WORKER_ROLES = ['worker','operator','factory','supervisor','admin'];
+
+app.get('/api/worker/tasks', requireRole(...WORKER_ROLES), (req, res) => {
+  const user  = req.user.username || 'all';
+  const limit = parseInt(req.query.limit, 10) || 30;
+  res.json(nocExec(`worker_tasks ${user} ${limit}`));
+});
+
+app.get('/api/worker/tasks/history', requireRole(...WORKER_ROLES), (req, res) => {
+  const user  = req.user.username || 'all';
+  const limit = parseInt(req.query.limit, 10) || 20;
+  res.json(nocExec(`worker_tasks_history ${user} ${limit}`));
+});
+
+app.post('/api/worker/tasks/:id/start', requireRole(...WORKER_ROLES), (req, res) => {
+  const id   = parseInt(req.params.id, 10);
+  const user = req.user.username;
+  if (!id || !user) return res.status(400).json({ ok: false, error: 'id e username obrigatórios' });
+  res.json(nocExec(`worker_task_start ${id} ${user}`));
+});
+
+app.post('/api/worker/tasks/:id/done', requireRole(...WORKER_ROLES), (req, res) => {
+  const id   = parseInt(req.params.id, 10);
+  const user = req.user.username;
+  const note = String(req.body?.note || '').replace(/'/g, '"').slice(0, 500);
+  if (!id || !user) return res.status(400).json({ ok: false, error: 'id e username obrigatórios' });
+  res.json(nocExec(`worker_task_done ${id} ${user} '${note}'`));
+});
+
+app.post('/api/worker/tasks/:id/skip', requireRole(...WORKER_ROLES), (req, res) => {
+  const id   = parseInt(req.params.id, 10);
+  const user = req.user.username;
+  if (!id || !user) return res.status(400).json({ ok: false, error: 'id e username obrigatórios' });
+  res.json(nocExec(`worker_task_skip ${id} ${user}`));
+});
+
+// ── finance twin ──────────────────────────────────────────────────────────────
+
+const FINANCE_ROLES = ['finance', 'supervisor', 'admin', 'factory'];
+
+app.get('/api/twin/invoices', requireRole(...FINANCE_ROLES), (req, res) => {
+  const status = req.query.status || '';
+  const limit  = parseInt(req.query.limit, 10) || 20;
+  const args   = [status, String(limit)].filter(Boolean).join(' ');
+  res.json(nocExec(`finance_invoice_list ${args}`));
+});
+
+app.post('/api/twin/invoices/:id/pay', requireRole('finance', 'supervisor', 'admin'), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  const paid_at = (req.body || {}).paid_at || '';
+  res.json(nocExec(`finance_invoice_pay ${id}${paid_at ? ' ' + paid_at : ''}`));
+});
+
+app.get('/api/twin/finance/stats', requireRole(...FINANCE_ROLES), (req, res) => {
+  res.json(nocExec('finance_stats'));
+});
+
+// ── timesheets ─────────────────────────────────────────────────────────────────
+
+app.get('/api/worker/timesheets', requireRole(...WORKER_ROLES), (req, res) => {
+  const user   = req.user.username;
+  const status = req.query.status || '';
+  const limit  = parseInt(req.query.limit, 10) || 30;
+  res.json(nocExec(`timesheet_list ${user} ${status} ${limit}`));
+});
+
+app.post('/api/worker/timesheets/start', requireRole(...WORKER_ROLES), (req, res) => {
+  const user       = req.user.username;
+  const eventName  = String(req.body?.event_name || '').replace(/'/g, '"').slice(0, 200);
+  const hourlyRate = parseFloat(req.body?.hourly_rate) || '';
+  if (!eventName) return res.status(400).json({ ok: false, error: 'event_name obrigatório' });
+  const args = hourlyRate ? `${user} '${eventName}' ${hourlyRate}` : `${user} '${eventName}'`;
+  res.json(nocExec(`timesheet_start ${args}`));
+});
+
+app.post('/api/worker/timesheets/:id/stop', requireRole(...WORKER_ROLES), (req, res) => {
+  const id    = parseInt(req.params.id, 10);
+  const notes = String(req.body?.notes || '').replace(/'/g, '"').slice(0, 500);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  const args = notes ? `${id} '${notes}'` : String(id);
+  res.json(nocExec(`timesheet_stop ${args}`));
+});
+
+app.get('/api/timesheets/all', requireRole(...FINANCE_ROLES), (req, res) => {
+  const status = req.query.status || '';
+  const limit  = parseInt(req.query.limit, 10) || 50;
+  res.json(nocExec(`timesheet_all ${status} ${limit}`));
+});
+
+app.post('/api/timesheets/:id/approve', requireRole('supervisor', 'admin', 'finance'), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  res.json(nocExec(`timesheet_approve ${id}`));
+});
+
+// ── finance obligations ────────────────────────────────────────────────────────
+
+app.get('/api/twin/obligations', requireRole(...FINANCE_ROLES), (req, res) => {
+  const status = req.query.status || '';
+  const days   = parseInt(req.query.days, 10) || 90;
+  const limit  = parseInt(req.query.limit, 10) || 50;
+  res.json(nocExec(`obligation_list ${status} ${days} ${limit}`));
+});
+
+app.post('/api/twin/obligations/:id/pay', requireRole('finance', 'supervisor', 'admin'), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  res.json(nocExec(`obligation_pay ${id}`));
+});
+
+app.get('/api/twin/obligations/stats', requireRole(...FINANCE_ROLES), (req, res) => {
+  res.json(nocExec('obligation_stats'));
 });
 
 // ── versão e boot ─────────────────────────────────────────────────────────────

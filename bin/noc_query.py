@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Remover bin/ do sys.path para evitar shadowing do stdlib (ex: bin/secrets.py)
+import sys as _sys, os as _os
+_bin_dir = _os.path.dirname(_os.path.abspath(__file__))
+if _bin_dir in _sys.path:
+    _sys.path.remove(_bin_dir)
+
 """
 noc_query.py — queries NOC ao Postgres para o server.js Express.
 
@@ -20,10 +26,11 @@ Output: JSON para stdout; erros para stderr.
 """
 import json
 import os
+import secrets as _secrets
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -38,11 +45,16 @@ def _conn():
 
 
 def _row(r) -> dict:
+    import datetime as _dt
+    from decimal import Decimal as _Dec
     d = dict(r)
-    # converte datetime para ISO string
     for k, v in d.items():
-        if isinstance(v, datetime):
+        if isinstance(v, _dt.datetime):
             d[k] = v.isoformat()
+        elif isinstance(v, _dt.date):
+            d[k] = v.isoformat()
+        elif isinstance(v, _Dec):
+            d[k] = float(v)
     return d
 
 
@@ -304,6 +316,1184 @@ def cmd_worker_token_check(args):
     print(json.dumps({"token": row["token"] if row and row["token"] else None}))
 
 
+# ── twin_cases ────────────────────────────────────────────────────────────────
+
+def cmd_twin_cases(args):
+    limit = int(args[0]) if args else 20
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT c.id, c.workflow_key, c.status, c.created_at, c.updated_at,
+                   e.id AS entity_id, e.name AS entity_name, e.type AS entity_type,
+                   e.metadata->>'kg' AS kg,
+                   e.metadata->>'client' AS client,
+                   e.metadata->>'estado' AS estado,
+                   e.metadata->>'kg_cobre' AS kg_cobre,
+                   e.metadata->>'kg_plastico' AS kg_plastico,
+                   e.metadata->>'valor_fatura' AS valor_fatura
+            FROM public.twin_cases c
+            LEFT JOIN public.twin_entities e ON e.id = c.entity_id
+            ORDER BY c.created_at DESC LIMIT :n
+        """), {"n": limit}).mappings().all()
+    print(json.dumps([_row(r) for r in rows], ensure_ascii=False))
+
+
+# ── twin_cable_batch_create ───────────────────────────────────────────────────
+
+def cmd_twin_cable_batch_create(args):
+    """Cria entity batch + case cable_batch + tasks iniciais.
+    Args: <kg> <client> [tenant_id]
+    """
+    if len(args) < 2:
+        raise ValueError("usage: twin_cable_batch_create <kg> <client>")
+    kg     = float(args[0])
+    client = args[1]
+    tenant = args[2] if len(args) > 2 else "jdl"
+    engine, text = _conn()
+    with engine.begin() as c:
+        # 1. entidade batch
+        client_token = _secrets.token_urlsafe(16)
+        entity_id = c.execute(text("""
+            INSERT INTO public.twin_entities (tenant_id, type, name, status, metadata)
+            VALUES (:tenant, 'batch', :name, 'active', :meta)
+            RETURNING id
+        """), {
+            "tenant": tenant,
+            "name": f"Lote {client} {kg}kg",
+            "meta": json.dumps({"kg": kg, "client": client, "estado": "agendado",
+                                "client_token": client_token}),
+        }).scalar()
+
+        # 2. caso cable_batch
+        case_id = c.execute(text("""
+            INSERT INTO public.twin_cases (tenant_id, workflow_key, entity_id, status, data)
+            VALUES (:tenant, 'cable_batch', :eid, 'open', :data)
+            RETURNING id
+        """), {
+            "tenant": tenant,
+            "eid": entity_id,
+            "data": json.dumps({"kg": kg, "client": client, "estado": "agendado"}),
+        }).scalar()
+
+        # 3. tasks iniciais do workflow
+        tasks = [
+            ("Check-in do lote na fábrica",    "human"),
+            ("Iniciar processamento",           "human"),
+            ("Registar resultado (cobre/plástico)", "human"),
+            ("Fechar lote e faturar",           "human"),
+        ]
+        for title, ttype in tasks:
+            c.execute(text("""
+                INSERT INTO public.twin_tasks (case_id, title, type, status)
+                VALUES (:cid, :title, :type, 'pending')
+            """), {"cid": case_id, "title": title, "type": ttype})
+
+        # 4. evento
+        c.execute(text("""
+            INSERT INTO public.events (ts, level, source, kind, entity_id, message, data)
+            VALUES (NOW(), 'info', 'twin', 'batch_created', :eid, :msg, :data)
+        """), {
+            "eid": entity_id,
+            "msg": f"Lote criado: {client} {kg}kg",
+            "data": json.dumps({"entity_id": entity_id, "case_id": case_id, "kg": kg, "client": client}),
+        })
+
+    print(json.dumps({"ok": True, "entity_id": entity_id, "case_id": case_id,
+                      "kg": kg, "client": client, "estado": "agendado",
+                      "client_token": client_token}))
+
+
+# ── twin_batch_get ────────────────────────────────────────────────────────────
+
+BATCH_STATES = ["agendado", "chegou", "em_processamento", "separacao",
+                "concluido", "pronto_levantar", "faturado", "fechado"]
+
+def cmd_twin_batch_get(args):
+    if not args:
+        raise ValueError("usage: twin_batch_get <entity_id>")
+    eid = int(args[0])
+    engine, text = _conn()
+    with engine.connect() as c:
+        entity = c.execute(text(
+            "SELECT id, name, status, metadata FROM public.twin_entities WHERE id=:id"
+        ), {"id": eid}).mappings().first()
+        if not entity:
+            print(json.dumps({"error": f"lote #{eid} não encontrado"}))
+            return
+        case = c.execute(text(
+            "SELECT id, status, data FROM public.twin_cases WHERE entity_id=:eid ORDER BY id DESC LIMIT 1"
+        ), {"eid": eid}).mappings().first()
+        tasks = c.execute(text(
+            "SELECT id, title, type, status FROM public.twin_tasks WHERE case_id=:cid ORDER BY id ASC"
+        ), {"cid": case["id"]}).mappings().all() if case else []
+
+    meta = entity["metadata"] if isinstance(entity["metadata"], dict) else json.loads(entity["metadata"] or "{}")
+    estado = meta.get("estado", "?")
+    idx    = BATCH_STATES.index(estado) if estado in BATCH_STATES else -1
+    proximo = BATCH_STATES[idx + 1] if idx >= 0 and idx < len(BATCH_STATES) - 1 else None
+
+    print(json.dumps({
+        "entity_id": entity["id"],
+        "name": entity["name"],
+        "kg": meta.get("kg"),
+        "client": meta.get("client"),
+        "estado": estado,
+        "proximo_estado": proximo,
+        "case_id": case["id"] if case else None,
+        "case_status": case["status"] if case else None,
+        "tasks": [_row(t) for t in tasks],
+    }, ensure_ascii=False))
+
+
+# ── twin_batch_advance ────────────────────────────────────────────────────────
+
+def cmd_twin_batch_advance(args):
+    """Avança estado do lote para o próximo. Args: <entity_id> [nota]"""
+    if not args:
+        raise ValueError("usage: twin_batch_advance <entity_id> [nota]")
+    eid  = int(args[0])
+    nota = args[1] if len(args) > 1 else ""
+    engine, text = _conn()
+    with engine.begin() as c:
+        entity = c.execute(text(
+            "SELECT id, metadata FROM public.twin_entities WHERE id=:id FOR UPDATE"
+        ), {"id": eid}).mappings().first()
+        if not entity:
+            print(json.dumps({"error": f"lote #{eid} não encontrado"}))
+            return
+        meta   = entity["metadata"] if isinstance(entity["metadata"], dict) else json.loads(entity["metadata"] or "{}")
+        estado = meta.get("estado", BATCH_STATES[0])
+        idx    = BATCH_STATES.index(estado) if estado in BATCH_STATES else -1
+        if idx < 0 or idx >= len(BATCH_STATES) - 1:
+            print(json.dumps({"error": f"lote já em estado final: {estado}"}))
+            return
+        novo_estado = BATCH_STATES[idx + 1]
+        meta["estado"] = novo_estado
+
+        # actualiza entidade
+        c.execute(text(
+            "UPDATE public.twin_entities SET metadata=:meta, updated_at=NOW() WHERE id=:id"
+        ), {"meta": json.dumps(meta), "id": eid})
+
+        # actualiza case data
+        case = c.execute(text(
+            "SELECT id FROM public.twin_cases WHERE entity_id=:eid ORDER BY id DESC LIMIT 1"
+        ), {"eid": eid}).mappings().first()
+        if case:
+            case_status_sql = ", status='closed'" if novo_estado == "fechado" else ""
+            c.execute(text(
+                f"UPDATE public.twin_cases SET data=jsonb_set(data, '{{estado}}', CAST(:est AS jsonb)){case_status_sql}, updated_at=NOW() WHERE id=:cid"
+            ), {"est": json.dumps(novo_estado), "cid": case["id"]})
+            # marca primeira task pending como done
+            first_pending = c.execute(text(
+                "SELECT id FROM public.twin_tasks WHERE case_id=:cid AND status='pending' ORDER BY id ASC LIMIT 1"
+            ), {"cid": case["id"]}).mappings().first()
+            if first_pending:
+                c.execute(text(
+                    "UPDATE public.twin_tasks SET status='done', updated_at=NOW() WHERE id=:tid"
+                ), {"tid": first_pending["id"]})
+
+        # evento
+        msg = f"Lote #{eid} {estado} → {novo_estado}"
+        if nota:
+            msg += f" ({nota})"
+        c.execute(text(
+            "INSERT INTO public.events (ts, level, source, kind, entity_id, message, data) "
+            "VALUES (NOW(), 'info', 'twin', 'batch_advanced', :eid, :msg, :data)"
+        ), {"eid": eid, "msg": msg, "data": json.dumps({"entity_id": eid, "de": estado, "para": novo_estado, "nota": nota})})
+
+    print(json.dumps({"ok": True, "entity_id": eid, "de": estado, "para": novo_estado}))
+
+
+# ── twin_batch_faturar ────────────────────────────────────────────────────────
+
+def cmd_twin_batch_faturar(args):
+    """Cria approval de faturação. Args: <entity_id> <preco_kg>"""
+    if len(args) < 2:
+        raise ValueError("usage: twin_batch_faturar <entity_id> <preco_kg>")
+    eid      = int(args[0])
+    preco_kg = float(args[1])
+    engine, text = _conn()
+    with engine.begin() as c:
+        entity = c.execute(text(
+            "SELECT id, metadata FROM public.twin_entities WHERE id=:id"
+        ), {"id": eid}).mappings().first()
+        if not entity:
+            print(json.dumps({"error": f"lote #{eid} não encontrado"}))
+            return
+        meta = entity["metadata"] if isinstance(entity["metadata"], dict) else json.loads(entity["metadata"] or "{}")
+        kg_cobre = float(meta.get("kg_cobre") or 0)
+        if not kg_cobre:
+            print(json.dumps({"error": "resultado não registado — use /lote resultado primeiro"}))
+            return
+        valor = round(kg_cobre * preco_kg, 2)
+        meta["preco_kg"]     = preco_kg
+        meta["valor_fatura"] = valor
+        c.execute(text(
+            "UPDATE public.twin_entities SET metadata=:meta, updated_at=NOW() WHERE id=:id"
+        ), {"meta": json.dumps(meta), "id": eid})
+        case = c.execute(text(
+            "SELECT id FROM public.twin_cases WHERE entity_id=:eid ORDER BY id DESC LIMIT 1"
+        ), {"eid": eid}).mappings().first()
+        summary = f"Lote #{eid} — {meta.get('client','?')} — {kg_cobre}kg Cu × €{preco_kg}/kg = €{valor}"
+        approval_id = c.execute(text("""
+            INSERT INTO public.twin_approvals
+              (case_id, action, status, requested_by, summary, context)
+            VALUES (:cid, 'faturar_lote', 'pending', 'system', :summary, :ctx)
+            RETURNING id
+        """), {
+            "cid": case["id"] if case else None,
+            "summary": summary,
+            "ctx": json.dumps({"entity_id": eid, "kg_cobre": kg_cobre, "preco_kg": preco_kg, "valor": valor}),
+        }).scalar()
+        c.execute(text(
+            "INSERT INTO public.events (ts, level, source, kind, entity_id, message, data) "
+            "VALUES (NOW(), 'info', 'twin', 'fatura_pendente', :eid, :msg, :data)"
+        ), {
+            "eid": eid,
+            "msg": f"Faturação pendente: Lote #{eid} €{valor}",
+            "data": json.dumps({"entity_id": eid, "valor": valor, "approval_id": approval_id}),
+        })
+    print(json.dumps({"ok": True, "entity_id": eid, "valor": valor,
+                      "kg_cobre": kg_cobre, "preco_kg": preco_kg,
+                      "approval_id": approval_id, "summary": summary}))
+
+
+# ── twin_batch_faturar_ok ─────────────────────────────────────────────────────
+
+def cmd_twin_batch_faturar_ok(args):
+    """Marca lote como faturado (chamado ao aprovar). Args: <entity_id>"""
+    if not args:
+        raise ValueError("usage: twin_batch_faturar_ok <entity_id>")
+    eid = int(args[0])
+    engine, text = _conn()
+    with engine.begin() as c:
+        entity = c.execute(text(
+            "SELECT id, metadata FROM public.twin_entities WHERE id=:id FOR UPDATE"
+        ), {"id": eid}).mappings().first()
+        if not entity:
+            print(json.dumps({"error": f"lote #{eid} não encontrado"}))
+            return
+        meta = entity["metadata"] if isinstance(entity["metadata"], dict) else json.loads(entity["metadata"] or "{}")
+        meta["estado"] = "faturado"
+        c.execute(text(
+            "UPDATE public.twin_entities SET metadata=:meta, updated_at=NOW() WHERE id=:id"
+        ), {"meta": json.dumps(meta), "id": eid})
+        case = c.execute(text(
+            "SELECT id FROM public.twin_cases WHERE entity_id=:eid ORDER BY id DESC LIMIT 1"
+        ), {"eid": eid}).mappings().first()
+        if case:
+            c.execute(text(
+                "UPDATE public.twin_cases SET data=jsonb_set(data, '{estado}', '\"faturado\"'::jsonb), "
+                "updated_at=NOW() WHERE id=:cid"
+            ), {"cid": case["id"]})
+            c.execute(text(
+                "UPDATE public.twin_tasks SET status='done', updated_at=NOW() "
+                "WHERE case_id=:cid AND status='pending'"
+            ), {"cid": case["id"]})
+        c.execute(text(
+            "INSERT INTO public.events (ts, level, source, kind, entity_id, message, data) "
+            "VALUES (NOW(), 'info', 'twin', 'batch_faturado', :eid, :msg, :data)"
+        ), {
+            "eid": eid,
+            "msg": f"Lote #{eid} faturado — €{meta.get('valor_fatura','?')}",
+            "data": json.dumps({"entity_id": eid, "valor": meta.get("valor_fatura")}),
+        })
+        # Auto-criar invoice se ainda não existir
+        existing_inv = c.execute(text(
+            "SELECT id FROM public.twin_invoices WHERE entity_id=:eid LIMIT 1"
+        ), {"eid": eid}).fetchone()
+        invoice_number = None
+        if not existing_inv:
+            valor = float(meta.get("valor_fatura") or 0)
+            yr    = datetime.now().year
+            cnt   = c.execute(text(
+                "SELECT COUNT(*) FROM public.twin_invoices WHERE number LIKE :pat"
+            ), {"pat": f"AIOS-{yr}-%"}).scalar()
+            invoice_number = f"AIOS-{yr}-{cnt+1:04d}"
+            due_date = (datetime.now() + timedelta(days=30)).date()
+            case_id_inv = case["id"] if case else None
+            c.execute(text("""
+                INSERT INTO public.twin_invoices
+                  (entity_id, case_id, number, status, amount, client, due_date)
+                VALUES (:eid, :cid, :num, 'issued', :amt, :cli, :due)
+            """), {"eid": eid, "cid": case_id_inv,
+                   "num": invoice_number, "amt": valor,
+                   "cli": meta.get("client"), "due": due_date})
+            c.execute(text(
+                "INSERT INTO public.events (ts, level, source, kind, entity_id, message, data) "
+                "VALUES (NOW(),'info','twin','invoice_created',:eid,:msg,:data)"
+            ), {"eid": eid, "msg": f"Fatura {invoice_number} emitida — €{valor:.2f}",
+                "data": json.dumps({"invoice_number": invoice_number, "amount": valor, "entity_id": eid})})
+    print(json.dumps({"ok": True, "entity_id": eid, "estado": "faturado",
+                      "valor": meta.get("valor_fatura"), "invoice_number": invoice_number}))
+
+
+# ── twin_factory_stats ────────────────────────────────────────────────────────
+
+def cmd_twin_factory_stats(_args):
+    engine, text = _conn()
+    with engine.connect() as c:
+        by_estado = c.execute(text("""
+            SELECT e.metadata->>'estado' AS estado, COUNT(*) AS n
+            FROM public.twin_cases c
+            JOIN public.twin_entities e ON e.id = c.entity_id
+            WHERE c.workflow_key = 'cable_batch'
+            GROUP BY e.metadata->>'estado'
+            ORDER BY MIN(c.created_at)
+        """)).mappings().all()
+        hoje = c.execute(text("""
+            SELECT
+                COUNT(*) AS lotes_hoje,
+                COALESCE(SUM(CAST(NULLIF(e.metadata->>'kg','') AS FLOAT)), 0) AS kg_entrada,
+                COALESCE(SUM(CAST(NULLIF(e.metadata->>'kg_cobre','') AS FLOAT)), 0) AS kg_cobre,
+                COALESCE(SUM(CAST(NULLIF(e.metadata->>'kg_plastico','') AS FLOAT)), 0) AS kg_plastico,
+                COALESCE(SUM(CAST(NULLIF(e.metadata->>'valor_fatura','') AS FLOAT)), 0) AS receita
+            FROM public.twin_cases c
+            JOIN public.twin_entities e ON e.id = c.entity_id
+            WHERE c.workflow_key = 'cable_batch'
+              AND c.created_at >= CURRENT_DATE
+        """)).mappings().first()
+        total = c.execute(text("""
+            SELECT COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE e.metadata->>'estado' != 'fechado') AS ativos
+            FROM public.twin_cases c
+            JOIN public.twin_entities e ON e.id = c.entity_id
+            WHERE c.workflow_key = 'cable_batch'
+        """)).mappings().first()
+    print(json.dumps({
+        "by_estado": [_row(r) for r in by_estado],
+        "hoje":  _row(hoje) if hoje else {},
+        "total": _row(total) if total else {},
+    }, ensure_ascii=False))
+
+
+# ── twin_batch_by_token ───────────────────────────────────────────────────────
+
+def cmd_twin_batch_by_token(args):
+    """Lote por client_token (portal cliente público). Args: <token>"""
+    if not args:
+        raise ValueError("usage: twin_batch_by_token <token>")
+    token = args[0]
+    engine, text = _conn()
+    with engine.connect() as c:
+        entity = c.execute(text(
+            "SELECT id, name, status, metadata, created_at FROM public.twin_entities "
+            "WHERE metadata->>'client_token' = :tok AND type='batch' LIMIT 1"
+        ), {"tok": token}).mappings().first()
+        if not entity:
+            print(json.dumps({"error": "lote não encontrado"}))
+            return
+        eid  = entity["id"]
+        meta = entity["metadata"] if isinstance(entity["metadata"], dict) else json.loads(entity["metadata"] or "{}")
+        case = c.execute(text(
+            "SELECT id, status FROM public.twin_cases WHERE entity_id=:eid ORDER BY id DESC LIMIT 1"
+        ), {"eid": eid}).mappings().first()
+        tasks = []
+        if case:
+            tasks = c.execute(text(
+                "SELECT title, status, updated_at FROM public.twin_tasks WHERE case_id=:cid ORDER BY id ASC"
+            ), {"cid": case["id"]}).mappings().all()
+        events = c.execute(text(
+            "SELECT ts, kind, message FROM public.events "
+            "WHERE entity_id=:eid AND source='twin' ORDER BY ts ASC"
+        ), {"eid": eid}).mappings().all()
+        # Approvals pendentes para este cliente
+        approvals = c.execute(text(
+            "SELECT id, action, status, context, requested_at FROM public.twin_approvals "
+            "WHERE context->>'entity_id' = :eid AND status = 'pending' "
+            "ORDER BY requested_at DESC"
+        ), {"eid": str(eid)}).mappings().all()
+        # Documentos disponíveis
+        documents = c.execute(text(
+            "SELECT id, template_key, status, created_at FROM public.twin_documents "
+            "WHERE entity_id = :eid AND status = 'ready' ORDER BY created_at DESC"
+        ), {"eid": eid}).mappings().all()
+    estado  = meta.get("estado", "?")
+    idx     = BATCH_STATES.index(estado) if estado in BATCH_STATES else 0
+    progresso = round(idx / (len(BATCH_STATES) - 1) * 100) if len(BATCH_STATES) > 1 else 0
+    # valor_fatura só é visível ao cliente quando fatura já foi aprovada/fechada
+    estados_com_fatura = {"faturado", "fechado"}
+    valor_fatura = meta.get("valor_fatura") if estado in estados_com_fatura else None
+    print(json.dumps({
+        "entity_id": eid,
+        "name": entity["name"],
+        "kg": meta.get("kg"),
+        "client": meta.get("client"),
+        "estado": estado,
+        "progresso_pct": progresso,
+        "kg_cobre": meta.get("kg_cobre"),
+        "kg_plastico": meta.get("kg_plastico"),
+        "valor_fatura": valor_fatura,
+        "created_at": entity["created_at"].isoformat() if entity["created_at"] else None,
+        "tasks": [_row(t) for t in tasks],
+        "events": [{"ts": str(e["ts"])[:16].replace("T", " "), "msg": e["message"]} for e in events],
+        "approvals": [{"id": a["id"], "action": a["action"], "status": a["status"],
+                       "context": a["context"] if isinstance(a["context"], dict) else json.loads(a["context"] or "{}"),
+                       "requested_at": str(a["requested_at"])[:16]} for a in approvals],
+        "documents": [{"id": d["id"], "type": d["template_key"], "status": d["status"]} for d in documents],
+    }, ensure_ascii=False))
+
+
+# ── client_approve ────────────────────────────────────────────────────────────
+
+def cmd_client_approve(args):
+    """Aprovação pelo cliente via portal. Args: <token> <approval_id> <action: approved|rejected>"""
+    if len(args) < 3:
+        raise ValueError("usage: client_approve <token> <approval_id> <approved|rejected>")
+    token       = args[0]
+    approval_id = int(args[1])
+    action      = args[2]
+    if action not in ("approved", "rejected"):
+        print(json.dumps({"ok": False, "error": "action deve ser 'approved' ou 'rejected'"}))
+        return
+    engine, text = _conn()
+    with engine.begin() as c:
+        # Validar token → entity
+        entity = c.execute(text(
+            "SELECT id FROM public.twin_entities "
+            "WHERE metadata->>'client_token' = :tok AND type='batch' LIMIT 1"
+        ), {"tok": token}).mappings().first()
+        if not entity:
+            print(json.dumps({"ok": False, "error": "token inválido"}))
+            return
+        eid = entity["id"]
+        # Validar approval pertence a esta entity
+        appr = c.execute(text(
+            "SELECT id, action, status, context FROM public.twin_approvals "
+            "WHERE id=:aid AND context->>'entity_id' = :eid FOR UPDATE"
+        ), {"aid": approval_id, "eid": str(eid)}).mappings().first()
+        if not appr:
+            print(json.dumps({"ok": False, "error": "aprovação não encontrada para este lote"}))
+            return
+        if appr["status"] != "pending":
+            print(json.dumps({"ok": False, "error": f"aprovação já foi decidida: {appr['status']}"}))
+            return
+        # Actualizar approval
+        c.execute(text(
+            "UPDATE public.twin_approvals SET status=:s, decided_at=NOW(), approved_by='client' "
+            "WHERE id=:aid"
+        ), {"s": action, "aid": approval_id})
+        # Se faturar_lote aprovado → executar fatura_ok inline
+        next_estado = None
+        if action == "approved" and appr["action"] == "faturar_lote":
+            ctx = appr["context"] if isinstance(appr["context"], dict) else json.loads(appr["context"] or "{}")
+            valor = ctx.get("valor", 0)
+            # Actualizar entity metadata
+            entity_full = c.execute(text(
+                "SELECT metadata FROM public.twin_entities WHERE id=:eid FOR UPDATE"
+            ), {"eid": eid}).mappings().first()
+            meta = entity_full["metadata"] if isinstance(entity_full["metadata"], dict) else json.loads(entity_full["metadata"] or "{}")
+            meta["estado"]       = "faturado"
+            meta["valor_fatura"] = valor
+            c.execute(text(
+                "UPDATE public.twin_entities SET metadata=:m, updated_at=NOW() WHERE id=:eid"
+            ), {"m": json.dumps(meta), "eid": eid})
+            # Marcar tasks pendentes como done
+            c.execute(text(
+                "UPDATE public.twin_tasks SET status='done', updated_at=NOW() "
+                "WHERE case_id IN (SELECT id FROM public.twin_cases WHERE entity_id=:eid) "
+                "AND status='pending'"
+            ), {"eid": eid})
+            # Evento
+            c.execute(text(
+                "INSERT INTO public.events (ts, level, source, kind, entity_id, message, data) "
+                "VALUES (NOW(),'info','twin','fatura_aprovada_cliente',:eid,:msg,:data)"
+            ), {
+                "eid":  eid,
+                "msg":  f"Faturação aprovada pelo cliente via portal (lote #{eid})",
+                "data": json.dumps({"entity_id": eid, "valor": valor, "approval_id": approval_id}),
+            })
+            next_estado = "faturado"
+        elif action == "rejected" and appr["action"] == "faturar_lote":
+            c.execute(text(
+                "INSERT INTO public.events (ts, level, source, kind, entity_id, message, data) "
+                "VALUES (NOW(),'warn','twin','fatura_rejeitada_cliente',:eid,:msg,:data)"
+            ), {
+                "eid":  eid,
+                "msg":  f"Faturação rejeitada pelo cliente via portal (lote #{eid})",
+                "data": json.dumps({"entity_id": eid, "approval_id": approval_id}),
+            })
+    print(json.dumps({
+        "ok": True,
+        "approval_id": approval_id,
+        "action":      action,
+        "entity_id":   eid,
+        "next_estado": next_estado,
+    }))
+
+
+# ── twin_batch_resultado ──────────────────────────────────────────────────────
+
+def cmd_twin_batch_resultado(args):
+    """Regista resultado (kg_cobre, kg_plastico) no lote.
+    Args: <entity_id> <kg_cobre> <kg_plastico>
+    """
+    if len(args) < 3:
+        raise ValueError("usage: twin_batch_resultado <entity_id> <kg_cobre> <kg_plastico>")
+    eid       = int(args[0])
+    kg_cobre  = float(args[1])
+    kg_plastico = float(args[2])
+    engine, text = _conn()
+    with engine.begin() as c:
+        entity = c.execute(text(
+            "SELECT id, metadata FROM public.twin_entities WHERE id=:id FOR UPDATE"
+        ), {"id": eid}).mappings().first()
+        if not entity:
+            print(json.dumps({"error": f"lote #{eid} não encontrado"}))
+            return
+        meta = entity["metadata"] if isinstance(entity["metadata"], dict) else json.loads(entity["metadata"] or "{}")
+        meta["kg_cobre"]    = kg_cobre
+        meta["kg_plastico"] = kg_plastico
+        meta["kg_residuo"]  = round(float(meta.get("kg", 0)) - kg_cobre - kg_plastico, 2)
+        c.execute(text(
+            "UPDATE public.twin_entities SET metadata=:meta, updated_at=NOW() WHERE id=:id"
+        ), {"meta": json.dumps(meta), "id": eid})
+        # evento
+        c.execute(text(
+            "INSERT INTO public.events (ts, level, source, kind, entity_id, message, data) "
+            "VALUES (NOW(), 'info', 'twin', 'batch_resultado', :eid, :msg, :data)"
+        ), {
+            "eid": eid,
+            "msg": f"Lote #{eid} resultado: {kg_cobre}kg cobre, {kg_plastico}kg plástico",
+            "data": json.dumps({"entity_id": eid, "kg_cobre": kg_cobre, "kg_plastico": kg_plastico, "kg_residuo": meta["kg_residuo"]}),
+        })
+    print(json.dumps({"ok": True, "entity_id": eid, "kg_cobre": kg_cobre,
+                      "kg_plastico": kg_plastico, "kg_residuo": meta["kg_residuo"]}))
+
+
+# ── worker tasks ──────────────────────────────────────────────────────────────
+
+def cmd_worker_tasks(args):
+    """Lista tarefas pending/in_progress. Args: <username|all> [limit=30]"""
+    user  = args[0] if args else "all"
+    limit = int(args[1]) if len(args) > 1 and args[1].isdigit() else 30
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT t.id, t.title, t.type, t.status, t.assignee,
+                   t.due_at, t.payload, t.created_at,
+                   e.id AS entity_id, e.name AS entity_name,
+                   e.metadata->>'kind' AS kind
+            FROM public.twin_tasks t
+            JOIN public.twin_cases c ON c.id = t.case_id
+            JOIN public.twin_entities e ON e.id = c.entity_id
+            WHERE t.status IN ('pending','in_progress')
+              AND (:user = 'all' OR t.assignee IS NULL OR t.assignee = :user)
+            ORDER BY
+              CASE WHEN t.assignee = :user THEN 0 ELSE 1 END,
+              CASE WHEN t.status = 'in_progress' THEN 0 ELSE 1 END,
+              t.created_at ASC
+            LIMIT :limit
+        """), {"user": user, "limit": limit}).mappings().all()
+    out = []
+    for r in rows:
+        pl = r["payload"] if isinstance(r["payload"], dict) else json.loads(r["payload"] or "{}")
+        out.append({
+            "id":          r["id"],
+            "title":       r["title"],
+            "type":        r["type"],
+            "status":      r["status"],
+            "assignee":    r["assignee"],
+            "due_at":      r["due_at"].isoformat() if r["due_at"] else None,
+            "started_at":  pl.get("started_at"),
+            "entity_id":   r["entity_id"],
+            "entity_name": r["entity_name"],
+            "kind":        r["kind"],
+            "created_at":  r["created_at"].isoformat() if r["created_at"] else "",
+        })
+    print(json.dumps(out, ensure_ascii=False))
+
+
+def cmd_worker_tasks_history(args):
+    """Tarefas done do worker. Args: <username> [limit=20]"""
+    user  = args[0] if args else "all"
+    limit = int(args[1]) if len(args) > 1 and args[1].isdigit() else 20
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT t.id, t.title, t.type, t.status, t.assignee,
+                   t.payload, t.updated_at,
+                   e.name AS entity_name
+            FROM public.twin_tasks t
+            JOIN public.twin_cases c ON c.id = t.case_id
+            JOIN public.twin_entities e ON e.id = c.entity_id
+            WHERE t.status = 'done'
+              AND (:user = 'all' OR t.assignee = :user OR t.payload->>'done_by' = :user)
+            ORDER BY t.updated_at DESC
+            LIMIT :limit
+        """), {"user": user, "limit": limit}).mappings().all()
+    out = []
+    for r in rows:
+        pl = r["payload"] if isinstance(r["payload"], dict) else json.loads(r["payload"] or "{}")
+        out.append({
+            "id":           r["id"],
+            "title":        r["title"],
+            "status":       r["status"],
+            "assignee":     r["assignee"] or pl.get("done_by"),
+            "result":       pl.get("result", ""),
+            "completed_at": pl.get("completed_at"),
+            "entity_name":  r["entity_name"],
+            "updated_at":   r["updated_at"].isoformat() if r["updated_at"] else "",
+        })
+    print(json.dumps(out, ensure_ascii=False))
+
+
+def cmd_worker_task_start(args):
+    """Inicia tarefa. Args: <task_id> <username>"""
+    if len(args) < 2:
+        raise ValueError("usage: worker_task_start <task_id> <username>")
+    tid  = int(args[0])
+    user = args[1]
+    engine, text = _conn()
+    with engine.begin() as c:
+        task = c.execute(text(
+            "SELECT t.id, t.status, c.entity_id FROM public.twin_tasks t "
+            "JOIN public.twin_cases c ON c.id = t.case_id WHERE t.id = :id FOR UPDATE"
+        ), {"id": tid}).mappings().first()
+        if not task:
+            print(json.dumps({"ok": False, "error": f"tarefa #{tid} não encontrada"}))
+            return
+        if task["status"] != "pending":
+            print(json.dumps({"ok": False, "error": f"tarefa está em estado '{task['status']}', não 'pending'"}))
+            return
+        c.execute(text("""
+            UPDATE public.twin_tasks
+            SET status='in_progress', assignee=:user,
+                payload=jsonb_set(payload, '{started_at}', to_jsonb(NOW()::text)),
+                updated_at=NOW()
+            WHERE id=:id
+        """), {"id": tid, "user": user})
+        c.execute(text(
+            "INSERT INTO public.events (ts, level, source, kind, entity_id, message, data) "
+            "VALUES (NOW(),'info','twin','worker_task_started',:eid,:msg,:data)"
+        ), {
+            "eid":  task["entity_id"],
+            "msg":  f"Tarefa #{tid} iniciada por {user}",
+            "data": json.dumps({"task_id": tid, "assignee": user}),
+        })
+    print(json.dumps({"ok": True, "task_id": tid, "assignee": user, "status": "in_progress"}))
+
+
+def cmd_worker_task_done(args):
+    """Conclui tarefa. Args: <task_id> <username> [note]"""
+    if len(args) < 2:
+        raise ValueError("usage: worker_task_done <task_id> <username> [note]")
+    tid  = int(args[0])
+    user = args[1]
+    note = args[2] if len(args) > 2 else ""
+    engine, text = _conn()
+    with engine.begin() as c:
+        task = c.execute(text(
+            "SELECT t.id, t.status, t.assignee, c.entity_id FROM public.twin_tasks t "
+            "JOIN public.twin_cases c ON c.id = t.case_id WHERE t.id = :id FOR UPDATE"
+        ), {"id": tid}).mappings().first()
+        if not task:
+            print(json.dumps({"ok": False, "error": f"tarefa #{tid} não encontrada"}))
+            return
+        if task["status"] != "in_progress":
+            print(json.dumps({"ok": False, "error": f"tarefa está em estado '{task['status']}', não 'in_progress'"}))
+            return
+        c.execute(text("""
+            UPDATE public.twin_tasks
+            SET status='done',
+                payload=payload || jsonb_build_object(
+                    'completed_at', NOW()::text,
+                    'result', :note,
+                    'done_by', :user
+                ),
+                updated_at=NOW()
+            WHERE id=:id
+        """), {"id": tid, "user": user, "note": note})
+        c.execute(text(
+            "INSERT INTO public.events (ts, level, source, kind, entity_id, message, data) "
+            "VALUES (NOW(),'info','twin','worker_task_done',:eid,:msg,:data)"
+        ), {
+            "eid":  task["entity_id"],
+            "msg":  f"Tarefa #{tid} concluída por {user}",
+            "data": json.dumps({"task_id": tid, "done_by": user, "result": note}),
+        })
+    print(json.dumps({"ok": True, "task_id": tid, "done_by": user, "status": "done"}))
+
+
+def cmd_worker_task_skip(args):
+    """Salta tarefa. Args: <task_id> <username>"""
+    if len(args) < 2:
+        raise ValueError("usage: worker_task_skip <task_id> <username>")
+    tid  = int(args[0])
+    user = args[1]
+    engine, text = _conn()
+    with engine.begin() as c:
+        task = c.execute(text(
+            "SELECT t.id, t.status, c.entity_id FROM public.twin_tasks t "
+            "JOIN public.twin_cases c ON c.id = t.case_id WHERE t.id = :id FOR UPDATE"
+        ), {"id": tid}).mappings().first()
+        if not task:
+            print(json.dumps({"ok": False, "error": f"tarefa #{tid} não encontrada"}))
+            return
+        c.execute(text("""
+            UPDATE public.twin_tasks
+            SET status='skipped', assignee=:user, updated_at=NOW()
+            WHERE id=:id
+        """), {"id": tid, "user": user})
+        c.execute(text(
+            "INSERT INTO public.events (ts, level, source, kind, entity_id, message, data) "
+            "VALUES (NOW(),'info','twin','worker_task_skipped',:eid,:msg,:data)"
+        ), {
+            "eid":  task["entity_id"],
+            "msg":  f"Tarefa #{tid} saltada por {user}",
+            "data": json.dumps({"task_id": tid, "skipped_by": user}),
+        })
+    print(json.dumps({"ok": True, "task_id": tid, "skipped_by": user, "status": "skipped"}))
+
+
+# ── twin_tenders ──────────────────────────────────────────────────────────────
+
+def cmd_twin_tenders(args):
+    """Lista tenders. Args: [limit] [--source ted|base|dr]"""
+    limit  = 30
+    source = None
+    i = 0
+    while i < len(args):
+        if args[i] == "--source" and i + 1 < len(args):
+            source = args[i + 1]; i += 2
+        elif args[i].isdigit():
+            limit = int(args[i]); i += 1
+        else:
+            i += 1
+
+    engine, text = _conn()
+    src_filter = "AND e.metadata->>'source' = :src" if source else ""
+    with engine.connect() as c:
+        rows = c.execute(text(f"""
+            SELECT e.id, e.name, e.metadata, e.created_at,
+                   tc.id AS case_id, tc.status AS case_status
+            FROM public.twin_entities e
+            LEFT JOIN public.twin_cases tc ON tc.entity_id = e.id AND tc.workflow_key = 'tender_intake'
+            WHERE e.type = 'tender'
+            {src_filter}
+            ORDER BY (e.metadata->>'score')::int DESC, e.created_at DESC
+            LIMIT :n
+        """), {"n": limit, "src": source}).mappings().all()
+    out = []
+    for r in rows:
+        meta = r["metadata"] if isinstance(r["metadata"], dict) else json.loads(r["metadata"] or "{}")
+        out.append({
+            "entity_id":   r["id"],
+            "title":       meta.get("title", r["name"]),
+            "pub_num":     meta.get("pub_num", meta.get("external_id", "")),
+            "score":       meta.get("score", 0),
+            "estado":      meta.get("estado", "novo"),
+            "deadline":    meta.get("deadline", ""),
+            "nature":      meta.get("nature", ""),
+            "grupo":       meta.get("grupo", ""),
+            "pdf_url":     meta.get("pdf_url", ""),
+            "source":      meta.get("source", "ted"),
+            "entity_name": meta.get("entity_name", ""),
+            "base_value":  meta.get("base_value"),
+            "case_id":     r["case_id"],
+            "case_status": r["case_status"],
+            "created_at":  r["created_at"].isoformat() if r["created_at"] else "",
+        })
+    print(json.dumps(out, ensure_ascii=False))
+
+
+def cmd_twin_tender_update(args):
+    """Atualiza estado de um tender. Args: <entity_id> <estado>
+    Estados: novo | a_analisar | candidatar | ignorar | submetido | ganho | perdido
+    """
+    if len(args) < 2:
+        raise ValueError("usage: twin_tender_update <entity_id> <estado>")
+    eid    = int(args[0])
+    estado = args[1]
+    VALID  = {"novo", "a_analisar", "candidatar", "ignorar", "submetido", "ganho", "perdido"}
+    if estado not in VALID:
+        raise ValueError(f"estado inválido: {estado}. Válidos: {', '.join(sorted(VALID))}")
+    engine, text = _conn()
+    with engine.begin() as c:
+        entity = c.execute(text(
+            "SELECT id, metadata FROM public.twin_entities WHERE id=:id AND type='tender' FOR UPDATE"
+        ), {"id": eid}).mappings().first()
+        if not entity:
+            print(json.dumps({"error": f"tender #{eid} não encontrado"}))
+            return
+        meta = entity["metadata"] if isinstance(entity["metadata"], dict) else json.loads(entity["metadata"] or "{}")
+        meta["estado"] = estado
+        c.execute(text(
+            "UPDATE public.twin_entities SET metadata=:meta, updated_at=NOW() WHERE id=:id"
+        ), {"meta": json.dumps(meta), "id": eid})
+        c.execute(text(
+            "INSERT INTO public.events (ts, level, source, kind, entity_id, message, data) "
+            "VALUES (NOW(), 'info', 'twin', 'tender_updated', :eid, :msg, :data)"
+        ), {
+            "eid": eid,
+            "msg": f"Tender #{eid} estado → {estado}",
+            "data": json.dumps({"entity_id": eid, "estado": estado}),
+        })
+    print(json.dumps({"ok": True, "entity_id": eid, "estado": estado}))
+
+
+# ── finance ───────────────────────────────────────────────────────────────────
+
+def cmd_finance_invoice_create(args):
+    """Cria invoice manualmente para entity. Args: <entity_id>"""
+    if not args:
+        raise ValueError("usage: finance_invoice_create <entity_id>")
+    eid = int(args[0])
+    engine, text = _conn()
+    with engine.begin() as c:
+        entity = c.execute(text(
+            "SELECT id, metadata FROM public.twin_entities WHERE id=:id"
+        ), {"id": eid}).mappings().first()
+        if not entity:
+            print(json.dumps({"error": f"entity #{eid} não encontrada"})); return
+        meta = entity["metadata"] if isinstance(entity["metadata"], dict) else json.loads(entity["metadata"] or "{}")
+        existing = c.execute(text(
+            "SELECT id, number FROM public.twin_invoices WHERE entity_id=:eid LIMIT 1"
+        ), {"eid": eid}).mappings().first()
+        if existing:
+            print(json.dumps({"ok": True, "invoice_id": existing["id"], "number": existing["number"], "already_exists": True})); return
+        valor = float(meta.get("valor_fatura") or 0)
+        yr    = datetime.now().year
+        cnt   = c.execute(text(
+            "SELECT COUNT(*) FROM public.twin_invoices WHERE number LIKE :pat"
+        ), {"pat": f"AIOS-{yr}-%"}).scalar()
+        number = f"AIOS-{yr}-{cnt+1:04d}"
+        due_date = (datetime.now() + timedelta(days=30)).date()
+        case = c.execute(text(
+            "SELECT id FROM public.twin_cases WHERE entity_id=:eid ORDER BY id DESC LIMIT 1"
+        ), {"eid": eid}).mappings().first()
+        row = c.execute(text("""
+            INSERT INTO public.twin_invoices
+              (entity_id, case_id, number, status, amount, client, due_date)
+            VALUES (:eid, :cid, :num, 'issued', :amt, :cli, :due)
+            RETURNING id
+        """), {"eid": eid, "cid": case["id"] if case else None,
+               "num": number, "amt": valor,
+               "cli": meta.get("client"), "due": due_date}).fetchone()
+        c.execute(text(
+            "INSERT INTO public.events (ts, level, source, kind, entity_id, message, data) "
+            "VALUES (NOW(),'info','twin','invoice_created',:eid,:msg,:data)"
+        ), {"eid": eid, "msg": f"Fatura {number} emitida — €{valor:.2f}",
+            "data": json.dumps({"invoice_number": number, "amount": valor, "entity_id": eid})})
+    print(json.dumps({"ok": True, "invoice_id": row[0], "number": number,
+                      "amount": valor, "due_date": str(due_date)}))
+
+
+def cmd_finance_invoice_list(args):
+    """Lista invoices. Args: [status] [limit=20]"""
+    status = None
+    limit  = 20
+    for a in args:
+        if a.isdigit():
+            limit = int(a)
+        elif a in ("issued", "paid", "overdue", "cancelled"):
+            status = a
+    engine, text = _conn()
+    with engine.connect() as c:
+        where = "WHERE i.status = :status" if status else ""
+        rows = c.execute(text(f"""
+            SELECT i.id, i.number, i.status, i.amount, i.currency, i.client,
+                   i.due_date, i.paid_at, i.created_at,
+                   e.name AS entity_name,
+                   CASE WHEN i.status='issued' AND i.due_date < CURRENT_DATE
+                        THEN 'overdue' ELSE i.status END AS effective_status
+            FROM public.twin_invoices i
+            JOIN public.twin_entities e ON e.id = i.entity_id
+            {where}
+            ORDER BY i.created_at DESC
+            LIMIT :limit
+        """), {"status": status, "limit": limit}).mappings().all()
+    result = []
+    for r in rows:
+        d = dict(r)
+        for k in ("due_date", "paid_at", "created_at"):
+            if d.get(k) is not None:
+                d[k] = str(d[k])
+        if d.get("amount") is not None:
+            d["amount"] = float(d["amount"])
+        result.append(d)
+    print(json.dumps({"ok": True, "invoices": result, "count": len(result)}))
+
+
+def cmd_finance_invoice_pay(args):
+    """Marca invoice como paga. Args: <invoice_id> [paid_at ISO]"""
+    if not args:
+        raise ValueError("usage: finance_invoice_pay <invoice_id> [paid_at]")
+    inv_id = int(args[0])
+    paid_at = args[1] if len(args) > 1 else None
+    engine, text = _conn()
+    with engine.begin() as c:
+        inv = c.execute(text(
+            "SELECT id, entity_id, number FROM public.twin_invoices WHERE id=:id"
+        ), {"id": inv_id}).mappings().first()
+        if not inv:
+            print(json.dumps({"error": f"invoice #{inv_id} não encontrada"})); return
+        ts = paid_at or datetime.now(timezone.utc).isoformat()
+        c.execute(text(
+            "UPDATE public.twin_invoices SET status='paid', paid_at=:ts, updated_at=NOW() WHERE id=:id"
+        ), {"ts": ts, "id": inv_id})
+        c.execute(text(
+            "INSERT INTO public.events (ts, level, source, kind, entity_id, message, data) "
+            "VALUES (NOW(),'info','twin','invoice_paid',:eid,:msg,:data)"
+        ), {"eid": inv["entity_id"],
+            "msg": f"Fatura {inv['number']} paga",
+            "data": json.dumps({"invoice_id": inv_id, "number": inv["number"], "paid_at": ts})})
+    print(json.dumps({"ok": True, "invoice_id": inv_id, "paid_at": ts}))
+
+
+def cmd_finance_stats(_args):
+    """Estatísticas financeiras globais."""
+    engine, text = _conn()
+    with engine.connect() as c:
+        row = c.execute(text("""
+            SELECT
+              COUNT(*) FILTER (WHERE status='issued' AND due_date >= CURRENT_DATE) AS pendente,
+              COUNT(*) FILTER (WHERE status='issued' AND due_date < CURRENT_DATE)  AS vencido,
+              COUNT(*) FILTER (WHERE status='paid')                                AS pago,
+              COALESCE(SUM(amount) FILTER (WHERE status='issued'), 0)             AS total_pendente,
+              COALESCE(SUM(amount) FILTER (WHERE status='paid'), 0)               AS total_pago,
+              COALESCE(SUM(amount) FILTER (WHERE status='issued' AND due_date < CURRENT_DATE), 0) AS total_vencido
+            FROM public.twin_invoices
+        """)).mappings().first()
+    print(json.dumps({"ok": True,
+                      "pendente": int(row["pendente"]),
+                      "vencido":  int(row["vencido"]),
+                      "pago":     int(row["pago"]),
+                      "total_pendente": float(row["total_pendente"]),
+                      "total_pago":     float(row["total_pago"]),
+                      "total_vencido":  float(row["total_vencido"])}))
+
+
+# ── event timesheets ───────────────────────────────────────────────────────────
+
+def cmd_timesheet_start(args):
+    """Inicia timesheet: worker_id event_name [hourly_rate]"""
+    if len(args) < 2:
+        raise ValueError("worker_id e event_name obrigatórios")
+    worker_id   = args[0]
+    event_name  = args[1]
+    hourly_rate = float(args[2]) if len(args) > 2 else None
+    engine, text = _conn()
+    with engine.begin() as c:
+        row = c.execute(text("""
+            INSERT INTO public.event_timesheets
+              (worker_id, event_name, hourly_rate, start_time, status, updated_at)
+            VALUES (:wid, :ev, :rate, NOW(), 'open', NOW())
+            RETURNING id, start_time
+        """), {"wid": worker_id, "ev": event_name, "rate": hourly_rate}).mappings().first()
+    print(json.dumps({"ok": True, "id": row["id"],
+                      "start_time": row["start_time"].isoformat()}))
+
+
+def cmd_timesheet_stop(args):
+    """Para timesheet: timesheet_id [notes]"""
+    if not args:
+        raise ValueError("timesheet_id obrigatório")
+    ts_id = int(args[0])
+    notes = args[1] if len(args) > 1 else None
+    engine, text = _conn()
+    with engine.begin() as c:
+        row = c.execute(text("""
+            UPDATE public.event_timesheets
+            SET end_time  = NOW(),
+                hours     = ROUND(EXTRACT(EPOCH FROM (NOW() - start_time))/3600.0, 2),
+                notes     = COALESCE(:notes, notes),
+                status    = 'submitted',
+                updated_at = NOW()
+            WHERE id = :id AND status = 'open'
+            RETURNING id, hours, end_time, worker_id, event_name
+        """), {"id": ts_id, "notes": notes}).mappings().first()
+    if not row:
+        print(json.dumps({"ok": False, "error": "Timesheet não encontrado ou já fechado"}))
+        return
+    print(json.dumps({"ok": True, "id": row["id"], "hours": float(row["hours"]),
+                      "end_time": row["end_time"].isoformat(),
+                      "worker_id": row["worker_id"], "event_name": row["event_name"]}))
+
+
+def cmd_timesheet_list(args):
+    """Lista timesheets: worker_id [status] [limit]"""
+    if not args:
+        raise ValueError("worker_id obrigatório")
+    worker_id = args[0]
+    status    = args[1] if len(args) > 1 and args[1] not in ('', 'all') else None
+    limit     = int(args[2]) if len(args) > 2 else 30
+    engine, text = _conn()
+    with engine.connect() as c:
+        if status:
+            rows = c.execute(text("""
+                SELECT id, worker_id, event_name, start_time, end_time, hours,
+                       notes, status, hourly_rate, created_at
+                FROM public.event_timesheets
+                WHERE worker_id = :wid AND status = :st
+                ORDER BY start_time DESC LIMIT :lim
+            """), {"wid": worker_id, "st": status, "lim": limit}).mappings().all()
+        else:
+            rows = c.execute(text("""
+                SELECT id, worker_id, event_name, start_time, end_time, hours,
+                       notes, status, hourly_rate, created_at
+                FROM public.event_timesheets
+                WHERE worker_id = :wid
+                ORDER BY start_time DESC LIMIT :lim
+            """), {"wid": worker_id, "lim": limit}).mappings().all()
+    print(json.dumps({"ok": True, "timesheets": [_row(r) for r in rows]}))
+
+
+def cmd_timesheet_approve(args):
+    """Aprova timesheet: timesheet_id"""
+    if not args:
+        raise ValueError("timesheet_id obrigatório")
+    ts_id = int(args[0])
+    engine, text = _conn()
+    with engine.begin() as c:
+        row = c.execute(text("""
+            UPDATE public.event_timesheets
+            SET status = 'approved', updated_at = NOW()
+            WHERE id = :id AND status = 'submitted'
+            RETURNING id, worker_id, event_name, hours
+        """), {"id": ts_id}).mappings().first()
+    if not row:
+        print(json.dumps({"ok": False, "error": "Timesheet não encontrado ou não submetido"}))
+        return
+    print(json.dumps({"ok": True, "id": row["id"], "worker_id": row["worker_id"],
+                      "event_name": row["event_name"], "hours": float(row["hours"] or 0)}))
+
+
+def cmd_timesheet_all(args):
+    """Lista todos timesheets: [status] [limit]"""
+    status = args[0] if args and args[0] not in ('', 'all') else None
+    limit  = int(args[1]) if len(args) > 1 else 50
+    engine, text = _conn()
+    with engine.connect() as c:
+        if status:
+            rows = c.execute(text("""
+                SELECT id, worker_id, event_name, start_time, end_time, hours,
+                       notes, status, hourly_rate, created_at
+                FROM public.event_timesheets
+                WHERE status = :st
+                ORDER BY start_time DESC LIMIT :lim
+            """), {"st": status, "lim": limit}).mappings().all()
+        else:
+            rows = c.execute(text("""
+                SELECT id, worker_id, event_name, start_time, end_time, hours,
+                       notes, status, hourly_rate, created_at
+                FROM public.event_timesheets
+                ORDER BY start_time DESC LIMIT :lim
+            """), {"lim": limit}).mappings().all()
+    print(json.dumps({"ok": True, "timesheets": [_row(r) for r in rows]}))
+
+
+# ── finance obligations ────────────────────────────────────────────────────────
+
+def cmd_obligation_list(args):
+    """Lista obrigações: [status] [days_ahead] [limit]"""
+    status     = args[0] if args and args[0] not in ('', 'all') else None
+    days_ahead = int(args[1]) if len(args) > 1 else 90
+    limit      = int(args[2]) if len(args) > 2 else 50
+    engine, text = _conn()
+    with engine.connect() as c:
+        if status:
+            rows = c.execute(text("""
+                SELECT id, type, entity, label, due_date, amount, status,
+                       source, notes, paid_at, created_at,
+                       (due_date - CURRENT_DATE) AS days_left
+                FROM public.finance_obligations
+                WHERE status = :st
+                ORDER BY due_date ASC LIMIT :lim
+            """), {"st": status, "lim": limit}).mappings().all()
+        else:
+            rows = c.execute(text("""
+                SELECT id, type, entity, label, due_date, amount, status,
+                       source, notes, paid_at, created_at,
+                       (due_date - CURRENT_DATE) AS days_left
+                FROM public.finance_obligations
+                WHERE status != 'cancelled'
+                  AND due_date >= CURRENT_DATE - INTERVAL '30 days'
+                  AND due_date <= CURRENT_DATE + (:days * INTERVAL '1 day')
+                ORDER BY due_date ASC LIMIT :lim
+            """), {"days": days_ahead, "lim": limit}).mappings().all()
+    result = []
+    for r in rows:
+        d = _row(r)
+        d["days_left"] = int(r["days_left"]) if r["days_left"] is not None else None
+        result.append(d)
+    print(json.dumps({"ok": True, "obligations": result}))
+
+
+def cmd_obligation_pay(args):
+    """Marca obrigação como paga: obligation_id [paid_at]"""
+    if not args:
+        raise ValueError("obligation_id obrigatório")
+    ob_id   = int(args[0])
+    paid_at = args[1] if len(args) > 1 else None
+    ts      = paid_at or datetime.now(timezone.utc).isoformat()
+    engine, text = _conn()
+    with engine.begin() as c:
+        row = c.execute(text("""
+            UPDATE public.finance_obligations
+            SET status = 'paid', paid_at = :ts, updated_at = NOW()
+            WHERE id = :id AND status = 'pending'
+            RETURNING id, label, due_date, amount
+        """), {"id": ob_id, "ts": ts}).mappings().first()
+        if row:
+            c.execute(text(
+                "INSERT INTO public.events (ts,level,source,kind,message,data) "
+                "VALUES (NOW(),'info','finance','obligation_paid',:msg,:data)"
+            ), {"msg": f"Obrigação paga: {row['label']}",
+                "data": json.dumps({"obligation_id": ob_id, "label": row["label"],
+                                    "due_date": str(row["due_date"]), "paid_at": ts})})
+    if not row:
+        print(json.dumps({"ok": False, "error": "Obrigação não encontrada ou já paga"}))
+        return
+    print(json.dumps({"ok": True, "id": row["id"], "label": row["label"],
+                      "due_date": str(row["due_date"]),
+                      "amount": float(row["amount"]) if row["amount"] else None,
+                      "paid_at": ts}))
+
+
+def cmd_obligation_stats(_args):
+    """Estatísticas de obrigações fiscais."""
+    engine, text = _conn()
+    with engine.connect() as c:
+        row = c.execute(text("""
+            SELECT
+              COUNT(*) FILTER (WHERE status='pending' AND due_date < CURRENT_DATE)      AS overdue,
+              COUNT(*) FILTER (WHERE status='pending' AND due_date = CURRENT_DATE)      AS today,
+              COUNT(*) FILTER (WHERE status='pending' AND due_date BETWEEN CURRENT_DATE+1 AND CURRENT_DATE+7) AS week,
+              COUNT(*) FILTER (WHERE status='pending' AND due_date BETWEEN CURRENT_DATE+8 AND CURRENT_DATE+30) AS month,
+              COUNT(*) FILTER (WHERE status='paid')                                     AS paid,
+              COALESCE(SUM(amount) FILTER (WHERE status='pending'), 0)                 AS total_pending
+            FROM public.finance_obligations
+        """)).mappings().first()
+    # próxima obrigação
+    next_row = c.execute(text("""
+        SELECT label, due_date, (due_date - CURRENT_DATE) AS days_left
+        FROM public.finance_obligations
+        WHERE status='pending' AND due_date >= CURRENT_DATE
+        ORDER BY due_date ASC LIMIT 1
+    """)).mappings().first() if False else None
+    with engine.connect() as c2:
+        next_row = c2.execute(text("""
+            SELECT label, due_date, (due_date - CURRENT_DATE) AS days_left
+            FROM public.finance_obligations
+            WHERE status='pending' AND due_date >= CURRENT_DATE
+            ORDER BY due_date ASC LIMIT 1
+        """)).mappings().first()
+    print(json.dumps({
+        "ok": True,
+        "overdue": int(row["overdue"]),
+        "today":   int(row["today"]),
+        "week":    int(row["week"]),
+        "month":   int(row["month"]),
+        "paid":    int(row["paid"]),
+        "total_pending": float(row["total_pending"]),
+        "next": {"label": next_row["label"],
+                 "due_date": str(next_row["due_date"]),
+                 "days_left": int(next_row["days_left"])} if next_row else None
+    }))
+
+
 # ── dispatch ──────────────────────────────────────────────────────────────────
 
 CMDS = {
@@ -318,7 +1508,36 @@ CMDS = {
     "backlog_recent":       cmd_backlog_recent,
     "syshealth":            cmd_syshealth,
     "worker_jobs_enqueue":  cmd_worker_jobs_enqueue,
-    "worker_token_check":   cmd_worker_token_check,
+    "worker_token_check":          cmd_worker_token_check,
+    "twin_cases":                  cmd_twin_cases,
+    "twin_cable_batch_create":     cmd_twin_cable_batch_create,
+    "twin_batch_get":              cmd_twin_batch_get,
+    "twin_batch_advance":          cmd_twin_batch_advance,
+    "twin_batch_resultado":        cmd_twin_batch_resultado,
+    "twin_batch_by_token":         cmd_twin_batch_by_token,
+    "twin_batch_faturar":          cmd_twin_batch_faturar,
+    "twin_batch_faturar_ok":       cmd_twin_batch_faturar_ok,
+    "twin_factory_stats":          cmd_twin_factory_stats,
+    "twin_tenders":                cmd_twin_tenders,
+    "twin_tender_update":          cmd_twin_tender_update,
+    "client_approve":              cmd_client_approve,
+    "worker_tasks":                cmd_worker_tasks,
+    "worker_tasks_history":        cmd_worker_tasks_history,
+    "worker_task_start":           cmd_worker_task_start,
+    "worker_task_done":            cmd_worker_task_done,
+    "worker_task_skip":            cmd_worker_task_skip,
+    "finance_invoice_create":      cmd_finance_invoice_create,
+    "finance_invoice_list":        cmd_finance_invoice_list,
+    "finance_invoice_pay":         cmd_finance_invoice_pay,
+    "finance_stats":               cmd_finance_stats,
+    "timesheet_start":             cmd_timesheet_start,
+    "timesheet_stop":              cmd_timesheet_stop,
+    "timesheet_list":              cmd_timesheet_list,
+    "timesheet_approve":           cmd_timesheet_approve,
+    "timesheet_all":               cmd_timesheet_all,
+    "obligation_list":             cmd_obligation_list,
+    "obligation_pay":              cmd_obligation_pay,
+    "obligation_stats":            cmd_obligation_stats,
 }
 
 if __name__ == "__main__":

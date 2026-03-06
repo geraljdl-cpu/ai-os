@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#3b82f6">
+<title>Worker — AI-OS</title>
+<link rel="manifest" href="/worker.manifest.json">
+<style>
+:root{
+  --bg:#f1f5f9;--panel:#fff;--border:#e2e8f0;
+  --blue:#3b82f6;--green:#22c55e;--yellow:#f59e0b;--gray:#94a3b8;
+  --red:#ef4444;--ink:#1e293b;--ink2:#64748b;
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:var(--bg);color:var(--ink);font-family:var(--font)}
+
+/* ── Header ── */
+.header{
+  background:var(--blue);color:#fff;
+  padding:calc(12px + var(--safe-top)) 16px 12px;
+  display:flex;align-items:center;gap:10px;
+  position:sticky;top:0;z-index:100;
+}
+.header .title{font-size:17px;font-weight:700;flex:1}
+.header .user{font-size:12px;opacity:.75}
+.header button{
+  background:rgba(255,255,255,.2);border:none;color:#fff;
+  padding:6px 12px;border-radius:8px;font-size:13px;cursor:pointer;
+}
+.header button:active{background:rgba(255,255,255,.35)}
+
+/* ── Nav tabs ── */
+.tabs{
+  display:flex;background:#fff;border-bottom:1px solid var(--border);
+  position:sticky;top:56px;z-index:99;
+}
+.tab{
+  flex:1;padding:12px 4px;text-align:center;font-size:13px;font-weight:600;
+  color:var(--ink2);border-bottom:3px solid transparent;cursor:pointer;
+  transition:color .15s,border-color .15s;
+}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+
+/* ── View container ── */
+.view{display:none}
+.view.active{display:block}
+
+/* ── Task list ── */
+.task-list{padding:12px}
+.task-card{
+  background:var(--panel);border-radius:12px;
+  border:1px solid var(--border);margin-bottom:10px;
+  overflow:hidden;cursor:pointer;
+  box-shadow:0 1px 3px rgba(0,0,0,.06);
+}
+.task-card:active{background:#f8faff}
+.task-card .body{padding:14px 14px 10px}
+.task-card .title{font-size:15px;font-weight:600;line-height:1.3;margin-bottom:4px}
+.task-card .sub{font-size:12px;color:var(--ink2);margin-bottom:10px}
+.task-card .footer{display:flex;align-items:center;justify-content:space-between}
+.task-card .started{font-size:11px;color:var(--ink2)}
+.btn{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:8px 16px;border-radius:8px;font-size:14px;font-weight:600;
+  border:none;cursor:pointer;min-height:36px;
+}
+.btn-start{background:var(--blue);color:#fff}
+.btn-start:active{background:#2563eb}
+.btn-done{background:var(--green);color:#fff}
+.btn-done:active{background:#16a34a}
+.btn-skip{background:var(--bg);color:var(--ink2);border:1px solid var(--border);font-size:12px;padding:6px 10px}
+
+/* ── Status badges ── */
+.badge{display:inline-block;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:700}
+.badge-pending    {background:#f1f5f9;color:#64748b}
+.badge-in_progress{background:#dbeafe;color:#1d4ed8}
+.badge-done       {background:#dcfce7;color:#166534}
+.badge-skipped    {background:#fef9c3;color:#92400e}
+
+/* ── Detail view ── */
+.detail{padding:16px}
+.detail .back{
+  display:flex;align-items:center;gap:6px;
+  font-size:14px;color:var(--blue);margin-bottom:16px;cursor:pointer;
+  background:none;border:none;padding:0;
+}
+.detail-card{background:var(--panel);border-radius:12px;border:1px solid var(--border);padding:18px;margin-bottom:12px}
+.detail-card .label{font-size:11px;color:var(--ink2);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.detail-card .value{font-size:15px;color:var(--ink);line-height:1.4}
+.detail-card .value.muted{color:var(--ink2);font-size:13px}
+textarea.note{
+  width:100%;min-height:100px;padding:12px;
+  border:1px solid var(--border);border-radius:8px;
+  font-size:15px;font-family:var(--font);resize:vertical;
+  background:var(--panel);color:var(--ink);
+  margin-top:8px;
+}
+textarea.note:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+.btn-full{width:100%;justify-content:center;padding:14px;font-size:16px;border-radius:10px;margin-top:8px}
+.btn-row{display:flex;gap:8px;margin-top:10px}
+
+/* ── History ── */
+.history-card{
+  background:var(--panel);border-radius:10px;
+  border:1px solid var(--border);padding:12px 14px;margin-bottom:8px;
+}
+.history-card .htitle{font-size:14px;font-weight:600;margin-bottom:3px}
+.history-card .hmeta{font-size:12px;color:var(--ink2);margin-bottom:4px}
+.history-card .hnote{font-size:13px;color:var(--ink2);background:#f8faff;border-radius:6px;padding:6px 8px;margin-top:6px;white-space:pre-wrap}
+
+/* ── Empty / loading ── */
+.empty{text-align:center;padding:40px 20px;color:var(--gray)}
+.empty .icon{font-size:40px;margin-bottom:8px}
+.spin{display:inline-block;width:24px;height:24px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loader{display:flex;justify-content:center;padding:40px}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="title">📋 Worker</div>
+  <span class="user" id="user-label"></span>
+  <button onclick="_refresh()">↻</button>
+  <button onclick="_logout()">sair</button>
+</div>
+
+<div class="tabs">
+  <div class="tab active" id="tab-tasks"      onclick="showTab('tasks')">Tarefas</div>
+  <div class="tab"        id="tab-events"     onclick="showTab('events')">Eventos</div>
+  <div class="tab"        id="tab-history"    onclick="showTab('history')">Histórico</div>
+</div>
+
+<!-- VIEW: lista tarefas -->
+<div class="view active" id="view-tasks">
+  <div class="task-list" id="task-list">
+    <div class="loader"><div class="spin"></div></div>
+  </div>
+</div>
+
+<!-- VIEW: detalhe tarefa -->
+<div class="view" id="view-detail">
+  <div class="detail">
+    <button class="back" onclick="showTab('tasks')">&#8592; Voltar</button>
+    <div id="detail-content"></div>
+  </div>
+</div>
+
+<!-- VIEW: eventos / timesheets -->
+<div class="view" id="view-events">
+  <div class="task-list">
+    <!-- Novo evento -->
+    <div class="task-card" style="background:#f0f9ff;border-color:#bae6fd">
+      <div class="body">
+        <div class="title" style="color:#0369a1">Registar horas de evento</div>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <input id="ev-name" type="text" placeholder="Nome do evento" style="
+            flex:1;min-width:160px;padding:9px 12px;border:1px solid var(--border);
+            border-radius:8px;font-size:14px;color:var(--ink);background:#fff">
+          <button class="btn btn-start" onclick="startEvent()" style="white-space:nowrap">▶ Iniciar</button>
+        </div>
+      </div>
+    </div>
+    <div id="event-list">
+      <div class="loader"><div class="spin"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- VIEW: histórico -->
+<div class="view" id="view-history">
+  <div class="task-list" id="history-list">
+    <div class="loader"><div class="spin"></div></div>
+  </div>
+</div>
+
+<script>
+// ── Auth ──────────────────────────────────────────────────────────────────────
+const _jwt = localStorage.getItem('aios_jwt');
+if (!_jwt) window.location = '/login?next=/worker';
+
+function _authHeaders() {
+  return { 'Authorization': 'Bearer ' + _jwt, 'Content-Type': 'application/json' };
+}
+function _logout() {
+  localStorage.removeItem('aios_jwt');
+  localStorage.removeItem('aios_user');
+  window.location = '/login';
+}
+
+try {
+  const u = JSON.parse(localStorage.getItem('aios_user') || '{}');
+  if (u.username) document.getElementById('user-label').textContent = u.username;
+} catch {}
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let allTasks    = [];
+let currentTask = null;
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  const tab = document.getElementById('tab-' + name);
+  if (tab) tab.classList.add('active');
+  if (name === 'tasks')   loadTasks();
+  if (name === 'events')  loadEvents();
+  if (name === 'history') loadHistory();
+  if (name === 'detail')  return;
+}
+
+// ── Load tasks ────────────────────────────────────────────────────────────────
+async function loadTasks() {
+  try {
+    const r = await fetch('/api/worker/tasks?limit=50', { headers: _authHeaders() });
+    if (r.status === 401) { _logout(); return; }
+    allTasks = await r.json();
+    if (!Array.isArray(allTasks)) allTasks = [];
+    renderTasks();
+  } catch(e) {
+    document.getElementById('task-list').innerHTML =
+      '<div class="empty"><div class="icon">⚠️</div>Erro ao carregar tarefas.</div>';
+  }
+}
+
+async function loadHistory() {
+  const el = document.getElementById('history-list');
+  el.innerHTML = '<div class="loader"><div class="spin"></div></div>';
+  try {
+    const r = await fetch('/api/worker/tasks/history?limit=30', { headers: _authHeaders() });
+    if (r.status === 401) { _logout(); return; }
+    const tasks = await r.json();
+    if (!Array.isArray(tasks) || !tasks.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">📭</div>Sem histórico ainda.</div>';
+      return;
+    }
+    el.innerHTML = tasks.map(t => `
+      <div class="history-card">
+        <div class="htitle">${escHtml(t.title)}</div>
+        <div class="hmeta">${escHtml(t.entity_name || '')} · ${fmtTime(t.completed_at || t.updated_at)}</div>
+        ${t.result ? `<div class="hnote">${escHtml(t.result)}</div>` : ''}
+      </div>
+    `).join('');
+  } catch(e) {
+    el.innerHTML = '<div class="empty">Erro ao carregar histórico.</div>';
+  }
+}
+
+function renderTasks() {
+  const el = document.getElementById('task-list');
+  if (!allTasks.length) {
+    el.innerHTML = '<div class="empty"><div class="icon">✅</div>Nenhuma tarefa pendente!</div>';
+    return;
+  }
+  // in_progress first (já tem assignee do utilizador), depois pending
+  const sorted = [...allTasks].sort((a,b) => {
+    if (a.status === 'in_progress' && b.status !== 'in_progress') return -1;
+    if (b.status === 'in_progress' && a.status !== 'in_progress') return 1;
+    return 0;
+  });
+  el.innerHTML = sorted.map(t => {
+    const inProgress = t.status === 'in_progress';
+    const btn = inProgress
+      ? `<button class="btn btn-done" onclick="openTask(${t.id})">✓ Concluir</button>`
+      : `<button class="btn btn-start" onclick="startTask(event,${t.id})">→ Iniciar</button>`;
+    const started = inProgress && t.started_at
+      ? `<span class="started">iniciada ${fmtAgo(t.started_at)}</span>`
+      : '';
+    return `<div class="task-card" onclick="openTask(${t.id})">
+      <div class="body">
+        <div class="title">${escHtml(t.title)}</div>
+        <div class="sub">${escHtml(t.entity_name || '')}${t.kind ? ' · ' + t.kind : ''}</div>
+        <div class="footer">
+          <span class="badge badge-${t.status}">${statusPT(t.status)}</span>
+          ${started}
+          <span onclick="event.stopPropagation()">${btn}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Task actions ──────────────────────────────────────────────────────────────
+async function startTask(evt, id) {
+  evt.stopPropagation();
+  const t = allTasks.find(x => x.id === id);
+  if (!t) return;
+  const btn = evt.target;
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const r = await fetch(`/api/worker/tasks/${id}/start`, { method:'POST', headers: _authHeaders() });
+    const d = await r.json();
+    if (d.ok) {
+      t.status = 'in_progress';
+      const u = JSON.parse(localStorage.getItem('aios_user') || '{}');
+      t.assignee = u.username || '';
+      t.started_at = new Date().toISOString();
+      renderTasks();
+    } else {
+      alert(d.error || 'Erro ao iniciar');
+      btn.disabled = false; btn.textContent = '→ Iniciar';
+    }
+  } catch(e) {
+    alert('Erro de rede'); btn.disabled = false; btn.textContent = '→ Iniciar';
+  }
+}
+
+function openTask(id) {
+  currentTask = allTasks.find(x => x.id === id);
+  if (!currentTask) return;
+  renderDetail();
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('view-detail').classList.add('active');
+}
+
+function renderDetail() {
+  const t = currentTask;
+  if (!t) return;
+  const inProgress = t.status === 'in_progress';
+  const noteSection = `
+    <div class="detail-card" style="margin-top:12px">
+      <div class="label">Nota de resultado</div>
+      <textarea class="note" id="task-note" placeholder="Descreve o que foi feito..."></textarea>
+    </div>
+  `;
+  const actions = inProgress ? `
+    ${noteSection}
+    <div class="btn-row">
+      <button class="btn btn-skip" style="flex:0" onclick="skipTask(${t.id})">↷ Saltar</button>
+      <button class="btn btn-done btn-full" style="flex:1" onclick="doneTask(${t.id})">✓ Concluir tarefa</button>
+    </div>
+  ` : `
+    <div class="btn-row">
+      <button class="btn btn-skip" style="flex:0" onclick="skipTask(${t.id})">↷ Saltar</button>
+      <button class="btn btn-start btn-full" style="flex:1" onclick="startTaskFromDetail(${t.id})">→ Iniciar tarefa</button>
+    </div>
+  `;
+  document.getElementById('detail-content').innerHTML = `
+    <div class="detail-card">
+      <div class="label">Tarefa</div>
+      <div class="value">${escHtml(t.title)}</div>
+    </div>
+    <div class="detail-card">
+      <div class="label">Entidade</div>
+      <div class="value muted">${escHtml(t.entity_name || '—')}</div>
+    </div>
+    ${t.started_at ? `<div class="detail-card">
+      <div class="label">Iniciada</div>
+      <div class="value muted">${fmtTime(t.started_at)} (${fmtAgo(t.started_at)})</div>
+    </div>` : ''}
+    ${actions}
+  `;
+}
+
+async function startTaskFromDetail(id) {
+  const r = await fetch(`/api/worker/tasks/${id}/start`, { method:'POST', headers: _authHeaders() });
+  const d = await r.json();
+  if (d.ok) {
+    if (currentTask) { currentTask.status = 'in_progress'; currentTask.started_at = new Date().toISOString(); }
+    const t = allTasks.find(x => x.id === id);
+    if (t) { t.status = 'in_progress'; t.started_at = currentTask.started_at; }
+    renderDetail();
+  } else { alert(d.error || 'Erro'); }
+}
+
+async function doneTask(id) {
+  const note = (document.getElementById('task-note')?.value || '').trim();
+  const btn = document.querySelector('.btn-done');
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    const r = await fetch(`/api/worker/tasks/${id}/done`, {
+      method: 'POST',
+      headers: _authHeaders(),
+      body: JSON.stringify({ note }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      allTasks = allTasks.filter(x => x.id !== id);
+      showTab('tasks');
+    } else {
+      alert(d.error || 'Erro ao concluir');
+      if (btn) { btn.disabled = false; btn.textContent = '✓ Concluir tarefa'; }
+    }
+  } catch(e) {
+    alert('Erro de rede');
+    if (btn) { btn.disabled = false; btn.textContent = '✓ Concluir tarefa'; }
+  }
+}
+
+async function skipTask(id) {
+  if (!confirm('Saltar esta tarefa?')) return;
+  const r = await fetch(`/api/worker/tasks/${id}/skip`, { method:'POST', headers: _authHeaders() });
+  const d = await r.json();
+  if (d.ok) {
+    allTasks = allTasks.filter(x => x.id !== id);
+    showTab('tasks');
+  } else { alert(d.error || 'Erro'); }
+}
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function _refresh() { loadTasks(); }
+
+function statusPT(s) {
+  return { pending:'Pendente', in_progress:'Em curso', done:'Concluída', skipped:'Saltada' }[s] || s;
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleTimeString('pt', { hour:'2-digit', minute:'2-digit' });
+  } catch { return iso; }
+}
+
+function fmtAgo(iso) {
+  if (!iso) return '';
+  try {
+    const diff = Math.round((Date.now() - new Date(iso)) / 60000);
+    if (diff < 1)  return 'agora';
+    if (diff < 60) return `há ${diff}m`;
+    return `há ${Math.round(diff/60)}h`;
+  } catch { return ''; }
+}
+
+// ── Timesheets (Eventos) ──────────────────────────────────────────────────────
+let _timers = {};
+
+async function loadEvents() {
+  const el = document.getElementById('event-list');
+  try {
+    const r = await fetch('/api/worker/timesheets?limit=20', { headers: _authHeaders() });
+    if (r.status === 401) { _logout(); return; }
+    const d = await r.json();
+    const ts = (d.timesheets || []);
+    if (!ts.length) {
+      el.innerHTML = '<div class="empty"><div class="icon">🕐</div>Sem horas registadas.</div>';
+      return;
+    }
+    el.innerHTML = ts.map(t => {
+      const isOpen = t.status === 'open';
+      const hrs    = t.hours != null ? Number(t.hours).toFixed(2) + 'h' : '—';
+      const badge  = { open: '#dbeafe', submitted: '#fef9c3', approved: '#dcfce7', paid: '#f0fdf4' }[t.status] || '#f1f5f9';
+      const lblCol = { open: '#1d4ed8', submitted: '#92400e', approved: '#166534', paid: '#14532d' }[t.status] || '#64748b';
+      const lbl    = { open: 'Em curso', submitted: 'Submetido', approved: 'Aprovado', paid: 'Pago' }[t.status] || t.status;
+      const elapsed = isOpen ? `<span id="elapsed-${t.id}" style="font-size:13px;color:var(--blue);font-weight:600"></span>` : `<span style="font-size:13px;color:var(--ink2)">${hrs}</span>`;
+      const actions = isOpen
+        ? `<button class="btn btn-done" style="font-size:13px;padding:6px 14px" onclick="stopEvent(${t.id},this)">■ Parar</button>`
+        : '';
+      if (isOpen) startElapsed(t.id, t.start_time);
+      return `<div class="task-card">
+        <div class="body">
+          <div class="title">${escHtml(t.event_name)}</div>
+          <div class="sub">${fmtTime(t.start_time)}${t.end_time ? ' → ' + fmtTime(t.end_time) : ''}</div>
+          <div class="footer">
+            <span style="display:inline-block;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:700;background:${badge};color:${lblCol}">${lbl}</span>
+            ${elapsed}
+            ${actions}
+          </div>
+          ${isOpen ? `<div style="margin-top:8px"><textarea id="note-${t.id}" placeholder="Notas..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;resize:vertical;min-height:56px"></textarea></div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div class="empty">Erro ao carregar eventos.</div>';
+  }
+}
+
+function startElapsed(id, startIso) {
+  if (_timers[id]) clearInterval(_timers[id]);
+  function upd() {
+    const el = document.getElementById('elapsed-' + id);
+    if (!el) { clearInterval(_timers[id]); delete _timers[id]; return; }
+    const diff = Math.round((Date.now() - new Date(startIso)) / 1000);
+    const h = Math.floor(diff / 3600), m = Math.floor((diff % 3600) / 60), s = diff % 60;
+    el.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
+  upd();
+  _timers[id] = setInterval(upd, 1000);
+}
+
+async function startEvent() {
+  const name = document.getElementById('ev-name').value.trim();
+  if (!name) { alert('Indica o nome do evento'); return; }
+  try {
+    const r = await fetch('/api/worker/timesheets/start', {
+      method: 'POST', headers: _authHeaders(),
+      body: JSON.stringify({ event_name: name })
+    });
+    const d = await r.json();
+    if (d.ok) { document.getElementById('ev-name').value = ''; loadEvents(); }
+    else alert(d.error || 'Erro ao iniciar');
+  } catch(e) { alert('Erro de rede'); }
+}
+
+async function stopEvent(id, btn) {
+  btn.disabled = true; btn.textContent = '...';
+  const notes = (document.getElementById('note-' + id)?.value || '').trim();
+  try {
+    const r = await fetch(`/api/worker/timesheets/${id}/stop`, {
+      method: 'POST', headers: _authHeaders(),
+      body: JSON.stringify({ notes })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      if (_timers[id]) { clearInterval(_timers[id]); delete _timers[id]; }
+      loadEvents();
+    } else { alert(d.error || 'Erro ao parar'); btn.disabled = false; btn.textContent = '■ Parar'; }
+  } catch(e) { alert('Erro de rede'); btn.disabled = false; btn.textContent = '■ Parar'; }
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+loadTasks();
+</script>
+</body>
+</html>

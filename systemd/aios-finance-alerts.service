@@ -1,0 +1,12 @@
+[Unit]
+Description=AI-OS Finance Alerts — obrigações fiscais
+After=network.target
+
+[Service]
+Type=oneshot
+User=jdl
+WorkingDirectory=/home/jdl/ai-os
+EnvironmentFile=-/etc/aios.env
+ExecStart=/usr/bin/python3 /home/jdl/ai-os/bin/finance_alerts.py
+StandardOutput=journal
+StandardError=journal

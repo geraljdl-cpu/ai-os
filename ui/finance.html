@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI-OS Finanças</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+  header{background:linear-gradient(135deg,#1e3a5f,#1e293b);padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334155}
+  header h1{font-size:1.25rem;font-weight:700;color:#fff}
+  header nav{display:flex;gap:.5rem}
+  nav button{padding:.4rem .9rem;border-radius:.4rem;border:none;cursor:pointer;font-size:.85rem;font-weight:600;transition:background .2s}
+  nav button.active{background:#3b82f6;color:#fff}
+  nav button:not(.active){background:#1e293b;color:#94a3b8;border:1px solid #334155}
+  nav button:hover:not(.active){background:#334155;color:#e2e8f0}
+  .top-bar{display:flex;align-items:center;justify-content:space-between;padding:1rem 1.5rem}
+  .top-bar h2{font-size:1rem;color:#94a3b8}
+  .refresh-btn{background:#334155;color:#e2e8f0;border:none;padding:.4rem .8rem;border-radius:.4rem;cursor:pointer;font-size:.85rem}
+  .refresh-btn:hover{background:#475569}
+
+  /* Metrics */
+  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;padding:0 1.5rem 1.5rem}
+  .metric-card{background:#1e293b;border:1px solid #334155;border-radius:.75rem;padding:1.25rem}
+  .metric-card .label{font-size:.75rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.5rem}
+  .metric-card .value{font-size:1.75rem;font-weight:700;color:#f8fafc}
+  .metric-card .sub{font-size:.8rem;color:#64748b;margin-top:.25rem}
+  .metric-card.pending .value{color:#60a5fa}
+  .metric-card.overdue .value{color:#f87171}
+  .metric-card.paid .value{color:#34d399}
+
+  /* Filters */
+  .filters{display:flex;gap:.5rem;padding:0 1.5rem .75rem;flex-wrap:wrap}
+  .filters button{padding:.35rem .85rem;border-radius:2rem;border:none;cursor:pointer;font-size:.8rem;font-weight:600;transition:all .2s}
+  .filters button.active{background:#3b82f6;color:#fff}
+  .filters button:not(.active){background:#1e293b;color:#94a3b8;border:1px solid #334155}
+  .filters button:hover:not(.active){background:#334155}
+
+  /* Table */
+  .table-wrap{padding:0 1.5rem 2rem;overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:.85rem}
+  thead tr{background:#1e293b;border-bottom:2px solid #334155}
+  thead th{padding:.75rem 1rem;text-align:left;font-weight:600;color:#94a3b8;white-space:nowrap}
+  tbody tr{border-bottom:1px solid #1e293b;transition:background .15s}
+  tbody tr:hover{background:#1e293b}
+  tbody td{padding:.75rem 1rem;color:#e2e8f0}
+  .badge{display:inline-block;padding:.2rem .6rem;border-radius:2rem;font-size:.75rem;font-weight:700;text-transform:uppercase}
+  .badge.issued{background:#1e3a5f;color:#60a5fa}
+  .badge.overdue{background:#450a0a;color:#f87171}
+  .badge.paid{background:#064e3b;color:#34d399}
+  .badge.cancelled{background:#292524;color:#a8a29e}
+  .pay-btn{background:#16a34a;color:#fff;border:none;padding:.3rem .7rem;border-radius:.35rem;cursor:pointer;font-size:.8rem;font-weight:600;transition:background .15s}
+  .pay-btn:hover{background:#15803d}
+  .empty{text-align:center;padding:3rem;color:#475569}
+
+  /* Spinner */
+  .spinner{display:inline-block;width:1rem;height:1rem;border:2px solid #334155;border-top-color:#3b82f6;border-radius:50%;animation:spin .6s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .loading{text-align:center;padding:2rem;color:#64748b}
+
+  /* Toast */
+  #toast{position:fixed;bottom:1.5rem;right:1.5rem;background:#1e293b;border:1px solid #334155;border-radius:.5rem;padding:.75rem 1.25rem;color:#e2e8f0;font-size:.875rem;opacity:0;transform:translateY(8px);transition:all .3s;pointer-events:none;z-index:1000;max-width:320px}
+  #toast.show{opacity:1;transform:translateY(0)}
+  #toast.ok{border-color:#34d399;color:#34d399}
+  #toast.err{border-color:#f87171;color:#f87171}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>💰 Finanças</h1>
+  <nav>
+    <button onclick="location.href='/ops'">NOC</button>
+    <button onclick="location.href='/factory'">Fábrica</button>
+    <button class="active">Finanças</button>
+  </nav>
+</header>
+
+<div class="top-bar">
+  <h2 id="last-updated">A carregar...</h2>
+  <button class="refresh-btn" onclick="loadAll()">↻ Actualizar</button>
+</div>
+
+<!-- Tabs -->
+<div style="display:flex;gap:0;padding:0 1.5rem .5rem;border-bottom:1px solid #334155;margin-bottom:1rem">
+  <button id="ftab-invoices"     onclick="setFTab('invoices')"     style="padding:.5rem 1.2rem;border:none;border-bottom:3px solid #3b82f6;background:transparent;color:#f8fafc;font-weight:700;cursor:pointer;font-size:.9rem">Faturas</button>
+  <button id="ftab-obligations"  onclick="setFTab('obligations')"  style="padding:.5rem 1.2rem;border:none;border-bottom:3px solid transparent;background:transparent;color:#94a3b8;font-weight:600;cursor:pointer;font-size:.9rem">Obrigações Fiscais</button>
+  <button id="ftab-timesheets"   onclick="setFTab('timesheets')"   style="padding:.5rem 1.2rem;border:none;border-bottom:3px solid transparent;background:transparent;color:#94a3b8;font-weight:600;cursor:pointer;font-size:.9rem">Horas Eventos</button>
+</div>
+
+<!-- VIEW: Faturas -->
+<div id="fview-invoices">
+<div class="metrics" id="metrics">
+  <div class="metric-card pending"><div class="label">Pendente</div><div class="value" id="m-pendente">—</div><div class="sub" id="m-pendente-eur">—</div></div>
+  <div class="metric-card overdue"><div class="label">Vencido</div><div class="value" id="m-vencido">—</div><div class="sub" id="m-vencido-eur">—</div></div>
+  <div class="metric-card paid"><div class="label">Pago</div><div class="value" id="m-pago">—</div><div class="sub" id="m-pago-eur">—</div></div>
+  <div class="metric-card"><div class="label">Total faturas</div><div class="value" id="m-total">—</div></div>
+</div>
+
+<div class="filters">
+  <button class="active" data-f="" onclick="setFilter(this,'')">Todas</button>
+  <button data-f="issued" onclick="setFilter(this,'issued')">Pendente</button>
+  <button data-f="overdue" onclick="setFilter(this,'overdue')">Vencido</button>
+  <button data-f="paid" onclick="setFilter(this,'paid')">Pago</button>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Nº Fatura</th>
+        <th>Cliente</th>
+        <th>Valor</th>
+        <th>Estado</th>
+        <th>Emitida</th>
+        <th>Vencimento</th>
+        <th>Pago em</th>
+        <th>Ações</th>
+      </tr>
+    </thead>
+    <tbody id="invoice-tbody">
+      <tr><td colspan="8" class="loading"><div class="spinner"></div></td></tr>
+    </tbody>
+  </table>
+</div>
+</div>
+
+<!-- VIEW: Obrigações Fiscais -->
+<div id="fview-obligations" style="display:none">
+<div class="metrics" id="obl-metrics">
+  <div class="metric-card overdue"><div class="label">Vencidas</div><div class="value" id="o-overdue">—</div></div>
+  <div class="metric-card pending"><div class="label">Esta semana</div><div class="value" id="o-week">—</div></div>
+  <div class="metric-card"><div class="label">Próx. 30 dias</div><div class="value" id="o-month">—</div></div>
+  <div class="metric-card paid"><div class="label">Pagas</div><div class="value" id="o-paid">—</div></div>
+</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Obrigação</th>
+        <th>Entidade</th>
+        <th>Vencimento</th>
+        <th>Dias</th>
+        <th>Valor</th>
+        <th>Estado</th>
+        <th>Ação</th>
+      </tr>
+    </thead>
+    <tbody id="obl-tbody">
+      <tr><td colspan="7" class="loading"><div class="spinner"></div></td></tr>
+    </tbody>
+  </table>
+</div>
+</div>
+
+<!-- VIEW: Horas Eventos -->
+<div id="fview-timesheets" style="display:none">
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Worker</th>
+        <th>Evento</th>
+        <th>Início</th>
+        <th>Fim</th>
+        <th>Horas</th>
+        <th>Estado</th>
+        <th>Ação</th>
+      </tr>
+    </thead>
+    <tbody id="ts-tbody">
+      <tr><td colspan="7" class="loading"><div class="spinner"></div></td></tr>
+    </tbody>
+  </table>
+</div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const TOKEN = localStorage.getItem('aios_jwt');
+if (!TOKEN) location.href = '/login?next=/finance';
+
+let currentFilter = '';
+
+function fmtDate(s) {
+  if (!s) return '—';
+  return s.slice(0,10);
+}
+function fmtEur(n) {
+  return '€' + Number(n).toLocaleString('pt-PT', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function showToast(msg, type='ok') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show ' + type;
+  setTimeout(() => t.className = '', 3000);
+}
+
+async function apiFetch(url, opts={}) {
+  const res = await fetch(url, {
+    headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json', ...(opts.headers||{}) },
+    ...opts
+  });
+  if (res.status === 401) { location.href = '/login?next=/finance'; throw new Error('unauth'); }
+  return res.json();
+}
+
+async function loadStats() {
+  try {
+    const d = await apiFetch('/api/twin/finance/stats');
+    if (!d.ok) return;
+    document.getElementById('m-pendente').textContent = d.pendente;
+    document.getElementById('m-pendente-eur').textContent = fmtEur(d.total_pendente);
+    document.getElementById('m-vencido').textContent  = d.vencido;
+    document.getElementById('m-vencido-eur').textContent  = fmtEur(d.total_vencido);
+    document.getElementById('m-pago').textContent     = d.pago;
+    document.getElementById('m-pago-eur').textContent     = fmtEur(d.total_pago);
+    document.getElementById('m-total').textContent    = d.pendente + d.vencido + d.pago;
+  } catch(e) { /* silent */ }
+}
+
+async function loadInvoices(status='') {
+  const tbody = document.getElementById('invoice-tbody');
+  tbody.innerHTML = '<tr><td colspan="8" class="loading"><div class="spinner"></div></td></tr>';
+  try {
+    const url = '/api/twin/invoices?limit=50' + (status ? '&status='+status : '');
+    const d = await apiFetch(url);
+    if (!d.ok || !d.invoices.length) {
+      tbody.innerHTML = '<tr><td colspan="8" class="empty">Sem faturas</td></tr>';
+      return;
+    }
+    tbody.innerHTML = d.invoices.map(inv => {
+      const eff = inv.effective_status || inv.status;
+      const badgeClass = eff === 'overdue' ? 'overdue' : eff === 'paid' ? 'paid' : eff === 'cancelled' ? 'cancelled' : 'issued';
+      const label = eff === 'overdue' ? 'Vencido' : eff === 'paid' ? 'Pago' : eff === 'cancelled' ? 'Cancelado' : 'Pendente';
+      const payBtn = (inv.status === 'issued')
+        ? `<button class="pay-btn" onclick="markPaid(${inv.id}, this)">✓ Marcar paga</button>`
+        : '—';
+      return `<tr>
+        <td><strong>${inv.number}</strong></td>
+        <td>${inv.client || inv.entity_name || '—'}</td>
+        <td>${fmtEur(inv.amount)} ${inv.currency}</td>
+        <td><span class="badge ${badgeClass}">${label}</span></td>
+        <td>${fmtDate(inv.created_at)}</td>
+        <td>${fmtDate(inv.due_date)}</td>
+        <td>${fmtDate(inv.paid_at)}</td>
+        <td>${payBtn}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">Erro ao carregar faturas</td></tr>';
+  }
+}
+
+async function markPaid(id, btn) {
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const d = await apiFetch(`/api/twin/invoices/${id}/pay`, { method: 'POST', body: '{}' });
+    if (d.ok) {
+      showToast('Fatura marcada como paga', 'ok');
+      await loadAll();
+    } else {
+      showToast(d.error || 'Erro', 'err');
+      btn.disabled = false; btn.textContent = '✓ Marcar paga';
+    }
+  } catch(e) {
+    showToast('Erro de rede', 'err');
+    btn.disabled = false; btn.textContent = '✓ Marcar paga';
+  }
+}
+
+function setFilter(el, val) {
+  document.querySelectorAll('.filters button').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  currentFilter = val;
+  loadInvoices(val);
+}
+
+// ── Finance tabs ───────────────────────────────────────────────────────────────
+let currentFTab = 'invoices';
+
+function setFTab(tab) {
+  currentFTab = tab;
+  ['invoices','obligations','timesheets'].forEach(t => {
+    document.getElementById('fview-' + t).style.display  = t === tab ? '' : 'none';
+    const btn = document.getElementById('ftab-' + t);
+    btn.style.borderBottomColor = t === tab ? '#3b82f6' : 'transparent';
+    btn.style.color             = t === tab ? '#f8fafc' : '#94a3b8';
+  });
+  if (tab === 'obligations') loadObligations();
+  if (tab === 'timesheets')  loadTimesheets();
+}
+
+// ── Obligations ────────────────────────────────────────────────────────────────
+async function loadObligationStats() {
+  try {
+    const d = await apiFetch('/api/twin/obligations/stats');
+    if (!d.ok) return;
+    document.getElementById('o-overdue').textContent = d.overdue + (d.today > 0 ? '+' + d.today : '');
+    document.getElementById('o-week').textContent    = d.week;
+    document.getElementById('o-month').textContent   = d.month;
+    document.getElementById('o-paid').textContent    = d.paid;
+  } catch(e) { /* silent */ }
+}
+
+async function loadObligations() {
+  await loadObligationStats();
+  const tbody = document.getElementById('obl-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" class="loading"><div class="spinner"></div></td></tr>';
+  try {
+    const d = await apiFetch('/api/twin/obligations?days=180');
+    if (!d.ok || !d.obligations.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">Sem obrigações</td></tr>';
+      return;
+    }
+    tbody.innerHTML = d.obligations.map(o => {
+      const days = o.days_left;
+      const isOverdue = days < 0;
+      const isUrgent  = days >= 0 && days <= 5;
+      const isWarning = days > 5 && days <= 10;
+      const daysLabel = isOverdue
+        ? `<span style="color:#f87171;font-weight:700">VENCIDA ${Math.abs(days)}d</span>`
+        : isUrgent
+          ? `<span style="color:#fb923c;font-weight:700">${days}d ⚠</span>`
+          : isWarning
+            ? `<span style="color:#fbbf24;font-weight:600">${days}d</span>`
+            : `<span style="color:#94a3b8">${days}d</span>`;
+      const rowBg = isOverdue ? 'background:#1a0808' : isUrgent ? 'background:#1a1000' : '';
+      const badgeClass = o.status === 'paid' ? 'paid' : isOverdue ? 'overdue' : 'issued';
+      const badgeLabel = o.status === 'paid' ? 'Pago' : isOverdue ? 'Vencida' : 'Pendente';
+      const payBtn = o.status === 'pending'
+        ? `<button class="pay-btn" onclick="payObligation(${o.id}, this)">✓ Pagar</button>`
+        : '—';
+      return `<tr style="${rowBg}">
+        <td><strong>${o.label}</strong></td>
+        <td>${o.entity}</td>
+        <td>${o.due_date ? o.due_date.slice(0,10) : '—'}</td>
+        <td>${daysLabel}</td>
+        <td>${o.amount != null ? fmtEur(o.amount) : '<span style="color:#64748b">a definir</span>'}</td>
+        <td><span class="badge ${badgeClass}">${badgeLabel}</span></td>
+        <td>${payBtn}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">Erro ao carregar</td></tr>';
+  }
+}
+
+async function payObligation(id, btn) {
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const d = await apiFetch(`/api/twin/obligations/${id}/pay`, { method: 'POST', body: '{}' });
+    if (d.ok) { showToast('Obrigação marcada como paga', 'ok'); loadObligations(); }
+    else { showToast(d.error || 'Erro', 'err'); btn.disabled = false; btn.textContent = '✓ Pagar'; }
+  } catch(e) { showToast('Erro de rede', 'err'); btn.disabled = false; btn.textContent = '✓ Pagar'; }
+}
+
+// ── Timesheets ─────────────────────────────────────────────────────────────────
+async function loadTimesheets() {
+  const tbody = document.getElementById('ts-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" class="loading"><div class="spinner"></div></td></tr>';
+  try {
+    const d = await apiFetch('/api/timesheets/all?limit=50');
+    if (!d.ok || !d.timesheets.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">Sem horas registadas</td></tr>';
+      return;
+    }
+    tbody.innerHTML = d.timesheets.map(t => {
+      const hrs = t.hours != null ? Number(t.hours).toFixed(2) + 'h' : '—';
+      const val = (t.hours && t.hourly_rate) ? fmtEur(t.hours * t.hourly_rate) : '—';
+      const badgeClass = { open:'issued', submitted:'pending', approved:'paid', paid:'paid' }[t.status] || 'issued';
+      const badgeLabel = { open:'Em curso', submitted:'Submetido', approved:'Aprovado', paid:'Pago' }[t.status] || t.status;
+      const approveBtn = t.status === 'submitted'
+        ? `<button class="pay-btn" onclick="approveTs(${t.id}, this)">✓ Aprovar</button>`
+        : '—';
+      return `<tr>
+        <td>${t.worker_id}</td>
+        <td>${t.event_name}</td>
+        <td>${t.start_time ? t.start_time.slice(11,16) : '—'} ${t.start_time ? t.start_time.slice(0,10) : ''}</td>
+        <td>${t.end_time ? t.end_time.slice(11,16) : '—'}</td>
+        <td>${hrs}${val !== '—' ? ' · ' + val : ''}</td>
+        <td><span class="badge ${badgeClass}">${badgeLabel}</span></td>
+        <td>${approveBtn}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">Erro ao carregar</td></tr>';
+  }
+}
+
+async function approveTs(id, btn) {
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const d = await apiFetch(`/api/timesheets/${id}/approve`, { method: 'POST', body: '{}' });
+    if (d.ok) { showToast('Horas aprovadas', 'ok'); loadTimesheets(); }
+    else { showToast(d.error || 'Erro', 'err'); btn.disabled = false; btn.textContent = '✓ Aprovar'; }
+  } catch(e) { showToast('Erro de rede', 'err'); btn.disabled = false; btn.textContent = '✓ Aprovar'; }
+}
+
+async function loadAll() {
+  document.getElementById('last-updated').textContent = 'A actualizar...';
+  await Promise.all([loadStats(), loadInvoices(currentFilter)]);
+  if (currentFTab === 'obligations') loadObligations();
+  if (currentFTab === 'timesheets')  loadTimesheets();
+  document.getElementById('last-updated').textContent = 'Actualizado: ' + new Date().toLocaleTimeString('pt-PT');
+}
+
+loadAll();
+</script>
+</body>
+</html>
