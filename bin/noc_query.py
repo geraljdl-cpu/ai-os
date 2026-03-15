@@ -1863,7 +1863,9 @@ def cmd_idea_list(args):
                    (SELECT content FROM public.idea_messages
                     WHERE thread_id=t.id AND role='joao'
                     ORDER BY created_at LIMIT 1) AS first_msg,
-                   (SELECT COUNT(*) FROM public.idea_reviews WHERE thread_id=t.id) AS review_count
+                   (SELECT COUNT(*) FROM public.idea_reviews WHERE thread_id=t.id) AS review_count,
+                   (SELECT AVG(score)::integer FROM public.idea_reviews
+                    WHERE thread_id=t.id AND score IS NOT NULL AND agent != 'system') AS avg_score
             FROM public.idea_threads t
             WHERE (:status IS NULL OR t.status = :status)
             ORDER BY t.created_at DESC LIMIT :lim

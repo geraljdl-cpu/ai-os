@@ -1108,16 +1108,13 @@ app.get('/api/ideas/:id', requireRole(...JOAO_ROLES), (req, res) => {
 app.post('/api/ideas/:id/analyze', requireRole(...JOAO_ROLES), (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
-  if (!ANTHROPIC_KEY)
-    return res.status(503).json({ ok: false, error: 'ANTHROPIC_API_KEY não configurada em /etc/aios.env' });
-  // executa em background, resposta imediata
-  const { spawn } = require('child_process');
-  const env = { ...process.env, ANTHROPIC_API_KEY: ANTHROPIC_KEY,
-                DATABASE_URL: process.env.DATABASE_URL || 'postgresql://aios_user:jdl@127.0.0.1:5432/aios' };
-  const proc = spawn('python3', ['/home/jdl/ai-os/bin/idea_router.py', String(id)],
-    { env, detached: true, stdio: 'ignore' });
-  proc.unref();
-  res.json({ ok: true, id, status: 'analyzing', message: 'Conselho de IA a analisar...' });
+  // Enfileira no cluster via worker_jobs pipeline
+  const result = nocExec(`pipeline_idea_analyze ${id}`, 5000);
+  if (result && result.ok) {
+    res.json({ ok: true, id, job_id: result.job_id, status: 'analyzing', message: 'Análise enfileirada no cluster...' });
+  } else {
+    res.json(result || { ok: false, error: 'Erro ao enfileirar análise' });
+  }
 });
 
 app.get('/api/ideas/:id/reviews', requireRole(...JOAO_ROLES), (req, res) => {

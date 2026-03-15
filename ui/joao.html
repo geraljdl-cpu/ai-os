@@ -128,6 +128,31 @@ header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
 .form-field input,.form-field textarea{width:100%;background:#0f172a;border:1px solid #334155;border-radius:.4rem;color:#e2e8f0;padding:.6rem .8rem;font-size:.875rem;font-family:inherit}
 .form-field textarea{height:100px;resize:vertical;line-height:1.5}
 .form-field input:focus,.form-field textarea:focus{outline:none;border-color:#3b82f6}
+
+/* ── Score badge ── */
+.score-badge{display:inline-block;padding:.1rem .45rem;border-radius:99px;font-size:.68rem;font-weight:700;margin-left:.3rem;vertical-align:middle}
+.score-badge.hi{background:#14532d;color:#34d399}
+.score-badge.mid{background:#451a03;color:#fb923c}
+.score-badge.lo{background:#292524;color:#a8a29e}
+
+/* ── Hoje top items ── */
+.hoje-item{display:flex;align-items:flex-start;gap:.75rem;padding:.7rem 0;border-bottom:1px solid #1e293b}
+.hoje-item:last-child{border:none}
+.hoje-dot{width:.55rem;height:.55rem;border-radius:50%;flex-shrink:0;margin-top:.45rem}
+.hoje-item .h-label{font-size:.63rem;text-transform:uppercase;color:#64748b;font-weight:700;letter-spacing:.05em;margin-bottom:.15rem}
+.hoje-item .h-title{font-size:.875rem;color:#e2e8f0;font-weight:500;line-height:1.35}
+.hoje-item .h-sub{font-size:.73rem;color:#64748b;margin-top:.15rem}
+.hoje-item .h-action{margin-left:auto;flex-shrink:0;align-self:center}
+
+/* ── Timeline (7 dias) ── */
+.timeline-item{display:flex;align-items:center;gap:.6rem;padding:.42rem 0;border-bottom:1px solid #1e293b;font-size:.83rem}
+.timeline-item:last-child{border:none}
+.timeline-date{font-size:.68rem;color:#64748b;min-width:3.2rem;font-weight:600;flex-shrink:0}
+.timeline-label{flex:1;color:#e2e8f0;line-height:1.3}
+.timeline-days{font-size:.7rem;font-weight:700;padding:.12rem .45rem;border-radius:99px;flex-shrink:0}
+.timeline-days.urg{background:#7f1d1d;color:#f87171}
+.timeline-days.warn{background:#451a03;color:#fb923c}
+.timeline-days.ok{background:#1e293b;color:#64748b}
 </style>
 </head>
 <body>
@@ -187,12 +212,12 @@ header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
         <div class="card">
-          <div class="card-title">Próximas obrigações</div>
-          <div id="ov-obl-list"><div class="loading"><span class="spinner"></span>A carregar...</div></div>
+          <div class="card-title">🎯 Para fazer hoje</div>
+          <div id="ov-hoje-list"><div class="loading"><span class="spinner"></span>A carregar...</div></div>
         </div>
         <div class="card">
-          <div class="card-title">Decisões a tomar</div>
-          <div id="ov-dec-list"><div class="loading"><span class="spinner"></span>A carregar...</div></div>
+          <div class="card-title">📅 Próximos 14 dias</div>
+          <div id="ov-7dias-list"><div class="loading"><span class="spinner"></span>A carregar...</div></div>
         </div>
       </div>
       <div class="card">
@@ -250,7 +275,18 @@ header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
         <div class="section-title">Decisões Pendentes</div>
         <button class="btn btn-ghost btn-sm" onclick="loadDecisions()">↻</button>
       </div>
-      <div id="decisions-list"><div class="loading"><span class="spinner"></span></div></div>
+      <div class="card">
+        <div class="card-title">💡 Ideias analisadas — prontas para projeto</div>
+        <div id="dec-ideas-list"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">⚡ Aprovações pendentes</div>
+        <div id="dec-approvals-list"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">📋 Decisões a resolver</div>
+        <div id="decisions-list"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
     </div>
 
     <!-- VIEW: Radar -->
@@ -377,57 +413,106 @@ function setView(v) {
 
 async function loadOverview() {
   try {
-    const [ideas, decisions, oblStats] = await Promise.all([
-      api('/api/ideas?status=open&limit=5'),
-      api('/api/decisions?status=pending&limit=5'),
+    const [ideas, decisions, oblStats, oblData] = await Promise.all([
+      api('/api/ideas?limit=20'),
+      api('/api/decisions?status=pending&limit=10'),
       api('/api/twin/obligations/stats'),
+      api('/api/twin/obligations?days=30&limit=10'),
     ]);
 
-    // badges
-    const ideasCount     = (ideas.ideas||[]).length;
+    const allIdeas       = ideas.ideas || [];
+    const activeIdeas    = allIdeas.filter(i => ['open','analyzed'].includes(i.status));
     const decisionsCount = (decisions.decisions||[]).length;
     const oblUrgent      = (oblStats.overdue||0) + (oblStats.today||0) + (oblStats.week||0);
 
-    document.getElementById('ov-decisions').textContent = decisionsCount;
-    document.getElementById('ov-ideas').textContent     = ideasCount;
+    document.getElementById('ov-decisions').textContent   = decisionsCount;
+    document.getElementById('ov-ideas').textContent       = activeIdeas.length;
     document.getElementById('ov-obligations').textContent = oblUrgent;
-    document.getElementById('ov-tenders').textContent   = '—';
+    document.getElementById('ov-tenders').textContent     = '—';
 
-    // obrigações
-    const oblEl = document.getElementById('ov-obl-list');
-    if (oblStats.next) {
-      const obl = await api('/api/twin/obligations?days=30&limit=4');
-      oblEl.innerHTML = (obl.obligations||[]).slice(0,4).map(o => {
-        const days = o.days_left;
-        const cls  = days < 0 ? 'urgent' : days <= 5 ? 'urgent' : days <= 10 ? 'warn' : '';
-        return `<div class="obligation-row">
-          <span>${esc(o.label)}</span>
-          <span class="o-days ${cls}">${days < 0 ? 'VENCIDA' : days + 'd'}</span>
-        </div>`;
-      }).join('') || '<div style="color:#475569;font-size:.83rem">Sem obrigações próximas</div>';
-    } else {
-      oblEl.innerHTML = '<div style="color:#475569;font-size:.83rem">Sem obrigações próximas</div>';
+    // ── Para fazer hoje ────────────────────────────────────────────
+    const obls   = (oblData.obligations||[]).slice().sort((a,b) => a.days_left - b.days_left);
+    const topObl = obls[0];
+    const topDec = (decisions.decisions||[])[0];
+    const topIdea = allIdeas.filter(i => i.status === 'analyzed')
+                            .sort((a,b) => (b.avg_score||0) - (a.avg_score||0))[0];
+
+    let hojeHtml = '';
+
+    if (topObl) {
+      const d   = topObl.days_left;
+      const col = d < 0 ? '#f87171' : d <= 3 ? '#f87171' : d <= 7 ? '#fb923c' : '#64748b';
+      const lbl = d < 0 ? 'VENCIDA' : d === 0 ? 'HOJE' : d + 'd';
+      hojeHtml += `<div class="hoje-item">
+        <div class="hoje-dot" style="background:${col}"></div>
+        <div style="flex:1">
+          <div class="h-label">Obrigação fiscal</div>
+          <div class="h-title">${esc(topObl.label)}</div>
+          <div class="h-sub">${lbl}${topObl.amount ? ' · ' + fmtEur(topObl.amount) : ''}</div>
+        </div>
+        <a href="/finance" class="btn btn-ghost btn-sm h-action">Ver</a>
+      </div>`;
     }
 
-    // decisões
-    const decEl = document.getElementById('ov-dec-list');
-    decEl.innerHTML = (decisions.decisions||[]).slice(0,4).map(d => `
-      <div class="obligation-row">
-        <span>${esc(d.title)}</span>
-        <span style="font-size:.7rem;color:#64748b">${esc(d.kind)}</span>
-      </div>`).join('') || '<div style="color:#475569;font-size:.83rem">Sem decisões pendentes</div>';
+    if (topDec) {
+      hojeHtml += `<div class="hoje-item">
+        <div class="hoje-dot" style="background:#fbbf24"></div>
+        <div style="flex:1">
+          <div class="h-label">Decisão pendente</div>
+          <div class="h-title">${esc(topDec.title)}</div>
+          <div class="h-sub">${esc(topDec.kind)}</div>
+        </div>
+        <button class="btn btn-green btn-sm h-action" onclick="resolveDecision(${topDec.id},this)">✓</button>
+      </div>`;
+    }
 
-    // ideias recentes
+    if (topIdea) {
+      const sc = topIdea.avg_score;
+      const scBadge = sc != null ? `<span class="score-badge ${sc>=75?'hi':sc>=50?'mid':'lo'}">${sc}</span>` : '';
+      hojeHtml += `<div class="hoje-item">
+        <div class="hoje-dot" style="background:#a78bfa"></div>
+        <div style="flex:1">
+          <div class="h-label">Ideia pronta — converter em projeto?</div>
+          <div class="h-title">${esc(topIdea.title)}${scBadge}</div>
+          <div class="h-sub">Conselho IA: ${topIdea.review_count} análises</div>
+        </div>
+        <button class="btn btn-primary btn-sm h-action" onclick="setView('ideas');selectIdea(${topIdea.id})">Ver</button>
+      </div>`;
+    }
+
+    document.getElementById('ov-hoje-list').innerHTML =
+      hojeHtml || '<div style="color:#475569;font-size:.83rem;padding:.5rem 0">Nada urgente hoje</div>';
+
+    // ── Próximos 14 dias ───────────────────────────────────────────
+    const agenda = obls.filter(o => o.days_left >= 0 && o.days_left <= 14).slice(0, 7);
+    const seteDiasEl = document.getElementById('ov-7dias-list');
+    if (agenda.length) {
+      seteDiasEl.innerHTML = agenda.map(o => {
+        const d   = o.days_left;
+        const cls = d <= 2 ? 'urg' : d <= 7 ? 'warn' : 'ok';
+        const dt  = new Date(Date.now() + d * 86400000).toLocaleDateString('pt-PT', {day:'2-digit',month:'short'});
+        return `<div class="timeline-item">
+          <span class="timeline-date">${dt}</span>
+          <span class="timeline-label">${esc(o.label)}</span>
+          <span class="timeline-days ${cls}">${d === 0 ? 'hoje' : d + 'd'}</span>
+        </div>`;
+      }).join('');
+    } else {
+      seteDiasEl.innerHTML = '<div style="color:#475569;font-size:.83rem">Sem obrigações nos próximos 14 dias</div>';
+    }
+
+    // ── Ideias recentes ────────────────────────────────────────────
     const ideasEl = document.getElementById('ov-ideas-list');
-    ideasEl.innerHTML = (ideas.ideas||[]).map(i => `
-      <div class="obligation-row" style="cursor:pointer" onclick="setView('ideas');selectIdea(${i.id})">
-        <span>${esc(i.title)}</span>
+    ideasEl.innerHTML = allIdeas.slice(0,7).map(i => {
+      const scBadge = i.avg_score != null ? `<span class="score-badge ${i.avg_score>=75?'hi':i.avg_score>=50?'mid':'lo'}">${i.avg_score}</span>` : '';
+      return `<div class="obligation-row" style="cursor:pointer" onclick="setView('ideas');selectIdea(${i.id})">
+        <span>${esc(i.title)}${scBadge}</span>
         <span class="idea-status ${i.status}">${i.status}</span>
-      </div>`).join('') || '<div style="color:#475569;font-size:.83rem">Sem ideias abertas — lança a primeira!</div>';
+      </div>`;
+    }).join('') || '<div style="color:#475569;font-size:.83rem">Sem ideias — lança a primeira!</div>';
 
-    // update badges + agent briefing
-    updateBadges(ideasCount, decisionsCount);
-    loadAgentBriefing().then(alertCount => updateBadges(ideasCount, decisionsCount, alertCount));
+    updateBadges(activeIdeas.length, decisionsCount);
+    loadAgentBriefing().then(alertCount => updateBadges(activeIdeas.length, decisionsCount, alertCount));
   } catch(e) { console.error(e); }
 }
 
@@ -536,7 +621,7 @@ async function loadIdeas() {
         <div class="idea-meta">
           <span class="idea-status ${i.status}">${i.status}</span>
           <span>${fmtDate(i.created_at)}</span>
-          ${i.review_count > 0 ? `<span>📊 ${i.review_count} análises</span>` : ''}
+          ${i.avg_score != null ? `<span class="score-badge ${i.avg_score>=75?'hi':i.avg_score>=50?'mid':'lo'}">${i.avg_score}</span>` : (i.review_count > 0 ? `<span style="font-size:.7rem;color:#475569">📊 ${i.review_count}</span>` : '')}
         </div>
       </div>`).join('');
     if (selectedIdeaId) selectIdea(selectedIdeaId);
@@ -710,12 +795,55 @@ async function archiveIdea(id) {
 // ── decisions ─────────────────────────────────────────────────────────────────
 
 async function loadDecisions() {
+  // Section 1: Ideias analisadas prontas para projeto
+  const decIdeasEl = document.getElementById('dec-ideas-list');
+  try {
+    const d = await api('/api/ideas?status=analyzed&limit=10');
+    const analyzed = d.ideas || [];
+    if (!analyzed.length) {
+      decIdeasEl.innerHTML = '<div style="color:#475569;font-size:.83rem">Sem ideias analisadas aguardando decisão</div>';
+    } else {
+      decIdeasEl.innerHTML = analyzed
+        .sort((a,b) => (b.avg_score||0) - (a.avg_score||0))
+        .map(i => {
+          const scBadge = i.avg_score != null
+            ? `<span class="score-badge ${i.avg_score>=75?'hi':i.avg_score>=50?'mid':'lo'}">${i.avg_score}</span>` : '';
+          return `<div class="decision-item">
+            <span class="d-kind">ideia</span>
+            <span class="d-title">${esc(i.title)}${scBadge}</span>
+            <button class="btn btn-ghost btn-sm" onclick="setView('ideas');selectIdea(${i.id})">Ver</button>
+            <button class="btn btn-green btn-sm" onclick="createCase(${i.id})">📁 Projeto</button>
+          </div>`;
+        }).join('');
+    }
+  } catch(e) { decIdeasEl.innerHTML = '<div style="color:#475569;font-size:.83rem">Erro</div>'; }
+
+  // Section 2: Aprovações pendentes
+  const decApprEl = document.getElementById('dec-approvals-list');
+  try {
+    const appr = await api('/api/twin/approvals?limit=15');
+    const pending = (Array.isArray(appr) ? appr : []).filter(a => a.status === 'pending');
+    if (!pending.length) {
+      decApprEl.innerHTML = '<div style="color:#475569;font-size:.83rem">Sem aprovações pendentes</div>';
+    } else {
+      decApprEl.innerHTML = pending.map(a => `
+        <div class="decision-item">
+          <span class="d-kind">${esc(a.action)}</span>
+          <span class="d-title">${esc(a.summary || a.action)}</span>
+          <span style="font-size:.73rem;color:#475569">${fmtDate(a.requested_at)}</span>
+          <button class="btn btn-green btn-sm" onclick="setApproval(${a.id},'approved',this)">✓ Aprovar</button>
+          <button class="btn btn-red btn-sm" onclick="setApproval(${a.id},'rejected',this)">✗</button>
+        </div>`).join('');
+    }
+  } catch(e) { decApprEl.innerHTML = '<div style="color:#475569;font-size:.83rem">Erro</div>'; }
+
+  // Section 3: Decision queue
   const el = document.getElementById('decisions-list');
   el.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   try {
     const d = await api('/api/decisions?status=pending&limit=30');
     if (!d.ok || !d.decisions.length) {
-      el.innerHTML = '<div style="color:#475569;text-align:center;padding:3rem;font-size:.85rem">Sem decisões pendentes</div>';
+      el.innerHTML = '<div style="color:#475569;font-size:.83rem;padding:.5rem 0">Sem decisões na fila</div>';
       return;
     }
     el.innerHTML = d.decisions.map(dec => `
@@ -732,9 +860,22 @@ async function resolveDecision(id, btn) {
   btn.disabled = true; btn.textContent = '...';
   try {
     const d = await api(`/api/decisions/${id}/resolve`, { method: 'POST', body: '{}' });
-    if (d.ok) { showToast('Decisão resolvida', 'ok'); loadDecisions(); }
-    else { showToast(d.error||'Erro','err'); btn.disabled=false; btn.textContent='✓ Resolver'; }
+    if (d.ok) {
+      showToast('Decisão resolvida', 'ok');
+      if (currentView === 'overview') loadOverview(); else loadDecisions();
+    } else { showToast(d.error||'Erro','err'); btn.disabled=false; btn.textContent='✓ Resolver'; }
   } catch(e) { showToast('Erro','err'); btn.disabled=false; btn.textContent='✓ Resolver'; }
+}
+
+async function setApproval(id, status, btn) {
+  btn.disabled = true;
+  try {
+    const d = await api(`/api/twin/approvals/${id}/set`, { method: 'POST', body: JSON.stringify({ status }) });
+    if (d.ok) {
+      showToast(status === 'approved' ? 'Aprovado' : 'Rejeitado', 'ok');
+      loadDecisions();
+    } else { showToast(d.error||'Erro','err'); btn.disabled = false; }
+  } catch(e) { showToast('Erro','err'); btn.disabled = false; }
 }
 
 // ── radar ─────────────────────────────────────────────────────────────────────
