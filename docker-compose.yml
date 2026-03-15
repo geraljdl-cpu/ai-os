@@ -105,7 +105,7 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - OLLAMA_MODEL=qwen2.5:14b
       - OPENAI_MODEL=gpt-4.1-mini
-      - OPENAI_API_KEY=REDACTED_OPENAI_KEY
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - DATABASE_URL=postgresql://webui:webui@postgres:5432/aios
       - QDRANT_URL=http://qdrant:6333
       - MQTT_HOST=mosquitto
