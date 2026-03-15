@@ -121,11 +121,18 @@ def schedule_radar(conn):
         log.info(f"radar TED score: job_id={jid}")
         results.append(jid)
 
-    # base.gov: pipeline completo diário (collect + normalize + score + bridge)
+    # base.gov: pipeline completo diário
     base_payload = {"cmd": f"bash {_CLUSTER_ROOT}/bin/radar_run_all.sh base"}
     if not has_active_job(conn, "automation", 22*60, base_payload):
         jid = enqueue(conn, "automation", base_payload)
         log.info(f"radar base full: job_id={jid}")
+        results.append(jid)
+
+    # Diário da República: pipeline completo diário
+    dr_payload = {"cmd": f"bash {_CLUSTER_ROOT}/bin/radar_run_all.sh dr"}
+    if not has_active_job(conn, "automation", 22*60, dr_payload):
+        jid = enqueue(conn, "automation", dr_payload)
+        log.info(f"radar dr full: job_id={jid}")
         results.append(jid)
 
     return results or None
