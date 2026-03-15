@@ -1,0 +1,10 @@
+[Unit]
+Description=AIOS Radar DR — daily 06:45 (disabled until Phase 2)
+
+[Timer]
+OnCalendar=*-*-* 06:45:00
+Persistent=true
+Unit=aios-radar-dr.service
+
+# [Install] intentionally omitted — enable when DR API is available
+# To activate: sudo systemctl enable --now aios-radar-dr.timer

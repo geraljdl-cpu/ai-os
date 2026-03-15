@@ -1,0 +1,11 @@
+[Unit]
+Description=AIOS Radar Diário da República (stub — Phase 2)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=jdl
+WorkingDirectory=/home/jdl/ai-os
+ExecStart=/usr/bin/env bash /home/jdl/ai-os/bin/radar_run_all.sh dr
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,10 @@
+[Unit]
+Description=AIOS Radar BASE.gov.pt — daily 06:30
+
+[Timer]
+OnCalendar=*-*-* 06:30:00
+Persistent=true
+Unit=aios-radar-base.service
+
+[Install]
+WantedBy=timers.target

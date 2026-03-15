@@ -1,0 +1,11 @@
+[Unit]
+Description=AIOS Radar BASE.gov.pt (nacional)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=jdl
+WorkingDirectory=/home/jdl/ai-os
+ExecStart=/usr/bin/env bash /home/jdl/ai-os/bin/radar_run_all.sh base
+StandardOutput=journal
+StandardError=journal

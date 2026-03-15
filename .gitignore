@@ -65,3 +65,9 @@ dashboards/
 backlog/
 *_dashboard.html
 bin/autofill.py
+.aider*
+.env
+.env
+.env
+.env
+.env
