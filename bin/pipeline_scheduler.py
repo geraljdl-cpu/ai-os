@@ -110,14 +110,25 @@ def schedule_incidents(conn):
     return jid
 
 
-# ── Rule 3: radar — cada 30min ───────────────────────────────────────────────
+# ── Rule 3: radar — TED cada 30min, base.gov diário ──────────────────────────
 
 def schedule_radar(conn):
-    if has_active_job(conn, "radar", 28):
-        return None
-    jid = enqueue(conn, "radar", {"script": "radar_score", "args": ["--source", "ted"]})
-    log.info(f"radar: job_id={jid}")
-    return jid
+    results = []
+
+    # TED: score incremental a cada 30min (collect feito pelo aios-radar.service)
+    if not has_active_job(conn, "radar", 28, {"script": "radar_score", "args": ["--source", "ted"]}):
+        jid = enqueue(conn, "radar", {"script": "radar_score", "args": ["--source", "ted"]})
+        log.info(f"radar TED score: job_id={jid}")
+        results.append(jid)
+
+    # base.gov: pipeline completo diário (collect + normalize + score + bridge)
+    base_payload = {"cmd": f"bash {_CLUSTER_ROOT}/bin/radar_run_all.sh base"}
+    if not has_active_job(conn, "automation", 22*60, base_payload):
+        jid = enqueue(conn, "automation", base_payload)
+        log.info(f"radar base full: job_id={jid}")
+        results.append(jid)
+
+    return results or None
 
 
 # ── Rule 4: finance — cada 1h ────────────────────────────────────────────────
