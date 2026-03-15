@@ -1068,6 +1068,8 @@ def cmd_twin_tenders(args):
 
     engine, text = _conn()
     src_filter = "AND e.metadata->>'source' = :src" if source else ""
+    # Fetch more rows than limit so we can guarantee 1 per source
+    fetch_n = max(limit * 5, 200) if not source else limit
     with engine.connect() as c:
         rows = c.execute(text(f"""
             SELECT e.id, e.name, e.metadata, e.created_at,
@@ -1076,13 +1078,13 @@ def cmd_twin_tenders(args):
             LEFT JOIN public.twin_cases tc ON tc.entity_id = e.id AND tc.workflow_key = 'tender_intake'
             WHERE e.type = 'tender'
             {src_filter}
-            ORDER BY (e.metadata->>'score')::int DESC, e.created_at DESC
+            ORDER BY (e.metadata->>'score')::int DESC NULLS LAST, e.created_at DESC
             LIMIT :n
-        """), {"n": limit, "src": source}).mappings().all()
-    out = []
-    for r in rows:
+        """), {"n": fetch_n, "src": source}).mappings().all()
+
+    def _fmt(r):
         meta = r["metadata"] if isinstance(r["metadata"], dict) else json.loads(r["metadata"] or "{}")
-        out.append({
+        return {
             "entity_id":   r["id"],
             "title":       meta.get("title", r["name"]),
             "pub_num":     meta.get("pub_num", meta.get("external_id", "")),
@@ -1098,8 +1100,23 @@ def cmd_twin_tenders(args):
             "case_id":     r["case_id"],
             "case_status": r["case_status"],
             "created_at":  r["created_at"].isoformat() if r["created_at"] else "",
-        })
-    print(json.dumps(out, ensure_ascii=False))
+        }
+
+    # Guarantee at least 1 item per source, then fill up to limit by score
+    seen_sources: set = set()
+    guaranteed, rest = [], []
+    for r in rows:
+        meta = r["metadata"] if isinstance(r["metadata"], dict) else json.loads(r["metadata"] or "{}")
+        src = meta.get("source", "ted")
+        if src not in seen_sources:
+            guaranteed.append(_fmt(r))
+            seen_sources.add(src)
+        else:
+            rest.append(_fmt(r))
+
+    out = guaranteed + rest[:max(0, limit - len(guaranteed))]
+    out.sort(key=lambda t: t["score"] or 0, reverse=True)
+    print(json.dumps(out[:limit], ensure_ascii=False))
 
 
 def cmd_twin_tender_update(args):
