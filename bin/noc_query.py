@@ -2221,6 +2221,63 @@ def cmd_cluster_metrics(args):
     print(json.dumps([_row(r) for r in rows], ensure_ascii=False))
 
 
+def cmd_agent_status(_args):
+    """Estado por agente/role: last 24h jobs, falhas, último trabalho. Usa cluster_workers.json para nomes."""
+    import pathlib as _pl
+    _ROOT = os.path.dirname(_bin_dir)
+    cfg_path = os.path.join(_ROOT, "config", "cluster_workers.json")
+    try:
+        cfg = json.loads(_pl.Path(cfg_path).read_text())
+        nodes_cfg = cfg.get("nodes", {})
+    except Exception:
+        nodes_cfg = {}
+
+    engine, text = _conn()
+    with engine.connect() as c:
+        workers = c.execute(text("""
+            SELECT id, hostname, role, status, last_seen,
+                   EXTRACT(EPOCH FROM (NOW() - last_seen))::int AS age_secs
+            FROM public.workers
+            ORDER BY last_seen DESC NULLS LAST
+        """)).mappings().all()
+
+        job_stats = c.execute(text("""
+            SELECT assigned_worker_id AS wid,
+                   COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE status='done')    AS done_cnt,
+                   COUNT(*) FILTER (WHERE status='failed')  AS fail_cnt,
+                   COUNT(*) FILTER (WHERE status='running') AS running_cnt,
+                   MAX(ts_done) AS last_done,
+                   (ARRAY_AGG(kind ORDER BY ts_created DESC))[1] AS last_kind
+            FROM public.worker_jobs
+            WHERE ts_created > NOW() - INTERVAL '24 hours'
+              AND assigned_worker_id IS NOT NULL
+            GROUP BY assigned_worker_id
+        """)).mappings().all()
+
+    job_map = {r["wid"]: dict(r) for r in job_stats}
+    result = []
+    for w in workers:
+        wid  = w["id"]
+        ncfg = nodes_cfg.get(wid, {})
+        js   = job_map.get(wid, {})
+        result.append({
+            "node":        wid,
+            "agent":       ncfg.get("agent", wid),
+            "agent_desc":  ncfg.get("agent_desc", ""),
+            "roles":       w["role"] or "",
+            "status":      w["status"] or "unknown",
+            "age_secs":    w["age_secs"],
+            "jobs_24h":    int(js.get("total") or 0),
+            "jobs_done":   int(js.get("done_cnt") or 0),
+            "jobs_failed": int(js.get("fail_cnt") or 0),
+            "running":     int(js.get("running_cnt") or 0),
+            "last_kind":   js.get("last_kind"),
+            "last_job_at": _row({"t": js["last_done"]})["t"] if js.get("last_done") else None,
+        })
+    print(json.dumps(result, ensure_ascii=False))
+
+
 def cmd_pipeline_idea_analyze(args):
     """Enfileira análise de ideia no cluster. Args: <thread_id>"""
     if not args:
@@ -2345,6 +2402,7 @@ CMDS = {
     "incident_resolve":            cmd_incident_resolve,
     "incident_create":             cmd_incident_create,
     "cluster_metrics":             cmd_cluster_metrics,
+    "agent_status":                cmd_agent_status,
     "pipeline_idea_analyze":       cmd_pipeline_idea_analyze,
     "pipeline_radar_score":        cmd_pipeline_radar_score,
     "pipeline_incidents":          cmd_pipeline_incidents,

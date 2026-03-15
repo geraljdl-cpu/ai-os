@@ -401,6 +401,55 @@ def _get_ops_token() -> str:
     return ""
 
 
+# ── Cluster agents (/cluster) ─────────────────────────────────────────────────
+
+def handle_cluster(_args) -> str:
+    try:
+        r = requests.get(f"{UI_BASE}/api/agent/status", timeout=10).json()
+    except Exception as e:
+        return f"Erro ao obter estado dos agentes: {e}"
+    if not isinstance(r, list) or not r:
+        return "Sem dados de agentes disponíveis."
+    lines = [f"🤖 *Agent Team* — {nowz()}", ""]
+    for a in r:
+        offline = (a.get("age_secs") or 999999) > 120
+        busy    = not offline and a.get("running", 0) > 0
+        icon    = "🔴" if offline else "🟡" if busy else "🟢"
+        st      = "OFFLINE" if offline else "BUSY" if busy else "IDLE"
+        fails   = a.get("jobs_failed", 0)
+        fail_s  = f" ⚠️{fails}err" if fails else ""
+        last    = a.get("last_kind") or "—"
+        lines.append(f"{icon} *{a['agent']}* [{st}] — {a.get('jobs_24h',0)}j/24h{fail_s}\n   _{a.get('agent_desc','')}_ | último: {last}")
+    lines.append(f"\n📺 {UI_BASE}/ops")
+    return "\n".join(lines)
+
+
+# ── Alertas de incidentes (/alertas) ──────────────────────────────────────────
+
+def handle_alertas(_args) -> str:
+    try:
+        r = requests.get(f"{UI_BASE}/api/incidents", timeout=10).json()
+    except Exception as e:
+        return f"Erro ao obter incidentes: {e}"
+    if not isinstance(r, list):
+        return "Sem dados de incidentes."
+    open_inc = [i for i in r if i.get("status") == "open"]
+    if not open_inc:
+        return f"✅ Sem incidentes abertos — {nowz()}"
+    crits = [i for i in open_inc if i.get("severity") == "crit"]
+    warns = [i for i in open_inc if i.get("severity") == "warn"]
+    lines = [f"🚨 *Incidentes* — {nowz()}", ""]
+    for i in crits:
+        lines.append(f"🔴 *CRIT* — {i.get('title','')} [{i.get('source','')}]")
+    for i in warns:
+        lines.append(f"🟠 *WARN* — {i.get('title','')} [{i.get('source','')}]")
+    infos = [i for i in open_inc if i.get("severity") == "info"]
+    for i in infos:
+        lines.append(f"🔵 *INFO* — {i.get('title','')} [{i.get('source','')}]")
+    lines.append(f"\n📺 {UI_BASE}/ops")
+    return "\n".join(lines)
+
+
 # ── Chief of Staff — /joao, /aprovar, /rejeitar, /control ────────────────────
 
 def list_agent_suggestions(limit=8):
@@ -557,6 +606,12 @@ def handle_command(text: str):
         except Exception as e:
             send(f"Erro: {e}")
         return
+    if t.startswith("/cluster"):
+        send(handle_cluster(t.split()[1:]))
+        return
+    if t.startswith("/alertas"):
+        send(handle_alertas(t.split()[1:]))
+        return
     if t.startswith("/control"):
         send(
             f"📺 *Control Room*\n{UI_BASE}/control\n\n"
@@ -571,6 +626,8 @@ def handle_command(text: str):
             "/joao — briefing + sugestões do agente\n"
             "/aprovar <id> — aprovar sugestão\n"
             "/rejeitar <id> — rejeitar sugestão\n"
+            "/cluster — estado da equipa de agentes IA\n"
+            "/alertas — incidentes abertos\n"
             "/control — link para o control room\n"
             "/status — estado da infra\n"
             "/approvals — aprovações da fábrica\n"
@@ -675,9 +732,37 @@ def handle_callback(cb):
         except Exception:
             pass
 
+def check_proactive_alerts():
+    """Check for new CRIT incidents and alert once per incident (by id)."""
+    if not hasattr(check_proactive_alerts, "_seen"):
+        check_proactive_alerts._seen = set()
+    try:
+        r = requests.get(f"{UI_BASE}/api/incidents", timeout=8).json()
+    except Exception:
+        return
+    if not isinstance(r, list):
+        return
+    crits = [i for i in r if i.get("status") == "open" and i.get("severity") == "crit"]
+    new_crits = [i for i in crits if i.get("id") not in check_proactive_alerts._seen]
+    if new_crits:
+        lines = [f"🚨 *ALERTA CRÍTICO* — {nowz()}", ""]
+        for i in new_crits:
+            check_proactive_alerts._seen.add(i.get("id"))
+            lines.append(f"🔴 {i.get('title','')} [{i.get('source','')}]")
+        lines.append(f"\nResolver: {UI_BASE}/ops")
+        try:
+            send("\n".join(lines))
+        except Exception:
+            pass
+    # Clean up resolved ids from seen set
+    open_ids = {i.get("id") for i in r if i.get("status") == "open"}
+    check_proactive_alerts._seen &= open_ids
+
+
 def main():
     offset = 0
-    send(f"[{nowz()}] AI-OS bot online. /status /approvals")
+    _tick = 0
+    send(f"[{nowz()}] AI-OS bot online. /status /approvals /cluster /alertas")
     while True:
         try:
             r = requests.get(f"{API_BASE}/getUpdates",
@@ -697,6 +782,9 @@ def main():
                     if TG_CHAT and str(TG_CHAT) != chat_id:
                         continue
                     handle_callback(cb)
+            _tick += 1
+            if _tick % 20 == 0:   # every ~10 min (20 × 30s long-poll)
+                check_proactive_alerts()
         except Exception as e:
             insert_event("warn", "telegram_bot_error", str(e))
             time.sleep(3)

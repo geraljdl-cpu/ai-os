@@ -79,6 +79,8 @@ const AUTH_EXEMPT = new Set([
   '/worker_jobs/enqueue',
   // Control room — leitura pública (TV wall)
   '/control/overview',
+  '/agent/status',
+  '/incidents',
   // Toconline health — public (sem dados sensíveis)
   '/finance/toconline/health',
 ]);
@@ -403,6 +405,8 @@ function nocExec(cmd, timeout = 8000) {
     return { error: (e.stderr || e.message || String(e)).slice(0, 300) };
   }
 }
+
+app.get('/api/agent/status', (req, res) => res.json(nocExec('agent_status')));
 
 // Serve ops.html
 app.get('/noc',     (req, res) => res.sendFile(__dirname + '/noc.html'));
@@ -1221,6 +1225,7 @@ app.get('/api/control/overview', (req, res) => {
     const bankTxs    = nocExec('bank_transactions 5 unmatched');
     const clusterJobs    = nocExec('worker_jobs 15');
     const clusterMetrics = nocExec('cluster_metrics 6');
+    const agentStatus    = nocExec('agent_status');
 
     const arr = v => Array.isArray(v) ? v : [];
     res.json({
@@ -1239,6 +1244,7 @@ app.get('/api/control/overview', (req, res) => {
       bank_unmatched: bankTxs.summary?.unmatched || 0,
       cluster_jobs:    arr(clusterJobs),
       cluster_metrics: arr(clusterMetrics),
+      agent_status:    arr(agentStatus),
       generated_at:  new Date().toISOString(),
     });
   } catch(e) {

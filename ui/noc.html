@@ -23,10 +23,19 @@
   #grid{
     display:grid;
     grid-template-columns:1fr 1fr 1fr;
-    grid-template-rows:1fr 1fr;
+    grid-template-rows:1fr 1fr 100px;
     gap:8px;padding:8px;
     height:calc(100vh - 48px);
   }
+  #card-agents{grid-column:1/-1}
+  .agent-card{background:#0d1320;border:1px solid var(--border);border-radius:6px;padding:6px 8px;flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+  .agent-card.busy{border-color:var(--yellow);animation:pulse 1.5s infinite}
+  .agent-card.offline{border-color:var(--red);opacity:.6}
+  .agent-card.ok{border-color:var(--green)}
+  .agent-head{display:flex;align-items:center;justify-content:space-between;gap:4px}
+  .agent-name{font-size:11px;font-weight:700;color:var(--cyan)}
+  .agent-roles{font-size:9px;color:var(--muted);margin-top:1px}
+  .agent-stats{font-size:10px;color:var(--text);margin-top:2px}
   .card{
     background:var(--card);border:1px solid var(--border);border-radius:8px;
     padding:12px;overflow:hidden;display:flex;flex-direction:column;min-height:0;
@@ -139,6 +148,11 @@
   <div class="card" id="card-ideas">
     <div class="card-title"><span class="dot dot-gray dot" style="background:var(--purple)"></span>IDEIAS / CONSELHO IA</div>
     <div class="card-body scroll" id="blk-ideas"></div>
+  </div>
+  <!-- Block 7: Agent Team -->
+  <div class="card" id="card-agents">
+    <div class="card-title"><span class="dot" style="background:var(--purple)"></span>AGENT TEAM — 24/7</div>
+    <div class="card-body" id="blk-agents" style="display:flex;gap:6px;align-items:stretch"></div>
   </div>
 </div>
 
@@ -334,6 +348,32 @@ function renderIdeas(ideas) {
   }).join('');
 }
 
+/* ── Block 7: Agent Team ─── */
+function renderAgents(agents) {
+  const el = document.getElementById('blk-agents');
+  if (!agents || !agents.length) {
+    el.innerHTML = '<div style="color:var(--muted);padding:8px">Sem dados de agentes</div>';
+    return;
+  }
+  el.innerHTML = agents.map(a => {
+    const offline = a.age_secs === null || a.age_secs > 120;
+    const busy = !offline && a.running > 0;
+    const cls = offline ? 'offline' : busy ? 'busy' : 'ok';
+    const stColor = offline ? 'var(--red)' : busy ? 'var(--yellow)' : 'var(--green)';
+    const stLabel = offline ? 'OFFLINE' : busy ? 'BUSY' : 'IDLE';
+    const lastAgo = a.last_job_at ? ago(a.last_job_at) : '—';
+    return `<div class="agent-card ${cls}">
+      <div class="agent-head">
+        <span class="agent-name">${esc(a.agent)}</span>
+        <span style="font-size:9px;font-weight:700;color:${stColor}">${stLabel}</span>
+      </div>
+      <div class="agent-roles">${esc(a.agent_desc||a.roles)}</div>
+      <div class="agent-stats">${a.jobs_24h}j &#183; ${a.jobs_failed>0?'<span style="color:var(--red)">'+a.jobs_failed+' err</span>':'ok'} &#183; ${lastAgo}</div>
+      ${a.last_kind ? `<div style="font-size:9px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.last_kind)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
 /* ── Main refresh ─── */
 async function refresh() {
   try {
@@ -347,6 +387,7 @@ async function refresh() {
     renderRadar(d.cluster_jobs);
     renderIncidents(d.incidents);
     renderIdeas(d.ideas);
+    renderAgents(d.agent_status);
     document.getElementById('hdr-time').textContent = new Date().toLocaleTimeString('pt-PT');
   } catch(e) {
     document.getElementById('hdr-time').textContent = 'ERRO: ' + e.message;
