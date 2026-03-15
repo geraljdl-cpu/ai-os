@@ -206,6 +206,96 @@ def schedule_closing(conn):
     return jid
 
 
+# ── Rule 9: job watchdog — cada tick ─────────────────────────────────────────
+
+_STUCK_MINUTES    = 12   # running > 12min → stuck
+_RETRY_FAIL_SECS  = 120  # failed within 2min → eligible for retry
+
+
+def schedule_job_retry(conn):
+    """
+    Stuck jobs (running > 12min): requeue if retry_count < max_retries, else fail permanently.
+    Recent failures (failed within 2min): requeue if retry_count < max_retries.
+    Returns dict with counts.
+    """
+    stats = {"requeued": 0, "dead": 0, "retry_recent": 0}
+
+    with conn.cursor() as cur:
+        # 1. Stuck running jobs
+        cur.execute("""
+            SELECT id, kind, retry_count, max_retries
+            FROM public.worker_jobs
+            WHERE status = 'running'
+              AND ts_assigned < NOW() - (%s || ' minutes')::interval
+        """, (str(_STUCK_MINUTES),))
+        stuck = cur.fetchall()
+
+    for jid, kind, rc, mr in stuck:
+        if rc < mr:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE public.worker_jobs
+                    SET status = 'queued', retry_count = retry_count + 1,
+                        assigned_worker_id = NULL, ts_assigned = NULL
+                    WHERE id = %s
+                """, (jid,))
+            log.info(f"job_retry: stuck job_id={jid} kind={kind} retry {rc+1}/{mr}")
+            stats["requeued"] += 1
+        else:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE public.worker_jobs
+                    SET status = 'failed', ts_done = NOW(),
+                        result = '{"error":"timeout: max retries exceeded"}'::jsonb
+                    WHERE id = %s
+                """, (jid,))
+            log.warning(f"job_retry: dead job_id={jid} kind={kind} after {rc} retries")
+            stats["dead"] += 1
+            # create incident for dead jobs
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO public.incidents (source, kind, severity, title, details)
+                        SELECT 'worker_jobs', 'job_dead', 'warn',
+                               'Job morto após ' || %s || ' tentativas: ' || %s,
+                               'job_id=' || %s
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM public.incidents
+                            WHERE source='worker_jobs' AND kind='job_dead'
+                              AND status='open'
+                              AND details = 'job_id=' || %s::text
+                        )
+                    """, (str(rc), kind, str(jid), str(jid)))
+            except Exception as e:
+                log.error(f"job_retry: incident insert error: {e}")
+
+    # 2. Recently failed, retryable
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT id, kind, retry_count, max_retries
+            FROM public.worker_jobs
+            WHERE status = 'failed'
+              AND retry_count < max_retries
+              AND ts_done > NOW() - (%s || ' seconds')::interval
+        """, (str(_RETRY_FAIL_SECS),))
+        recent_failed = cur.fetchall()
+
+    for jid, kind, rc, mr in recent_failed:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE public.worker_jobs
+                SET status = 'queued', retry_count = retry_count + 1,
+                    assigned_worker_id = NULL, ts_assigned = NULL, ts_done = NULL
+                WHERE id = %s
+            """, (jid,))
+        log.info(f"job_retry: failed→requeue job_id={jid} kind={kind} retry {rc+1}/{mr}")
+        stats["retry_recent"] += 1
+
+    if any(stats.values()):
+        log.info(f"job_watchdog: {stats}")
+    return stats if any(stats.values()) else None
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -221,6 +311,7 @@ def main():
             "stale_cases":       schedule_stale_cases(conn),
             "briefing":          schedule_briefing(conn),
             "closing":           schedule_closing(conn),
+            "job_retry":         schedule_job_retry(conn),
         }
         conn.commit()
         # log apenas resultados não-nulos

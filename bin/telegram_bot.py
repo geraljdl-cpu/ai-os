@@ -401,6 +401,162 @@ def _get_ops_token() -> str:
     return ""
 
 
+# ── Case management (/case) ───────────────────────────────────────────────────
+
+def handle_case(args: list) -> str:
+    sub = args[0].lower() if args else "list"
+
+    if sub == "list" or sub == "ls":
+        rows = psql("""
+            SELECT tc.id, tc.workflow_key, tc.status, te.name, tc.updated_at
+            FROM public.twin_cases tc
+            LEFT JOIN public.twin_entities te ON te.id = tc.entity_id
+            WHERE tc.status NOT IN ('closed','archived','done')
+            ORDER BY tc.updated_at DESC
+            LIMIT 12;
+        """)
+        items = []
+        for line in rows.splitlines():
+            if not line.strip():
+                continue
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) < 5:
+                continue
+            items.append({"id": parts[0], "wf": parts[1], "status": parts[2],
+                          "name": parts[3], "updated": parts[4]})
+        if not items:
+            return f"✅ Sem casos abertos — {nowz()}"
+        lines = [f"📁 *Casos abertos ({len(items)})* — {nowz()}", ""]
+        for c in items:
+            name = c["name"] or f"case#{c['id']}"
+            try:
+                import datetime
+                upd = datetime.datetime.fromisoformat(c["updated"].replace(" ", "T").rstrip("Z"))
+                age_h = int((datetime.datetime.utcnow() - upd.replace(tzinfo=None)).total_seconds() / 3600)
+                age_s = f"{age_h}h" if age_h < 48 else f"{age_h//24}d"
+            except Exception:
+                age_s = "?"
+            icon = "🔴" if age_s.endswith("d") and int(age_s[:-1]) >= 2 else "🟡"
+            lines.append(f"{icon} #{c['id']} *{name}* [{c['wf']}] — {age_s} atrás")
+        lines.append(f"\n🌐 {UI_BASE}/ops")
+        return "\n".join(lines)
+
+    if sub == "ver" or sub == "show":
+        if len(args) < 2:
+            return "Uso: /case ver <id>"
+        cid = args[1]
+        rows = psql(f"""
+            SELECT tc.id, tc.workflow_key, tc.status, te.name, tc.data,
+                   tc.sla_due_at, tc.updated_at
+            FROM public.twin_cases tc
+            LEFT JOIN public.twin_entities te ON te.id = tc.entity_id
+            WHERE tc.id = {int(cid)};
+        """)
+        tasks = psql(f"""
+            SELECT title, status FROM public.twin_tasks WHERE case_id={int(cid)}
+            ORDER BY id LIMIT 8;
+        """)
+        for line in rows.splitlines():
+            if not line.strip():
+                continue
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) < 5:
+                continue
+            cid2, wf, status, name, data = parts[0], parts[1], parts[2], parts[3], parts[4]
+            sla = parts[5] if len(parts) > 5 else "—"
+            task_lines = []
+            for tline in tasks.splitlines():
+                if not tline.strip():
+                    continue
+                tp = [p.strip() for p in tline.split("|")]
+                if len(tp) < 2:
+                    continue
+                ticon = "✅" if tp[1] == "done" else "⏳"
+                task_lines.append(f"  {ticon} {tp[0]}")
+            return (
+                f"📁 *Case #{cid2}* — {name or '?'}\n"
+                f"  Workflow: {wf}\n"
+                f"  Estado: {status}\n"
+                f"  SLA: {sla[:16] if sla and sla != '—' else '—'}\n"
+                + (f"\nTarefas:\n" + "\n".join(task_lines) if task_lines else "")
+            )
+        return f"Case #{cid} não encontrado."
+
+    return "Uso:\n/case list — listar casos abertos\n/case ver <id> — detalhe"
+
+
+# ── Finance summary (/finance) ────────────────────────────────────────────────
+
+def handle_finance(_args) -> str:
+    try:
+        # Obligations
+        obls = psql(
+            "SELECT label, due_date, amount, status FROM public.finance_obligations "
+            "WHERE status='pending' ORDER BY due_date ASC LIMIT 10;"
+        )
+        # Payouts
+        pays = psql(
+            "SELECT worker_id, week_start, amount, status FROM public.finance_payouts "
+            "WHERE status IN ('pending','approved') ORDER BY week_start DESC LIMIT 8;"
+        )
+    except Exception as e:
+        return f"Erro ao carregar finanças: {e}"
+
+    lines = [f"💰 *Finance* — {nowz()}", ""]
+
+    # Parse obligations
+    obl_items = []
+    for line in obls.splitlines():
+        if not line.strip():
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 4:
+            continue
+        label, due_date, amount, status = parts[:4]
+        obl_items.append({"label": label, "due": due_date, "amount": amount})
+
+    if obl_items:
+        lines.append("📋 *Obrigações pendentes:*")
+        for o in obl_items:
+            try:
+                import datetime
+                due = datetime.date.fromisoformat(o["due"])
+                days = (due - datetime.date.today()).days
+                icon = "🔴" if days < 0 else "🟠" if days <= 5 else "🟡"
+                days_s = f"vencida {-days}d" if days < 0 else f"em {days}d"
+            except Exception:
+                icon = "⚪"
+                days_s = o["due"]
+            amt = f" — €{float(o['amount']):.0f}" if o["amount"] else ""
+            lines.append(f"{icon} {o['label']}{amt} ({days_s})")
+    else:
+        lines.append("✅ Sem obrigações pendentes")
+
+    lines.append("")
+
+    # Parse payouts
+    pay_items = []
+    for line in pays.splitlines():
+        if not line.strip():
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 4:
+            continue
+        pay_items.append({"worker": parts[0], "week": parts[1], "amount": parts[2], "status": parts[3]})
+
+    if pay_items:
+        total = sum(float(p["amount"]) for p in pay_items if p["amount"])
+        lines.append(f"💳 *Pagamentos RH pendentes ({len(pay_items)}) — €{total:.0f}:*")
+        for p in pay_items:
+            st_icon = "🟡" if p["status"] == "pending" else "🟢"
+            lines.append(f"{st_icon} {p['worker']} semana {p['week'][:10]} — €{float(p['amount']):.0f}")
+    else:
+        lines.append("✅ Sem pagamentos pendentes")
+
+    lines.append(f"\n🌐 {UI_BASE}/finance")
+    return "\n".join(lines)
+
+
 # ── Cluster agents (/cluster) ─────────────────────────────────────────────────
 
 def handle_cluster(_args) -> str:
@@ -606,6 +762,12 @@ def handle_command(text: str):
         except Exception as e:
             send(f"Erro: {e}")
         return
+    if t.startswith("/case"):
+        send(handle_case(t.split()[1:]))
+        return
+    if t.startswith("/finance"):
+        send(handle_finance(t.split()[1:]))
+        return
     if t.startswith("/cluster"):
         send(handle_cluster(t.split()[1:]))
         return
@@ -628,6 +790,8 @@ def handle_command(text: str):
             "/rejeitar <id> — rejeitar sugestão\n"
             "/cluster — estado da equipa de agentes IA\n"
             "/alertas — incidentes abertos\n"
+            "/finance — obrigações e pagamentos RH\n"
+            "/case list|ver <id> — gestão de casos\n"
             "/control — link para o control room\n"
             "/status — estado da infra\n"
             "/approvals — aprovações da fábrica\n"
