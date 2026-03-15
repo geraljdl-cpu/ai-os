@@ -1,0 +1,22 @@
+{
+  "_comment": "Roles por node — escalável. Adicionar nodes sem refazer nada.",
+  "nodes": {
+    "node2": {"roles": ["ai_analysis"],                              "ip": "192.168.1.112"},
+    "node3": {"roles": ["preprocess", "general"],                    "ip": "192.168.1.121"},
+    "node4": {"roles": ["radar", "automation", "ai_analysis"],       "ip": "192.168.1.122"},
+    "node5": {"roles": ["general"],                                  "ip": "192.168.1.123"},
+    "node6": {"roles": ["general"],                                  "ip": "192.168.1.124"},
+    "node7": {"roles": ["watchdog", "light", "echo", "fallback"],    "ip": "192.168.1.125"}
+  },
+  "db": {
+    "host": "192.168.1.101",
+    "port": 5432,
+    "user": "aios_user",
+    "pass": "jdl",
+    "name": "aios"
+  },
+  "ollama_url": "http://192.168.1.101:11434",
+  "log_dir":    "/cluster/d1/ai-os/runtime/workers",
+  "poll_sec":   5,
+  "job_timeout_secs": 300
+}
