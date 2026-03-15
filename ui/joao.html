@@ -880,24 +880,29 @@ async function setApproval(id, status, btn) {
 
 // ── radar ─────────────────────────────────────────────────────────────────────
 
+const _SRC_COLOR = { ted: '#60a5fa', base: '#34d399', dr: '#c084fc' };
 async function loadRadar() {
   const el = document.getElementById('radar-list');
   try {
-    const d = await api('/api/twin/tenders?limit=10');
-    if (!d.ok || !(d.tenders||d.entities||[]).length) {
+    const items = await api('/api/twin/tenders?limit=10');
+    if (!Array.isArray(items) || !items.length) {
       el.innerHTML = '<div style="color:#475569;text-align:center;padding:3rem;font-size:.85rem">Sem concursos no radar</div>';
       return;
     }
-    const items = d.tenders || d.entities || [];
     el.innerHTML = items.map(t => {
-      const meta = t.metadata || {};
-      const score = meta.score != null ? meta.score : '—';
-      const scoreCls = score >= 70 ? 'color:#34d399' : score >= 40 ? 'color:#fbbf24' : 'color:#f87171';
+      const score = t.score != null ? t.score : '—';
+      const scoreCls = score >= 60 ? 'color:#34d399' : score >= 30 ? 'color:#fbbf24' : 'color:#f87171';
+      const src = t.source || '?';
+      const srcColor = _SRC_COLOR[src] || '#94a3b8';
       return `<div class="card" style="margin-bottom:.6rem">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div style="flex:1">
-            <div style="font-size:.9rem;font-weight:600;color:#f8fafc">${esc(t.name)}</div>
-            <div style="font-size:.75rem;color:#64748b;margin-top:.3rem">${esc(meta.entity||'')} ${meta.deadline ? '· ' + meta.deadline.slice(0,10) : ''}</div>
+            <div style="font-size:.9rem;font-weight:600;color:#f8fafc">${esc(t.title||'—')}</div>
+            <div style="font-size:.75rem;color:#64748b;margin-top:.3rem">
+              <span style="color:${srcColor};font-weight:700;font-size:.7rem">${src.toUpperCase()}</span>
+              ${t.entity_name ? ' · ' + esc(t.entity_name) : ''}
+              ${t.deadline ? ' · ' + t.deadline.slice(0,10) : ''}
+            </div>
           </div>
           <div style="font-size:1.2rem;font-weight:700;${scoreCls};margin-left:1rem">${score}</div>
         </div>

@@ -284,26 +284,33 @@ function renderFinance(finStats, obligations) {
 }
 
 /* ── Block 4: Radar ─── */
-function renderRadar(jobs) {
-  const radarJobs = (jobs||[]).filter(j => j.kind === 'radar').slice(0,6);
-  if (!radarJobs.length) {
-    document.getElementById('blk-radar').innerHTML = '<div style="color:var(--muted);padding:12px">Sem jobs de radar recentes</div>';
+const SRC_BADGE = { ted: 'color:#60a5fa', base: 'color:#34d399', dr: 'color:#c084fc' };
+function renderRadar(tenders) {
+  const list = (tenders||[]).slice(0,8);
+  if (!list.length) {
+    document.getElementById('blk-radar').innerHTML = '<div style="color:var(--muted);padding:12px">Sem oportunidades no radar</div>';
     return;
   }
-  const html = radarJobs.map(j => {
-    const res = j.result || {};
-    const cls = j.status === 'done' ? 'green' : j.status === 'running' ? 'yellow' : 'red';
-    const scored = res.scored !== undefined ? `${res.scored} scored, ${res.below_threshold||0} abaixo` : '';
-    const out = res.output ? res.output.slice(0,80) : scored;
+  // Count by source
+  const counts = list.reduce((a,t) => { a[t.source||'?'] = (a[t.source||'?']||0)+1; return a; }, {});
+  const summary = Object.entries(counts).map(([s,n]) => `<span style="${SRC_BADGE[s]||''}">${s.toUpperCase()}:${n}</span>`).join(' ');
+  const html = list.map(t => {
+    const score = t.score != null ? t.score : '—';
+    const scoreCl = score >= 60 ? 'var(--green)' : score >= 30 ? 'var(--yellow)' : 'var(--red)';
+    const src = t.source || '?';
+    const srcStyle = SRC_BADGE[src] || '';
     return `<tr>
-      <td>${badge(j.status,cls)}</td>
-      <td>${esc(j.payload?.script||j.payload?.args?.[1]||'-')}</td>
-      <td style="color:var(--muted)">${esc(out).slice(0,60)}</td>
-      <td style="color:var(--muted)">${ago(j.ts_done||j.ts_assigned)}</td>
+      <td style="${srcStyle};font-weight:700;font-size:10px">${src.toUpperCase()}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.title||'')}">
+        ${esc((t.title||'—').slice(0,50))}
+      </td>
+      <td style="color:var(--muted);font-size:11px">${esc((t.entity_name||'').slice(0,30))}</td>
+      <td style="color:${scoreCl};font-weight:700;text-align:right">${score}</td>
     </tr>`;
   }).join('');
   document.getElementById('blk-radar').innerHTML =
-    `<table class="tbl"><thead><tr><th>Status</th><th>Script</th><th>Resultado</th><th>Ago</th></tr></thead><tbody>${html}</tbody></table>`;
+    `<div style="font-size:10px;color:var(--muted);margin-bottom:6px">${summary}</div>` +
+    `<table class="tbl"><thead><tr><th>Src</th><th>Título</th><th>Entidade</th><th>Score</th></tr></thead><tbody>${html}</tbody></table>`;
 }
 
 /* ── Block 5: Incidents ─── */
@@ -384,7 +391,7 @@ async function refresh() {
     renderCluster(d.workers, d.cluster_jobs, d.cluster_metrics);
     renderFactory(d.cases, d.finance_stats);
     renderFinance(d.finance_stats, d.obligations);
-    renderRadar(d.cluster_jobs);
+    renderRadar(d.tenders);
     renderIncidents(d.incidents);
     renderIdeas(d.ideas);
     renderAgents(d.agent_status);
