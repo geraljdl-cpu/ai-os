@@ -23,7 +23,7 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "aios-jwt-secret-2026-change-in-prod")
 ALGORITHM  = "HS256"
 TOKEN_TTL  = int(os.environ.get("JWT_TTL_HOURS", "24"))
 
-ROLES = ["admin", "operator", "viewer", "finance", "factory", "show"]
+ROLES = ["admin", "supervisor", "operator", "factory", "finance", "viewer", "worker", "show", "cliente"]
 
 
 # ── Deps ─────────────────────────────────────────────────────────────────────
@@ -113,6 +113,56 @@ def verify_token(token: str) -> dict:
         return {"ok": False, "error": str(e)}
 
 
+def create_user(username: str, password: str, role: str = "operator") -> dict:
+    """Cria novo utilizador."""
+    if role not in ROLES:
+        return {"ok": False, "error": f"role inválido. Disponíveis: {ROLES}"}
+    db_mod = _db()
+    db = db_mod.SessionLocal()
+    try:
+        existing = db.query(db_mod.User).filter(db_mod.User.username == username).first()
+        if existing:
+            return {"ok": False, "error": "utilizador já existe"}
+        role_obj = db.query(db_mod.Role).filter(db_mod.Role.name == role).first()
+        if not role_obj:
+            return {"ok": False, "error": f"role '{role}' não encontrado na DB"}
+        user = db_mod.User(
+            username=username,
+            hashed_pw=hash_password(password),
+            role_id=role_obj.id,
+            active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        try:
+            db_mod.audit(db, "create_user", resource=username)
+        except Exception:
+            pass
+        return {"ok": True, "id": user.id, "username": username, "role": role}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        db.close()
+
+
+def deactivate_user(username: str) -> dict:
+    """Desativa utilizador (não apaga)."""
+    db_mod = _db()
+    db = db_mod.SessionLocal()
+    try:
+        user = db.query(db_mod.User).filter(db_mod.User.username == username).first()
+        if not user:
+            return {"ok": False, "error": "utilizador não encontrado"}
+        user.active = False
+        db.commit()
+        return {"ok": True, "username": username, "active": False}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        db.close()
+
+
 def list_users() -> dict:
     """Lista utilizadores (sem hashes)."""
     db_mod = _db()
@@ -148,5 +198,11 @@ if __name__ == "__main__":
         print(hash_password(sys.argv[2]))
     elif cmd == "users":
         print(json.dumps(list_users()))
+    elif cmd == "create" and len(sys.argv) >= 4:
+        role = sys.argv[4] if len(sys.argv) >= 5 else "operator"
+        print(json.dumps(create_user(sys.argv[2], sys.argv[3], role)))
+    elif cmd == "deactivate" and len(sys.argv) >= 3:
+        print(json.dumps(deactivate_user(sys.argv[2])))
     else:
         print("Uso: auth.py login <user> <pass> | verify <token> | hash <pass> | users")
+        print("     auth.py create <user> <pass> [role] | deactivate <user>")

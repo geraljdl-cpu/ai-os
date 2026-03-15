@@ -9,6 +9,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // --- Carrega ~/.env.db e /etc/aios.env ---
 let _JWT_SECRET = 'aios-jwt-secret-2026-change-in-prod';
 let _OPS_TOKEN  = '';
+let _ANTHROPIC_KEY = '';
 function _loadEnvFile(path) {
   try {
     fs.readFileSync(path, 'utf8').split('\n').forEach(line => {
@@ -16,15 +17,17 @@ function _loadEnvFile(path) {
       if (eq < 1) return;
       const k = line.slice(0, eq).trim();
       const v = line.slice(eq + 1).trim();
-      if (k === 'JWT_SECRET')    _JWT_SECRET = v;
-      if (k === 'AIOS_OPS_TOKEN') _OPS_TOKEN  = v;
+      if (k === 'JWT_SECRET')        _JWT_SECRET    = v;
+      if (k === 'AIOS_OPS_TOKEN')    _OPS_TOKEN     = v;
+      if (k === 'ANTHROPIC_API_KEY') _ANTHROPIC_KEY = v;
     });
   } catch(e) {}
 }
 _loadEnvFile(require('os').homedir() + '/.env.db');
 _loadEnvFile('/etc/aios.env');
-const JWT_SECRET = _JWT_SECRET;
-const OPS_TOKEN  = _OPS_TOKEN || process.env.AIOS_OPS_TOKEN || '';
+const JWT_SECRET    = _JWT_SECRET;
+const OPS_TOKEN     = _OPS_TOKEN || process.env.AIOS_OPS_TOKEN || '';
+const ANTHROPIC_KEY = _ANTHROPIC_KEY || process.env.ANTHROPIC_API_KEY || '';
 
 // --- JWT verification (pure Node.js, sem npm extra) ---
 function _b64url(b64) { return b64.replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_'); }
@@ -74,11 +77,16 @@ const AUTH_EXEMPT = new Set([
   '/worker_jobs/lease', '/worker_jobs/report',
   // Enqueue: bypass JWT mas requer X-AIOS-OPS-TOKEN (ou JWT)
   '/worker_jobs/enqueue',
+  // Control room — leitura pública (TV wall)
+  '/control/overview',
+  // Toconline health — public (sem dados sensíveis)
+  '/finance/toconline/health',
 ]);
 app.use('/api', (req, res, next) => {
   if (AUTH_EXEMPT.has(req.path)) return next();
   if (req.path.startsWith('/twin/batch'))  return next();  // auth própria em cada endpoint
   if (req.path.startsWith('/twin/client')) return next(); // client portal — token validado no noc_query
+  if (req.path.match(/^\/client\/[a-zA-Z0-9]+\/(timesheets|timesheet)/)) return next(); // client timesheet portal
   const auth  = req.headers['authorization'] || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
   if (!token) return res.status(401).json({ ok: false, error: 'unauthorized' });
@@ -400,6 +408,7 @@ function nocExec(cmd, timeout = 8000) {
 app.get('/ops',     (req, res) => res.sendFile(__dirname + '/ops.html'));
 app.get('/factory', (req, res) => res.sendFile(__dirname + '/factory.html'));
 app.get('/tenders', (req, res) => res.sendFile(__dirname + '/tenders.html'));
+app.get('/control', (req, res) => res.sendFile(__dirname + '/control.html'));
 app.get('/worker',  (req, res) => res.sendFile(__dirname + '/worker.html'));
 app.get('/finance', (req, res) => res.sendFile(__dirname + '/finance.html'));
 app.get('/login',   (req, res) => res.sendFile(__dirname + '/login.html'));
@@ -879,12 +888,440 @@ app.post('/api/twin/obligations/:id/pay', requireRole('finance', 'supervisor', '
   res.json(nocExec(`obligation_pay ${id}`));
 });
 
+app.post('/api/twin/obligations/:id/approve', requireRole('finance', 'supervisor', 'admin'), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  res.json(nocExec(`obligation_approve ${id}`));
+});
+
 app.get('/api/twin/obligations/stats', requireRole(...FINANCE_ROLES), (req, res) => {
   res.json(nocExec('obligation_stats'));
+});
+
+// ── people + clients ───────────────────────────────────────────────────────────
+
+app.get('/api/people', requireRole(...FINANCE_ROLES), (req, res) => {
+  const cluster = req.query.cluster || '';
+  res.json(nocExec(`people_list ${cluster}`));
+});
+
+app.get('/api/clients', requireRole(...FINANCE_ROLES), (req, res) => {
+  res.json(nocExec('client_list'));
+});
+
+// ── client portal — timesheets ─────────────────────────────────────────────────
+// Público (por token) — AUTH_EXEMPT via path check abaixo
+
+app.get('/api/client/:token/timesheets', (req, res) => {
+  const token  = String(req.params.token || '').replace(/[^a-zA-Z0-9]/g, '');
+  const status = String(req.query.status || '').replace(/[^a-z]/g, '');
+  const limit  = parseInt(req.query.limit, 10) || 50;
+  if (!token) return res.status(400).json({ ok: false, error: 'token obrigatório' });
+  res.json(nocExec(`client_timesheets ${token} ${status} ${limit}`, 8000));
+});
+
+app.post('/api/client/:token/timesheet/:id/approve', (req, res) => {
+  const token  = String(req.params.token || '').replace(/[^a-zA-Z0-9]/g, '');
+  const id     = parseInt(req.params.id, 10);
+  if (!token || !id) return res.status(400).json({ ok: false, error: 'token e id obrigatórios' });
+  res.json(nocExec(`client_timesheet_action ${token} ${id} approved`, 8000));
+});
+
+app.post('/api/client/:token/timesheet/:id/reject', (req, res) => {
+  const token  = String(req.params.token || '').replace(/[^a-zA-Z0-9]/g, '');
+  const id     = parseInt(req.params.id, 10);
+  if (!token || !id) return res.status(400).json({ ok: false, error: 'token e id obrigatórios' });
+  res.json(nocExec(`client_timesheet_action ${token} ${id} rejected`, 8000));
+});
+
+// ── payouts ────────────────────────────────────────────────────────────────────
+
+app.get('/api/finance/payouts', requireRole(...FINANCE_ROLES), (req, res) => {
+  const status = req.query.status || '';
+  const limit  = parseInt(req.query.limit, 10) || 50;
+  res.json(nocExec(`payout_list ${status} ${limit}`));
+});
+
+app.post('/api/finance/payouts/run', requireRole('finance', 'supervisor', 'admin'), (req, res) => {
+  const week = String(req.body?.week_start || '').replace(/[^0-9-]/g, '');
+  if (!week) return res.status(400).json({ ok: false, error: 'week_start obrigatório (YYYY-MM-DD)' });
+  res.json(nocExec(`payout_run ${week}`, 15000));
+});
+
+app.post('/api/finance/payouts/:id/paid', requireRole('finance', 'supervisor', 'admin'), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  res.json(nocExec(`payout_mark_paid ${id}`));
+});
+
+// ── invoice engine (H2) ───────────────────────────────────────────────────────
+
+app.post('/api/finance/invoice/generate', requireRole(...FINANCE_ROLES), (req, res) => {
+  const event  = String(req.body?.event_name || '').trim();
+  const client = parseInt(req.body?.client_id, 10) || '';
+  if (!event) return res.status(400).json({ ok: false, error: 'event_name obrigatório' });
+  res.json(nocExec(`invoice_generate ${JSON.stringify(event)}${client ? ' ' + client : ''}`, 10000));
+});
+
+app.post('/api/finance/invoice/:id/push_toconline', requireRole('finance', 'supervisor', 'admin'), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  res.json(nocExec(`invoice_push_toc ${id}`, 20000));
+});
+
+app.get('/api/finance/invoice/drafts', requireRole(...FINANCE_ROLES), (req, res) => {
+  res.json(nocExec('invoice_drafts'));
+});
+
+app.get('/api/finance/toconline/health', (req, res) => {
+  // public health check — só diz se está ligado, sem dados sensíveis
+  const r = nocExec('toconline_status');
+  const drafts = nocExec('invoice_drafts');
+  const pending = (drafts.drafts || []).filter(d => !d.toconline_id).length;
+  const last_push = (drafts.drafts || []).filter(d => d.toconline_id)
+    .sort((a, b) => b.created_at > a.created_at ? 1 : -1)[0];
+  res.json({
+    ok: r.ok,
+    status: r.toconline || 'error',
+    connected: r.ok && r.toconline === 'connected',
+    drafts_pending_push: pending,
+    last_push_at: last_push ? last_push.created_at : null,
+    hint: r.ok ? null : (r.hint || 'Token expirado — actualizar .toc_token.json'),
+  });
+});
+
+app.get('/api/finance/toconline/status', requireRole(...FINANCE_ROLES), (req, res) => {
+  res.json(nocExec('toconline_status', 10000));
+});
+
+// ── Reconciliação bancária ─────────────────────────────────────────────────────
+
+app.get('/api/finance/bank/transactions', requireRole(...FINANCE_ROLES), (req, res) => {
+  const limit  = parseInt(req.query.limit, 10) || 100;
+  const status = req.query.status || '';
+  const args   = status ? `${limit} ${status}` : `${limit}`;
+  res.json(nocExec(`bank_transactions ${args}`));
+});
+
+app.post('/api/finance/bank/reconcile', requireRole(...FINANCE_ROLES), (req, res) => {
+  res.json(nocExec('bank_reconcile', 30000));
+});
+
+app.post('/api/finance/bank/match', requireRole(...FINANCE_ROLES), (req, res) => {
+  const tx_id  = parseInt(req.body?.transaction_id, 10);
+  const inv_id = parseInt(req.body?.invoice_id, 10);
+  if (!tx_id || !inv_id) return res.status(400).json({ ok: false, error: 'transaction_id e invoice_id obrigatórios' });
+  res.json(nocExec(`bank_match ${tx_id} ${inv_id}`));
+});
+
+app.post('/api/finance/bank/ignore', requireRole(...FINANCE_ROLES), (req, res) => {
+  const tx_id = parseInt(req.body?.transaction_id, 10);
+  if (!tx_id) return res.status(400).json({ ok: false, error: 'transaction_id obrigatório' });
+  res.json(nocExec(`bank_ignore ${tx_id}`));
+});
+
+// Upload CSV — usa multipart com busboy para não precisar npm extra
+app.post('/api/finance/bank/import', requireRole(...FINANCE_ROLES), (req, res) => {
+  const os   = require('os');
+  const path = require('path');
+  const { execFileSync } = require('child_process');
+  const tmpFile = path.join(os.tmpdir(), `bank_import_${Date.now()}.csv`);
+  const chunks  = [];
+
+  req.on('data', d => chunks.push(d));
+  req.on('end', () => {
+    try {
+      const body = Buffer.concat(chunks);
+      // Tentar extrair conteúdo CSV do multipart ou body directo
+      let csvContent = '';
+      const contentType = req.headers['content-type'] || '';
+      if (contentType.includes('multipart/form-data')) {
+        // Extrai a parte CSV (heurística: primeiro bloco após boundary)
+        const bodyStr = body.toString('utf-8');
+        const parts   = bodyStr.split(/--[a-zA-Z0-9]+\r?\n/);
+        for (const part of parts) {
+          if (part.includes('filename=') || part.includes('name=')) {
+            const dataStart = part.indexOf('\r\n\r\n');
+            if (dataStart >= 0) {
+              csvContent = part.slice(dataStart + 4).replace(/\r?\n--[^\r\n]+.*$/s, '').trim();
+              break;
+            }
+          }
+        }
+      } else {
+        // body directo (text/csv ou application/octet-stream)
+        csvContent = body.toString('utf-8');
+      }
+
+      if (!csvContent) {
+        return res.status(400).json({ ok: false, error: 'CSV vazio ou formato não reconhecido' });
+      }
+
+      fs.writeFileSync(tmpFile, csvContent, 'utf-8');
+      const out = execFileSync('python3', ['bin/reconcile.py', 'bank_import', tmpFile], {
+        cwd: process.env.HOME + '/ai-os',
+        timeout: 15000,
+        env: { ...process.env }
+      }).toString();
+      try { fs.unlinkSync(tmpFile); } catch(_) {}
+      res.json(JSON.parse(out));
+    } catch(e) {
+      try { fs.unlinkSync(tmpFile); } catch(_) {}
+      res.status(500).json({ ok: false, error: String(e) });
+    }
+  });
+});
+
+app.post('/api/worker/timesheets/:id/submit', requireRole(...WORKER_ROLES), (req, res) => {
+  const id    = parseInt(req.params.id, 10);
+  const notes = String(req.body?.notes || '').trim();
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  res.json(nocExec(`timesheet_submit ${id}${notes ? ' ' + JSON.stringify(notes) : ''}`));
+});
+
+// ── Painel do João — ideias ────────────────────────────────────────────────────
+const JOAO_ROLES = ['admin', 'supervisor'];
+
+app.get('/joao', (req, res) => res.sendFile(__dirname + '/joao.html'));
+
+app.get('/api/ideas', requireRole(...JOAO_ROLES), (req, res) => {
+  const status = req.query.status || '';
+  const limit  = parseInt(req.query.limit, 10) || 30;
+  res.json(nocExec(`idea_list ${status} ${limit}`));
+});
+
+app.post('/api/ideas', requireRole(...JOAO_ROLES), (req, res) => {
+  const title   = String(req.body?.title   || '').trim();
+  const message = String(req.body?.message || '').trim();
+  if (!title) return res.status(400).json({ ok: false, error: 'title obrigatório' });
+  const args = [JSON.stringify(title), ...(message ? [JSON.stringify(message)] : [])];
+  res.json(nocExec(`idea_create ${args.join(' ')}`));
+});
+
+app.get('/api/ideas/:id', requireRole(...JOAO_ROLES), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  res.json(nocExec(`idea_get ${id}`));
+});
+
+app.post('/api/ideas/:id/analyze', requireRole(...JOAO_ROLES), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  if (!ANTHROPIC_KEY)
+    return res.status(503).json({ ok: false, error: 'ANTHROPIC_API_KEY não configurada em /etc/aios.env' });
+  // executa em background, resposta imediata
+  const { spawn } = require('child_process');
+  const env = { ...process.env, ANTHROPIC_API_KEY: ANTHROPIC_KEY,
+                DATABASE_URL: process.env.DATABASE_URL || 'postgresql://aios_user:jdl@127.0.0.1:5432/aios' };
+  const proc = spawn('python3', ['/home/jdl/ai-os/bin/idea_router.py', String(id)],
+    { env, detached: true, stdio: 'ignore' });
+  proc.unref();
+  res.json({ ok: true, id, status: 'analyzing', message: 'Conselho de IA a analisar...' });
+});
+
+app.get('/api/ideas/:id/reviews', requireRole(...JOAO_ROLES), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  res.json(nocExec(`idea_reviews ${id}`));
+});
+
+app.post('/api/ideas/:id/create_case', requireRole(...JOAO_ROLES), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  res.json(nocExec(`idea_create_case ${id}`, 10000));
+});
+
+app.post('/api/ideas/:id/archive', requireRole(...JOAO_ROLES), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  res.json(nocExec(`idea_archive ${id}`));
+});
+
+// ── Decisões ───────────────────────────────────────────────────────────────────
+
+app.get('/api/decisions', requireRole(...JOAO_ROLES), (req, res) => {
+  const status = req.query.status || 'pending';
+  const limit  = parseInt(req.query.limit, 10) || 20;
+  res.json(nocExec(`decision_list ${status} ${limit}`));
+});
+
+app.post('/api/decisions', requireRole(...JOAO_ROLES), (req, res) => {
+  const { title, kind } = req.body || {};
+  if (!title) return res.status(400).json({ ok: false, error: 'title obrigatório' });
+  const safeTitle = String(title).replace(/'/g, "\\'").slice(0, 200);
+  const safeKind  = ['manual','finance_task','decision_task','project_task','ops_task'].includes(kind) ? kind : 'manual';
+  res.json(nocExec(`decision_create '${safeTitle}' ${safeKind}`));
+});
+
+app.post('/api/decisions/:id/resolve', requireRole(...JOAO_ROLES), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  res.json(nocExec(`decision_resolve ${id}`));
+});
+
+// ── Agent suggestions (Chief of Staff) ────────────────────────────────────────
+
+app.get('/api/agent/suggestions', requireRole(...JOAO_ROLES), (req, res) => {
+  const kind  = req.query.kind  || '';
+  const limit = parseInt(req.query.limit, 10) || 30;
+  res.json(nocExec(`agent_suggestions ${kind || ''} ${limit}`));
+});
+
+app.get('/api/agent/briefing', requireRole(...JOAO_ROLES), (req, res) => {
+  res.json(nocExec('agent_briefing'));
+});
+
+app.post('/api/agent/suggestions/:id/read', requireRole(...JOAO_ROLES), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  res.json(nocExec(`agent_suggestion_read ${id}`));
+});
+
+// Trigger a manual agent cycle (async, does not wait)
+app.post('/api/agent/run', requireRole(...JOAO_ROLES), (req, res) => {
+  const mode = ['morning','midday','evening'].includes(req.body?.mode) ? req.body.mode : 'morning';
+  const { spawn } = require('child_process');
+  const proc = spawn('python3', ['bin/joao_agent.py', mode], {
+    cwd: process.env.HOME + '/ai-os',
+    detached: true,
+    stdio: 'ignore',
+    env: { ...process.env }
+  });
+  proc.unref();
+  res.json({ ok: true, mode, note: 'cycle started in background' });
+});
+
+// ── Incidents ──────────────────────────────────────────────────────────────────
+
+app.get('/api/incidents', requireRole('admin','supervisor','operator'), (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 50;
+  res.json(nocExec(`incident_list ${limit}`));
+});
+
+app.post('/api/incidents/:id/resolve', requireRole('admin','supervisor'), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  res.json(nocExec(`incident_resolve ${id}`));
+});
+
+// ── Control Room — agregador ────────────────────────────────────────────────────
+
+app.get('/api/control/overview', (req, res) => {
+  try {
+    // Parallel reads via nocExec (synchronous but fast — cached Postgres)
+    const tenders    = nocExec('twin_tenders 8');
+    const workers    = nocExec('workers');
+    const tasks      = nocExec('backlog_recent 20');
+    const obls       = nocExec('obligation_list 30');
+    const payouts    = nocExec('payout_list 20');
+    const alerts     = nocExec('agent_suggestions alert 10');
+    const health     = nocExec('syshealth');
+    const finStats   = nocExec('finance_stats');
+    const cases      = nocExec('twin_cases 8');
+    const ideas      = nocExec('idea_list open 5');
+    const incidents  = nocExec('incident_list 20');
+    const bankTxs    = nocExec('bank_transactions 5 unmatched');
+
+    res.json({
+      ok: true,
+      tenders:       tenders.tenders  || [],
+      workers:       workers.workers  || [],
+      tasks:         tasks.tasks      || [],
+      obligations:   obls.obligations || [],
+      payouts:       payouts.payouts  || [],
+      alerts:        alerts.suggestions || [],
+      health:        health,
+      finance_stats: finStats,
+      cases:         cases.cases   || [],
+      ideas:         ideas.ideas   || [],
+      incidents:     incidents.incidents || [],
+      bank_unmatched: bankTxs.summary?.unmatched || 0,
+      generated_at:  new Date().toISOString(),
+    });
+  } catch(e) {
+    res.json({ ok: false, error: String(e) });
+  }
 });
 
 // ── versão e boot ─────────────────────────────────────────────────────────────
 
 app.get('/api/version', (req, res) => res.json({ version: '1.0.0', name: 'ai-os' }));
+
+// ── Model Router ───────────────────────────────────────────────────────────────
+
+// Estado do routing (público — sem dados sensíveis)
+app.get('/api/model-router/state', (req, res) => {
+  try {
+    const out = execSync('python3 /home/jdl/ai-os/bin/provider_health.py', { timeout: 10000, encoding: 'utf8' });
+    const health = JSON.parse(out);
+
+    // Lê override de runtime
+    let override = '';
+    try {
+      const oFile = AIOS_ROOT + '/runtime/model_override.json';
+      if (fs.existsSync(oFile)) {
+        override = JSON.parse(fs.readFileSync(oFile, 'utf8')).force_model || '';
+      }
+    } catch(e) {}
+
+    // Determina estado visual
+    const forceEnv  = (process.env.FORCE_MODEL || '').toLowerCase().trim();
+    const force     = forceEnv || override;
+    const claudeOk  = health.claude?.available;
+    const ollamaOk  = health.ollama?.available;
+
+    let active_provider = 'unknown';
+    let routing_mode    = 'auto';
+    if (force === 'claude')  { active_provider = 'claude'; routing_mode = 'forced_claude'; }
+    else if (force === 'ollama') { active_provider = 'ollama'; routing_mode = 'forced_ollama'; }
+    else if (claudeOk)       { active_provider = 'claude'; routing_mode = 'auto'; }
+    else if (ollamaOk)       { active_provider = 'ollama'; routing_mode = 'fallback'; }
+    else                     { active_provider = 'none';   routing_mode = 'degraded'; }
+
+    res.json({
+      ok: true,
+      active_provider,
+      routing_mode,
+      force_model:    force || null,
+      hybrid_mode:    (process.env.HYBRID_MODE || 'true') === 'true',
+      claude:         health.claude,
+      ollama:         health.ollama,
+      last_fallback:  health.last_fallback,
+      last_routing:   health.last_routing,
+      ts:             health.ts,
+    });
+  } catch(e) {
+    res.json({ ok: false, error: String(e) });
+  }
+});
+
+// Forçar modelo (requer admin)
+app.post('/api/model-router/force', requireRole('admin'), (req, res) => {
+  const { force_model } = req.body || {};
+  const allowed = ['claude', 'ollama', ''];
+  const val = String(force_model || '').toLowerCase().trim();
+  if (!allowed.includes(val))
+    return res.status(400).json({ ok: false, error: 'force_model deve ser "claude", "ollama" ou "" (limpar)' });
+  try {
+    const arg = JSON.stringify(val);
+    const out = execSync(`python3 /home/jdl/ai-os/bin/model_router.py set_override ${arg}`, { timeout: 5000, encoding: 'utf8' });
+    res.json({ ...JSON.parse(out), force_model: val || null });
+  } catch(e) {
+    res.json({ ok: false, error: String(e) });
+  }
+});
+
+// Créditos/uso (requer admin)
+app.get('/api/model-router/credits', requireRole('admin'), (req, res) => {
+  try {
+    const out = execSync('python3 /home/jdl/ai-os/bin/credit_monitor.py', { timeout: 10000, encoding: 'utf8' });
+    res.json(JSON.parse(out));
+  } catch(e) {
+    res.json({ ok: false, error: String(e) });
+  }
+});
+
+// Adiciona model-router/state à whitelist pública (dashboard não requer JWT)
+AUTH_EXEMPT.add('/model-router/state');
 
 app.listen(3000, () => console.log("UI http://localhost:3000"));

@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tracking do Lote</title>
+<style>
+:root{
+  --bg:#f8faff;--panel:#ffffff;--border:#e2e8f0;
+  --blue:#3b82f6;--green:#22c55e;--yellow:#f59e0b;--gray:#94a3b8;
+  --ink:#1e293b;--ink2:#64748b;
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);min-height:100vh}
+
+header{
+  background:var(--blue);color:#fff;
+  padding:18px 20px;
+  display:flex;align-items:center;gap:12px;
+}
+header .logo{font-size:18px;font-weight:700;letter-spacing:1px}
+header .sub{font-size:13px;opacity:0.8}
+
+main{max-width:600px;margin:0 auto;padding:20px}
+
+.card{
+  background:var(--panel);border:1px solid var(--border);border-radius:12px;
+  padding:20px;margin-bottom:16px;
+}
+.card h2{font-size:14px;font-weight:600;color:var(--ink2);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px}
+
+.info-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9}
+.info-row:last-child{border:none}
+.info-row .label{font-size:13px;color:var(--ink2)}
+.info-row .val{font-size:13px;font-weight:600;color:var(--ink)}
+
+/* PROGRESS */
+.progress-wrap{margin:10px 0 6px}
+.progress-bar{
+  background:#e2e8f0;border-radius:99px;height:12px;overflow:hidden;
+}
+.progress-fill{
+  height:100%;border-radius:99px;
+  background:linear-gradient(90deg,#3b82f6,#22c55e);
+  transition:width 0.5s ease;
+}
+.progress-pct{font-size:12px;color:var(--ink2);margin-top:4px;text-align:right}
+
+/* STATE BADGE */
+.state-badge{
+  display:inline-block;padding:4px 14px;border-radius:99px;
+  font-size:13px;font-weight:600;
+}
+.state-agendado   {background:#e0e7ff;color:#3730a3}
+.state-chegou     {background:#cffafe;color:#0e7490}
+.state-em_processamento{background:#dbeafe;color:#1d4ed8}
+.state-separacao  {background:#fef9c3;color:#854d0e}
+.state-concluido  {background:#dcfce7;color:#166534}
+.state-pronto_levantar{background:#dcfce7;color:#166534}
+.state-faturado   {background:#ede9fe;color:#5b21b6}
+.state-fechado    {background:#f1f5f9;color:#475569}
+
+/* TIMELINE */
+.timeline{list-style:none;padding:0;position:relative}
+.timeline::before{
+  content:'';position:absolute;left:10px;top:0;bottom:0;
+  width:2px;background:#e2e8f0;
+}
+.timeline li{
+  position:relative;padding:0 0 14px 32px;
+  font-size:13px;
+}
+.timeline li::before{
+  content:'';position:absolute;left:6px;top:4px;
+  width:10px;height:10px;border-radius:50%;
+  background:var(--blue);border:2px solid #fff;
+}
+.timeline .ts{color:var(--gray);font-size:11px;margin-right:6px}
+
+/* TASKS */
+.task-item{
+  display:flex;align-items:center;gap:10px;
+  padding:8px 0;border-bottom:1px solid #f1f5f9;
+  font-size:13px;
+}
+.task-item:last-child{border:none}
+.task-check{
+  width:20px;height:20px;border-radius:50%;border:2px solid var(--border);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;
+}
+.task-check.done{background:var(--green);border-color:var(--green);color:#fff}
+
+/* RESULTADO */
+.result-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.result-box{
+  text-align:center;background:#f8faff;border:1px solid var(--border);
+  border-radius:8px;padding:12px;
+}
+.result-box .n{font-size:20px;font-weight:700;color:var(--blue)}
+.result-box .l{font-size:11px;color:var(--gray);margin-top:2px}
+
+.ts-update{font-size:11px;color:var(--gray);text-align:right;margin-top:-10px;margin-bottom:12px}
+.error-msg{text-align:center;padding:40px 20px;color:var(--gray)}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">JDL · Granulação de Cabos</div>
+    <div class="sub">Tracking do seu lote em tempo real</div>
+  </div>
+</header>
+
+<main>
+  <div class="ts-update" id="ts-update"></div>
+  <div id="content">
+    <div class="error-msg">A carregar...</div>
+  </div>
+</main>
+
+<script>
+const ESTADOS_PT = {
+  agendado:'Agendado', chegou:'Chegou à fábrica', em_processamento:'Em processamento',
+  separacao:'Separação cobre/plástico', concluido:'Concluído',
+  pronto_levantar:'Pronto a levantar', faturado:'Faturado', fechado:'Fechado'
+};
+
+const token = location.pathname.split('/lote/')[1] || '';
+
+function fmt(v) {
+  if (v == null || v === '') return '—';
+  return Number(v).toFixed(0);
+}
+
+async function load() {
+  try {
+    const r = await fetch(`/api/twin/batch/by-token/${token}`);
+    const d = await r.json();
+    if (d.error || !d.entity_id) {
+      document.getElementById('content').innerHTML =
+        `<div class="error-msg">Lote não encontrado ou link inválido.</div>`;
+      return;
+    }
+    render(d);
+    document.getElementById('ts-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt');
+  } catch(e) {
+    document.getElementById('content').innerHTML =
+      `<div class="error-msg">Erro ao carregar. Verifique a ligação.</div>`;
+  }
+}
+
+function render(d) {
+  const estado = d.estado || '';
+  const estadoPT = ESTADOS_PT[estado] || estado;
+  const pct  = d.progresso_pct || 0;
+
+  const tasks = (d.tasks || []).map(t => `
+    <div class="task-item">
+      <div class="task-check ${t.status === 'done' ? 'done' : ''}">
+        ${t.status === 'done' ? '✓' : ''}
+      </div>
+      <span style="color:${t.status === 'done' ? '#166534' : '#64748b'}">${t.title}</span>
+    </div>`).join('');
+
+  const events = (d.events || []).map(e =>
+    `<li><span class="ts">${e.ts}</span>${e.msg}</li>`
+  ).join('');
+
+  const resultHtml = d.kg_cobre ? `
+    <div class="card">
+      <h2>Resultado do Processamento</h2>
+      <div class="result-grid">
+        <div class="result-box">
+          <div class="n">${fmt(d.kg_cobre)} kg</div>
+          <div class="l">Cobre</div>
+        </div>
+        <div class="result-box">
+          <div class="n">${fmt(d.kg_plastico)} kg</div>
+          <div class="l">Plástico</div>
+        </div>
+        <div class="result-box" style="${d.valor_fatura ? 'border-color:#a7f3d0' : ''}">
+          <div class="n" style="color:${d.valor_fatura ? '#059669' : 'var(--blue)'}">
+            ${d.valor_fatura ? 'EUR ' + Number(d.valor_fatura).toFixed(2) : '—'}
+          </div>
+          <div class="l">Valor serviço</div>
+        </div>
+      </div>
+    </div>` : '';
+
+  document.getElementById('content').innerHTML = `
+    <div class="card">
+      <h2>Estado do Lote</h2>
+      <div class="info-row">
+        <span class="label">Nº do Lote</span>
+        <span class="val">#${d.entity_id}</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Cliente</span>
+        <span class="val">${d.client || '—'}</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Peso entrada</span>
+        <span class="val">${fmt(d.kg)} kg</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Estado</span>
+        <span class="val">
+          <span class="state-badge state-${estado}">${estadoPT}</span>
+        </span>
+      </div>
+      <div class="info-row">
+        <span class="label">Criado em</span>
+        <span class="val">${(d.created_at || '').slice(0,16).replace('T',' ')}</span>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-bar">
+          <div class="progress-fill" style="width:${pct}%"></div>
+        </div>
+        <div class="progress-pct">${pct}% concluído</div>
+      </div>
+    </div>
+
+    ${resultHtml}
+
+    ${tasks ? `<div class="card"><h2>Tarefas</h2>${tasks}</div>` : ''}
+
+    ${events ? `<div class="card"><h2>Histórico</h2><ul class="timeline">${events}</ul></div>` : ''}
+  `;
+}
+
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>

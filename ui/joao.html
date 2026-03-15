@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel do João — AI-OS</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+
+/* ── Header ── */
+header{background:linear-gradient(135deg,#1e3a5f,#0f172a);padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #1e3a5f}
+header h1{font-size:1.15rem;font-weight:700;color:#fff}
+header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
+.header-nav{display:flex;gap:.5rem}
+.header-nav a{padding:.35rem .8rem;border-radius:.4rem;font-size:.8rem;font-weight:600;text-decoration:none;background:#1e293b;color:#94a3b8;border:1px solid #334155}
+.header-nav a:hover{background:#334155;color:#e2e8f0}
+
+/* ── Layout ── */
+.layout{display:grid;grid-template-columns:200px 1fr;min-height:calc(100vh - 56px)}
+.sidebar{background:#0a1628;border-right:1px solid #1e293b;padding:1rem 0}
+.sidebar-item{display:flex;align-items:center;gap:.65rem;padding:.6rem 1.2rem;cursor:pointer;font-size:.875rem;font-weight:500;color:#94a3b8;transition:all .15s;border-left:3px solid transparent}
+.sidebar-item:hover{background:#1e293b;color:#e2e8f0}
+.sidebar-item.active{background:#1e3a5f;color:#60a5fa;border-left-color:#3b82f6}
+.sidebar-item .icon{font-size:1rem;min-width:1.2rem}
+.sidebar-badge{background:#ef4444;color:#fff;border-radius:99px;font-size:.65rem;font-weight:700;padding:.1rem .4rem;margin-left:auto}
+
+.main{padding:1.5rem;overflow-y:auto}
+
+/* ── Section header ── */
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem}
+.section-title{font-size:1rem;font-weight:700;color:#f8fafc}
+.btn{padding:.45rem 1rem;border-radius:.4rem;border:none;cursor:pointer;font-size:.85rem;font-weight:600;transition:all .15s}
+.btn-primary{background:#3b82f6;color:#fff}
+.btn-primary:hover{background:#2563eb}
+.btn-sm{padding:.3rem .7rem;font-size:.78rem}
+.btn-ghost{background:#1e293b;color:#94a3b8;border:1px solid #334155}
+.btn-ghost:hover{background:#334155;color:#e2e8f0}
+.btn-green{background:#16a34a;color:#fff}
+.btn-green:hover{background:#15803d}
+.btn-red{background:#dc2626;color:#fff}
+.btn-red:hover{background:#b91c1c}
+.btn-yellow{background:#d97706;color:#fff}
+.btn-yellow:hover{background:#b45309}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* ── Cards ── */
+.card{background:#1e293b;border:1px solid #334155;border-radius:.75rem;padding:1.25rem;margin-bottom:1rem}
+.card-title{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin-bottom:.75rem;font-weight:700}
+
+/* ── Metrics ── */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.75rem;margin-bottom:1.25rem}
+.metric{background:#1e293b;border:1px solid #334155;border-radius:.6rem;padding:1rem}
+.metric .val{font-size:1.75rem;font-weight:700;color:#f8fafc}
+.metric .lbl{font-size:.7rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-top:.25rem}
+.metric.red .val{color:#f87171}
+.metric.green .val{color:#34d399}
+.metric.blue .val{color:#60a5fa}
+.metric.yellow .val{color:#fbbf24}
+
+/* ── Ideas list ── */
+.idea-item{background:#1e293b;border:1px solid #334155;border-radius:.6rem;padding:1rem;margin-bottom:.6rem;cursor:pointer;transition:border-color .15s}
+.idea-item:hover{border-color:#3b82f6}
+.idea-item.selected{border-color:#3b82f6;background:#1e3a5f}
+.idea-title{font-size:.95rem;font-weight:600;color:#f8fafc;margin-bottom:.35rem}
+.idea-meta{font-size:.75rem;color:#64748b;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}
+.idea-status{display:inline-block;padding:.15rem .55rem;border-radius:99px;font-size:.7rem;font-weight:700;text-transform:uppercase}
+.idea-status.open{background:#1e3a5f;color:#60a5fa}
+.idea-status.analyzed{background:#14532d;color:#34d399}
+.idea-status.project{background:#3b0764;color:#c084fc}
+.idea-status.archived{background:#292524;color:#a8a29e}
+
+/* ── Detail panel ── */
+.detail-panel{background:#1e293b;border:1px solid #334155;border-radius:.75rem;padding:1.25rem}
+.detail-msg{background:#0f172a;border:1px solid #1e293b;border-radius:.5rem;padding:.875rem;margin-bottom:1rem;font-size:.875rem;line-height:1.6;color:#cbd5e1}
+
+.agent-reviews{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:1rem}
+@media(max-width:900px){.agent-reviews{grid-template-columns:1fr}}
+.agent-card{background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem}
+.agent-name{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin-bottom:.5rem}
+.agent-name.strategist{color:#f59e0b}
+.agent-name.engineering{color:#3b82f6}
+.agent-name.operations{color:#10b981}
+.agent-name.finance{color:#a78bfa}
+.agent-name.system{color:#f8fafc}
+.agent-score{float:right;font-size:1rem;font-weight:700;color:#f8fafc}
+.agent-section{margin-top:.5rem}
+.agent-label{font-size:.65rem;text-transform:uppercase;color:#64748b;margin-bottom:.2rem;font-weight:700}
+.agent-text{font-size:.82rem;color:#cbd5e1;line-height:1.55;white-space:pre-wrap}
+
+.synthesis-card{background:#1e3a5f;border:1px solid #2563eb;border-radius:.6rem;padding:1rem;margin-bottom:1rem}
+.synthesis-text{font-size:.875rem;color:#dbeafe;line-height:1.65;white-space:pre-wrap}
+
+/* ── Decision queue ── */
+.decision-item{display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem;background:#1e293b;border:1px solid #334155;border-radius:.5rem;margin-bottom:.5rem}
+.decision-item .d-title{flex:1;font-size:.875rem;font-weight:500;color:#e2e8f0}
+.decision-item .d-kind{font-size:.7rem;color:#64748b;background:#0f172a;padding:.15rem .5rem;border-radius:99px}
+
+/* ── Finance widget ── */
+.obligation-row{display:flex;justify-content:space-between;align-items:center;padding:.5rem 0;border-bottom:1px solid #1e293b;font-size:.85rem}
+.obligation-row:last-child{border:none}
+.obligation-row .o-days.urgent{color:#f87171;font-weight:700}
+.obligation-row .o-days.warn{color:#fbbf24;font-weight:600}
+
+/* ── Operations widget ── */
+.op-row{display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid #1e293b;font-size:.83rem;color:#94a3b8}
+.op-row:last-child{border:none}
+.op-row strong{color:#e2e8f0}
+
+/* ── Spinner / loading ── */
+.loading{text-align:center;padding:2rem;color:#475569;font-size:.85rem}
+.spinner{display:inline-block;width:.9rem;height:.9rem;border:2px solid #334155;border-top-color:#3b82f6;border-radius:50%;animation:spin .6s linear infinite;margin-right:.4rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Toast ── */
+#toast{position:fixed;bottom:1.5rem;right:1.5rem;background:#1e293b;border:1px solid #334155;border-radius:.5rem;padding:.75rem 1.25rem;color:#e2e8f0;font-size:.875rem;opacity:0;transform:translateY(8px);transition:all .3s;pointer-events:none;z-index:1000;max-width:320px}
+#toast.show{opacity:1;transform:translateY(0)}
+#toast.ok{border-color:#34d399;color:#34d399}
+#toast.err{border-color:#f87171;color:#f87171}
+
+/* ── New idea modal ── */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:#1e293b;border:1px solid #334155;border-radius:.75rem;padding:1.5rem;width:100%;max-width:500px;margin:1rem}
+.modal h3{font-size:1rem;font-weight:700;margin-bottom:1rem;color:#f8fafc}
+.form-field{margin-bottom:.875rem}
+.form-field label{display:block;font-size:.75rem;color:#94a3b8;margin-bottom:.35rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.form-field input,.form-field textarea{width:100%;background:#0f172a;border:1px solid #334155;border-radius:.4rem;color:#e2e8f0;padding:.6rem .8rem;font-size:.875rem;font-family:inherit}
+.form-field textarea{height:100px;resize:vertical;line-height:1.5}
+.form-field input:focus,.form-field textarea:focus{outline:none;border-color:#3b82f6}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Painel do João</h1>
+    <div class="subtitle" id="h-date">—</div>
+  </div>
+  <nav class="header-nav">
+    <a href="/ops">NOC</a>
+    <a href="/factory">Fábrica</a>
+    <a href="/finance">Finanças</a>
+  </nav>
+</header>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-item active" data-view="overview"  onclick="setView('overview')">
+      <span class="icon">📋</span> Hoje
+      <span class="sidebar-badge" id="sb-alerts" style="display:none">0</span>
+    </div>
+    <div class="sidebar-item" data-view="ideas" onclick="setView('ideas')">
+      <span class="icon">💡</span> Ideias
+      <span class="sidebar-badge" id="sb-ideas" style="display:none">0</span>
+    </div>
+    <div class="sidebar-item" data-view="decisions" onclick="setView('decisions')">
+      <span class="icon">⚡</span> Decisões
+      <span class="sidebar-badge" id="sb-decisions" style="display:none">0</span>
+    </div>
+    <div class="sidebar-item" data-view="radar" onclick="setView('radar')">
+      <span class="icon">🎯</span> Radar
+    </div>
+    <div class="sidebar-item" data-view="finance" onclick="setView('finance')">
+      <span class="icon">💰</span> Financeiro
+    </div>
+    <div class="sidebar-item" data-view="ops" onclick="setView('ops')">
+      <span class="icon">⚙️</span> Operação
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- VIEW: Hoje -->
+    <div id="view-overview">
+      <div class="section-header">
+        <div class="section-title">Hoje</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadAll()">↻</button>
+      </div>
+      <div class="metrics" id="ov-metrics">
+        <div class="metric yellow"><div class="val" id="ov-decisions">—</div><div class="lbl">Decisões pendentes</div></div>
+        <div class="metric blue"><div class="val" id="ov-ideas">—</div><div class="lbl">Ideias abertas</div></div>
+        <div class="metric red"><div class="val" id="ov-obligations">—</div><div class="lbl">Obrigações urgentes</div></div>
+        <div class="metric green"><div class="val" id="ov-tenders">—</div><div class="lbl">Radar (novos)</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+        <div class="card">
+          <div class="card-title">Próximas obrigações</div>
+          <div id="ov-obl-list"><div class="loading"><span class="spinner"></span>A carregar...</div></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Decisões a tomar</div>
+          <div id="ov-dec-list"><div class="loading"><span class="spinner"></span>A carregar...</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Ideias recentes</div>
+        <div id="ov-ideas-list"><div class="loading"><span class="spinner"></span>A carregar...</div></div>
+      </div>
+      <!-- Briefing do Agente -->
+      <div class="card" id="agent-card">
+        <div class="card-title" style="display:flex;align-items:center;justify-content:space-between">
+          <span>🤖 Briefing do Agente</span>
+          <div style="display:flex;gap:.5rem">
+            <button class="btn btn-ghost btn-sm" onclick="loadAgentBriefing()">↻</button>
+            <button class="btn btn-primary btn-sm" id="agent-run-btn" onclick="runAgent('morning')">⚡ Gerar briefing</button>
+          </div>
+        </div>
+        <div id="agent-briefing-text" style="font-size:.82rem;color:#94a3b8;white-space:pre-wrap;line-height:1.6;margin-bottom:1rem">A carregar...</div>
+        <div id="agent-suggestions-list"></div>
+      </div>
+    </div>
+
+      <!-- Quick Capture -->
+      <div class="card">
+        <div class="card-title">⚡ Quick Capture</div>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" onclick="openNewIdea()">+ Ideia</button>
+          <button class="btn btn-ghost btn-sm" onclick="quickDecision()">+ Decisão</button>
+          <button class="btn btn-ghost btn-sm" onclick="quickTask()">+ Tarefa</button>
+          <a href="/finance" class="btn btn-ghost btn-sm">💰 Finanças</a>
+          <a href="/control" class="btn btn-ghost btn-sm" target="_blank">📺 Control Room</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW: Ideias -->
+    <div id="view-ideas" style="display:none">
+      <div class="section-header">
+        <div class="section-title">Ideias</div>
+        <button class="btn btn-primary btn-sm" onclick="openNewIdea()">+ Nova ideia</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1.6fr;gap:1rem">
+        <div>
+          <div id="ideas-list"><div class="loading"><span class="spinner"></span></div></div>
+        </div>
+        <div id="idea-detail">
+          <div class="detail-panel" style="color:#475569;text-align:center;padding:3rem">
+            Selecciona uma ideia para ver o detalhe
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW: Decisões -->
+    <div id="view-decisions" style="display:none">
+      <div class="section-header">
+        <div class="section-title">Decisões Pendentes</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadDecisions()">↻</button>
+      </div>
+      <div id="decisions-list"><div class="loading"><span class="spinner"></span></div></div>
+    </div>
+
+    <!-- VIEW: Radar -->
+    <div id="view-radar" style="display:none">
+      <div class="section-header">
+        <div class="section-title">Radar de Oportunidades</div>
+        <a href="/tenders" class="btn btn-ghost btn-sm">Ver todos</a>
+      </div>
+      <div id="radar-list"><div class="loading"><span class="spinner"></span></div></div>
+    </div>
+
+    <!-- VIEW: Financeiro -->
+    <div id="view-finance" style="display:none">
+      <div class="section-header">
+        <div class="section-title">Financeiro</div>
+        <a href="/finance" class="btn btn-ghost btn-sm">Abrir finanças</a>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+        <div class="card">
+          <div class="card-title">Obrigações fiscais</div>
+          <div id="fin-obl-list"><div class="loading"><span class="spinner"></span></div></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Faturas em aberto</div>
+          <div id="fin-inv-list"><div class="loading"><span class="spinner"></span></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Pagamentos RH — semana actual</div>
+        <div id="fin-payouts-list"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+    </div>
+
+    <!-- VIEW: Operação -->
+    <div id="view-ops" style="display:none">
+      <div class="section-header">
+        <div class="section-title">Operação</div>
+        <a href="/ops" class="btn btn-ghost btn-sm">NOC</a>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+        <div class="card">
+          <div class="card-title">Infraestrutura</div>
+          <div id="ops-health"><div class="loading"><span class="spinner"></span></div></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Workers</div>
+          <div id="ops-workers"><div class="loading"><span class="spinner"></span></div></div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Modal nova ideia -->
+<div class="modal-bg" id="modal-idea">
+  <div class="modal">
+    <h3>💡 Nova Ideia</h3>
+    <div class="form-field">
+      <label>Título</label>
+      <input type="text" id="idea-title-inp" placeholder="Ex: app de picking para eventos" />
+    </div>
+    <div class="form-field">
+      <label>Descrição (opcional)</label>
+      <textarea id="idea-msg-inp" placeholder="Detalha a ideia, contexto, problema que resolve..."></textarea>
+    </div>
+    <div style="display:flex;gap:.75rem;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="submitIdea()">Guardar ideia</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const TOKEN = localStorage.getItem('aios_jwt');
+if (!TOKEN) location.href = '/login?next=/joao';
+
+let currentView = 'overview';
+let selectedIdeaId = null;
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmt(n,d=0){ return n != null ? Number(n).toFixed(d) : '—'; }
+function fmtEur(n) { return '€' + Number(n||0).toLocaleString('pt-PT',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtDate(s) { return s ? s.slice(0,10) : '—'; }
+
+function showToast(msg, type='ok') {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'show ' + type;
+  setTimeout(() => t.className = '', 3500);
+}
+
+async function api(url, opts={}) {
+  const res = await fetch(url, {
+    headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json', ...(opts.headers||{}) },
+    ...opts
+  });
+  if (res.status === 401) { location.href = '/login?next=/joao'; throw new Error('unauth'); }
+  return res.json();
+}
+
+// ── view ─────────────────────────────────────────────────────────────────────
+
+function setView(v) {
+  currentView = v;
+  document.querySelectorAll('.sidebar-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.view === v);
+  });
+  document.querySelectorAll('[id^="view-"]').forEach(el => {
+    el.style.display = el.id === 'view-' + v ? '' : 'none';
+  });
+  if (v === 'overview')  loadOverview();
+  if (v === 'ideas')     loadIdeas();
+  if (v === 'decisions') loadDecisions();
+  if (v === 'radar')     loadRadar();
+  if (v === 'finance')   loadFinance();
+  if (v === 'ops')       loadOps();
+}
+
+// ── overview ─────────────────────────────────────────────────────────────────
+
+async function loadOverview() {
+  try {
+    const [ideas, decisions, oblStats] = await Promise.all([
+      api('/api/ideas?status=open&limit=5'),
+      api('/api/decisions?status=pending&limit=5'),
+      api('/api/twin/obligations/stats'),
+    ]);
+
+    // badges
+    const ideasCount     = (ideas.ideas||[]).length;
+    const decisionsCount = (decisions.decisions||[]).length;
+    const oblUrgent      = (oblStats.overdue||0) + (oblStats.today||0) + (oblStats.week||0);
+
+    document.getElementById('ov-decisions').textContent = decisionsCount;
+    document.getElementById('ov-ideas').textContent     = ideasCount;
+    document.getElementById('ov-obligations').textContent = oblUrgent;
+    document.getElementById('ov-tenders').textContent   = '—';
+
+    // obrigações
+    const oblEl = document.getElementById('ov-obl-list');
+    if (oblStats.next) {
+      const obl = await api('/api/twin/obligations?days=30&limit=4');
+      oblEl.innerHTML = (obl.obligations||[]).slice(0,4).map(o => {
+        const days = o.days_left;
+        const cls  = days < 0 ? 'urgent' : days <= 5 ? 'urgent' : days <= 10 ? 'warn' : '';
+        return `<div class="obligation-row">
+          <span>${esc(o.label)}</span>
+          <span class="o-days ${cls}">${days < 0 ? 'VENCIDA' : days + 'd'}</span>
+        </div>`;
+      }).join('') || '<div style="color:#475569;font-size:.83rem">Sem obrigações próximas</div>';
+    } else {
+      oblEl.innerHTML = '<div style="color:#475569;font-size:.83rem">Sem obrigações próximas</div>';
+    }
+
+    // decisões
+    const decEl = document.getElementById('ov-dec-list');
+    decEl.innerHTML = (decisions.decisions||[]).slice(0,4).map(d => `
+      <div class="obligation-row">
+        <span>${esc(d.title)}</span>
+        <span style="font-size:.7rem;color:#64748b">${esc(d.kind)}</span>
+      </div>`).join('') || '<div style="color:#475569;font-size:.83rem">Sem decisões pendentes</div>';
+
+    // ideias recentes
+    const ideasEl = document.getElementById('ov-ideas-list');
+    ideasEl.innerHTML = (ideas.ideas||[]).map(i => `
+      <div class="obligation-row" style="cursor:pointer" onclick="setView('ideas');selectIdea(${i.id})">
+        <span>${esc(i.title)}</span>
+        <span class="idea-status ${i.status}">${i.status}</span>
+      </div>`).join('') || '<div style="color:#475569;font-size:.83rem">Sem ideias abertas — lança a primeira!</div>';
+
+    // update badges + agent briefing
+    updateBadges(ideasCount, decisionsCount);
+    loadAgentBriefing().then(alertCount => updateBadges(ideasCount, decisionsCount, alertCount));
+  } catch(e) { console.error(e); }
+}
+
+async function loadAgentBriefing() {
+  try {
+    const [brief, suggs] = await Promise.all([
+      api('/api/agent/briefing'),
+      api('/api/agent/suggestions?kind=alert&limit=6'),
+    ]);
+    const unreadCount = (suggs.suggestions || []).filter(s => !s.is_read).length;
+
+    const textEl = document.getElementById('agent-briefing-text');
+    if (brief.ok && brief.briefing) {
+      const b = brief.briefing;
+      textEl.textContent = b.details || b.title;
+      textEl.style.color = '#cbd5e1';
+    } else {
+      textEl.textContent = 'Sem briefing ainda — clica "Gerar briefing"';
+    }
+
+    const suggEl = document.getElementById('agent-suggestions-list');
+    const items  = (suggs.suggestions || []).filter(s => !s.is_read);
+    if (!items.length) {
+      suggEl.innerHTML = '';
+      return;
+    }
+    suggEl.innerHTML = '<div style="font-size:.7rem;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:.4rem">Alertas activos</div>' +
+      items.map(s => {
+        const scoreCol = s.score >= 9 ? '#f87171' : s.score >= 7 ? '#fb923c' : '#fbbf24';
+        return `<div style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;border-bottom:1px solid #1e293b">
+          <span style="width:.35rem;height:.35rem;border-radius:50%;background:${scoreCol};flex-shrink:0"></span>
+          <span style="font-size:.82rem;color:#e2e8f0;flex:1">${esc(s.title)}</span>
+          <button style="font-size:.7rem;color:#475569;background:none;border:none;cursor:pointer" onclick="markRead(${s.id},this)">✓</button>
+        </div>`;
+      }).join('');
+    return unreadCount;
+  } catch(e) { return 0; }
+}
+
+async function markRead(id, btn) {
+  btn.disabled = true;
+  try {
+    await api(`/api/agent/suggestions/${id}/read`, { method: 'POST' });
+    btn.closest('div').remove();
+  } catch(e) {}
+}
+
+async function runAgent(mode) {
+  const btn = document.getElementById('agent-run-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    const d = await api('/api/agent/run', { method: 'POST', body: JSON.stringify({ mode }) });
+    if (d.ok) {
+      showToast('Ciclo iniciado — a aguardar...', 'ok');
+      setTimeout(() => loadAgentBriefing(), 5000);
+    } else {
+      showToast(d.error || 'Erro', 'err');
+    }
+  } catch(e) { showToast('Erro de rede', 'err'); }
+  finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ Gerar briefing'; }
+  }
+}
+
+function updateBadges(ideas, decisions, alerts) {
+  const sbI = document.getElementById('sb-ideas');
+  const sbD = document.getElementById('sb-decisions');
+  const sbA = document.getElementById('sb-alerts');
+  sbI.style.display = ideas > 0 ? '' : 'none'; sbI.textContent = ideas;
+  sbD.style.display = decisions > 0 ? '' : 'none'; sbD.textContent = decisions;
+  if (sbA) { sbA.style.display = (alerts||0) > 0 ? '' : 'none'; sbA.textContent = alerts||0; }
+}
+
+function quickDecision() {
+  const title = prompt('Nova decisão pendente:');
+  if (!title || !title.trim()) return;
+  api('/api/decisions', { method: 'POST', body: JSON.stringify({ title: title.trim(), kind: 'manual' }) })
+    .then(d => { if (d.ok) { showToast('Decisão criada', 'ok'); loadOverview(); } else showToast(d.error || 'Erro', 'err'); })
+    .catch(() => showToast('Erro de rede', 'err'));
+}
+
+function quickTask() {
+  const title = prompt('Nova tarefa rápida:');
+  if (!title || !title.trim()) return;
+  // Cria como ideia simples para não necessitar case_id
+  api('/api/ideas', { method: 'POST', body: JSON.stringify({ title: title.trim(), source: 'quick_capture' }) })
+    .then(d => { if (d.ok) { showToast('Capturado como ideia', 'ok'); loadOverview(); } else showToast(d.error || 'Erro', 'err'); })
+    .catch(() => showToast('Erro de rede', 'err'));
+}
+
+// ── ideas ────────────────────────────────────────────────────────────────────
+
+async function loadIdeas() {
+  const listEl = document.getElementById('ideas-list');
+  listEl.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  try {
+    const d = await api('/api/ideas?limit=50');
+    if (!d.ok || !d.ideas.length) {
+      listEl.innerHTML = '<div style="color:#475569;text-align:center;padding:2rem;font-size:.85rem">Sem ideias ainda.<br>Clica "+ Nova ideia" para começar.</div>';
+      return;
+    }
+    listEl.innerHTML = d.ideas.map(i => `
+      <div class="idea-item ${selectedIdeaId === i.id ? 'selected' : ''}"
+           id="iitem-${i.id}" onclick="selectIdea(${i.id})">
+        <div class="idea-title">${esc(i.title)}</div>
+        <div class="idea-meta">
+          <span class="idea-status ${i.status}">${i.status}</span>
+          <span>${fmtDate(i.created_at)}</span>
+          ${i.review_count > 0 ? `<span>📊 ${i.review_count} análises</span>` : ''}
+        </div>
+      </div>`).join('');
+    if (selectedIdeaId) selectIdea(selectedIdeaId);
+  } catch(e) {
+    listEl.innerHTML = '<div class="loading">Erro ao carregar</div>';
+  }
+}
+
+async function selectIdea(id) {
+  selectedIdeaId = id;
+  document.querySelectorAll('.idea-item').forEach(el => {
+    el.classList.toggle('selected', el.id === 'iitem-' + id);
+  });
+  const detailEl = document.getElementById('idea-detail');
+  detailEl.innerHTML = '<div class="detail-panel loading"><span class="spinner"></span> A carregar...</div>';
+  try {
+    const d = await api(`/api/ideas/${id}`);
+    if (!d.ok) { detailEl.innerHTML = '<div class="detail-panel">Erro</div>'; return; }
+    renderIdeaDetail(d);
+  } catch(e) { detailEl.innerHTML = '<div class="detail-panel">Erro</div>'; }
+}
+
+function renderIdeaDetail(d) {
+  const t = d.thread;
+  const msgs = d.messages || [];
+  const reviews = d.reviews || [];
+  const userMsg = msgs.find(m => m.role === 'joao');
+  const agentNames = { strategist:'Strategist', engineering:'Engineering', operations:'Operations', finance:'Finance', system:'Síntese' };
+  const agentOrder = ['strategist','engineering','operations','finance'];
+  const agentReviews = agentOrder.map(a => reviews.find(r => r.agent === a)).filter(Boolean);
+  const synthesis   = reviews.find(r => r.agent === 'system');
+
+  const actionsHtml = `
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem">
+      ${t.status !== 'analyzing' ? `<button class="btn btn-primary btn-sm" onclick="analyzeIdea(${t.id})" id="btn-analyze-${t.id}">
+        🤖 Analisar com Conselho IA
+      </button>` : '<span style="color:#60a5fa;font-size:.85rem"><span class="spinner"></span> Conselho a analisar...</span>'}
+      ${t.status !== 'project' ? `<button class="btn btn-green btn-sm" onclick="createCase(${t.id})">
+        📁 Criar projeto
+      </button>` : '<span style="background:#3b0764;color:#c084fc;padding:.3rem .7rem;border-radius:.35rem;font-size:.78rem;font-weight:700">PROJETO CRIADO</span>'}
+      <button class="btn btn-ghost btn-sm" onclick="archiveIdea(${t.id})">Arquivar</button>
+      <button class="btn btn-ghost btn-sm" onclick="loadIdeas()">↻</button>
+    </div>`;
+
+  const msgHtml = userMsg
+    ? `<div class="detail-msg">${esc(userMsg.content)}</div>`
+    : '';
+
+  const reviewsHtml = agentReviews.length ? `
+    <div class="agent-reviews">
+      ${agentReviews.map(r => `
+        <div class="agent-card">
+          <div class="agent-name ${r.agent}">
+            ${agentNames[r.agent] || r.agent}
+            ${r.score != null ? `<span class="agent-score">${r.score}</span>` : ''}
+          </div>
+          ${r.summary ? `<div class="agent-section"><div class="agent-label">Resumo</div><div class="agent-text">${esc(r.summary)}</div></div>` : ''}
+          ${r.risks ? `<div class="agent-section" style="margin-top:.5rem"><div class="agent-label">Riscos</div><div class="agent-text">${esc(r.risks)}</div></div>` : ''}
+          ${r.next_steps ? `<div class="agent-section" style="margin-top:.5rem"><div class="agent-label">Próximos passos</div><div class="agent-text">${esc(r.next_steps)}</div></div>` : ''}
+        </div>`).join('')}
+    </div>` : '';
+
+  const synthesisHtml = synthesis ? `
+    <div class="synthesis-card">
+      <div class="agent-name system" style="margin-bottom:.5rem">Síntese do Conselho</div>
+      <div class="synthesis-text">${esc(synthesis.raw || synthesis.summary)}</div>
+    </div>` : '';
+
+  const noReviews = !agentReviews.length ? `
+    <div style="color:#475569;font-size:.85rem;padding:1rem;text-align:center">
+      Sem análises ainda. Clica "Analisar com Conselho IA".
+    </div>` : '';
+
+  document.getElementById('idea-detail').innerHTML = `
+    <div class="detail-panel">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.75rem">
+        <div>
+          <div style="font-size:1rem;font-weight:700;color:#f8fafc;margin-bottom:.25rem">${esc(t.title)}</div>
+          <span class="idea-status ${t.status}">${t.status}</span>
+          <span style="font-size:.75rem;color:#475569;margin-left:.5rem">${fmtDate(t.created_at)}</span>
+        </div>
+      </div>
+      ${actionsHtml}
+      ${msgHtml}
+      ${reviewsHtml}
+      ${synthesisHtml}
+      ${noReviews}
+    </div>`;
+}
+
+async function analyzeIdea(id) {
+  const btn = document.getElementById(`btn-analyze-${id}`);
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    const d = await api(`/api/ideas/${id}/analyze`, { method: 'POST', body: '{}' });
+    if (d.ok) {
+      showToast('Conselho de IA a analisar. Actualiza em ~30s.', 'ok');
+      // poll para ver quando terminar
+      pollIdeaReviews(id);
+    } else {
+      showToast(d.error || 'Erro', 'err');
+      if (btn) { btn.disabled = false; btn.textContent = '🤖 Analisar com Conselho IA'; }
+    }
+  } catch(e) {
+    showToast('Erro de rede', 'err');
+    if (btn) { btn.disabled = false; btn.textContent = '🤖 Analisar com Conselho IA'; }
+  }
+}
+
+function pollIdeaReviews(id, attempts=0) {
+  if (attempts > 20) return;
+  setTimeout(async () => {
+    try {
+      const d = await api(`/api/ideas/${id}/reviews`);
+      const hasAll = (d.reviews||[]).filter(r => r.agent !== 'system').length >= 4;
+      if (hasAll) {
+        selectIdea(id);
+        loadIdeas();
+        showToast('Análise concluída!', 'ok');
+      } else {
+        pollIdeaReviews(id, attempts + 1);
+      }
+    } catch(e) {}
+  }, 5000);
+}
+
+async function createCase(id) {
+  try {
+    const d = await api(`/api/ideas/${id}/create_case`, { method: 'POST', body: '{}' });
+    if (d.ok) {
+      showToast(`Projeto criado! Case #${d.case_id}`, 'ok');
+      selectIdea(id);
+      loadIdeas();
+    } else {
+      showToast(d.error || 'Erro', 'err');
+    }
+  } catch(e) { showToast('Erro de rede', 'err'); }
+}
+
+async function archiveIdea(id) {
+  if (!confirm('Arquivar esta ideia?')) return;
+  try {
+    const d = await api(`/api/ideas/${id}/archive`, { method: 'POST', body: '{}' });
+    if (d.ok) {
+      showToast('Ideia arquivada', 'ok');
+      selectedIdeaId = null;
+      loadIdeas();
+      document.getElementById('idea-detail').innerHTML =
+        '<div class="detail-panel" style="color:#475569;text-align:center;padding:3rem">Selecciona uma ideia</div>';
+    }
+  } catch(e) { showToast('Erro', 'err'); }
+}
+
+// ── decisions ─────────────────────────────────────────────────────────────────
+
+async function loadDecisions() {
+  const el = document.getElementById('decisions-list');
+  el.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  try {
+    const d = await api('/api/decisions?status=pending&limit=30');
+    if (!d.ok || !d.decisions.length) {
+      el.innerHTML = '<div style="color:#475569;text-align:center;padding:3rem;font-size:.85rem">Sem decisões pendentes</div>';
+      return;
+    }
+    el.innerHTML = d.decisions.map(dec => `
+      <div class="decision-item">
+        <span class="d-kind">${esc(dec.kind)}</span>
+        <span class="d-title">${esc(dec.title)}</span>
+        <span style="font-size:.75rem;color:#475569">${fmtDate(dec.created_at)}</span>
+        <button class="btn btn-green btn-sm" onclick="resolveDecision(${dec.id}, this)">✓ Resolver</button>
+      </div>`).join('');
+  } catch(e) { el.innerHTML = '<div class="loading">Erro</div>'; }
+}
+
+async function resolveDecision(id, btn) {
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const d = await api(`/api/decisions/${id}/resolve`, { method: 'POST', body: '{}' });
+    if (d.ok) { showToast('Decisão resolvida', 'ok'); loadDecisions(); }
+    else { showToast(d.error||'Erro','err'); btn.disabled=false; btn.textContent='✓ Resolver'; }
+  } catch(e) { showToast('Erro','err'); btn.disabled=false; btn.textContent='✓ Resolver'; }
+}
+
+// ── radar ─────────────────────────────────────────────────────────────────────
+
+async function loadRadar() {
+  const el = document.getElementById('radar-list');
+  try {
+    const d = await api('/api/twin/tenders?limit=10');
+    if (!d.ok || !(d.tenders||d.entities||[]).length) {
+      el.innerHTML = '<div style="color:#475569;text-align:center;padding:3rem;font-size:.85rem">Sem concursos no radar</div>';
+      return;
+    }
+    const items = d.tenders || d.entities || [];
+    el.innerHTML = items.map(t => {
+      const meta = t.metadata || {};
+      const score = meta.score != null ? meta.score : '—';
+      const scoreCls = score >= 70 ? 'color:#34d399' : score >= 40 ? 'color:#fbbf24' : 'color:#f87171';
+      return `<div class="card" style="margin-bottom:.6rem">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1">
+            <div style="font-size:.9rem;font-weight:600;color:#f8fafc">${esc(t.name)}</div>
+            <div style="font-size:.75rem;color:#64748b;margin-top:.3rem">${esc(meta.entity||'')} ${meta.deadline ? '· ' + meta.deadline.slice(0,10) : ''}</div>
+          </div>
+          <div style="font-size:1.2rem;font-weight:700;${scoreCls};margin-left:1rem">${score}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { el.innerHTML = '<div class="loading">Erro ao carregar radar</div>'; }
+}
+
+// ── finance ───────────────────────────────────────────────────────────────────
+
+async function loadFinance() {
+  try {
+    const [obl, inv, payouts] = await Promise.all([
+      api('/api/twin/obligations?days=30&limit=5'),
+      api('/api/twin/invoices?limit=5'),
+      api('/api/finance/payouts?limit=10'),
+    ]);
+
+    // obrigações
+    const oblEl = document.getElementById('fin-obl-list');
+    oblEl.innerHTML = (obl.obligations||[]).map(o => {
+      const days = o.days_left;
+      const cls  = days < 0 || days <= 2 ? 'urgent' : days <= 10 ? 'warn' : '';
+      return `<div class="obligation-row">
+        <span>${esc(o.label)}</span>
+        <div style="text-align:right">
+          <span class="o-days ${cls}" style="font-size:.8rem">${days < 0 ? 'VENCIDA' : days + 'd'}</span>
+          ${o.amount ? `<br><span style="font-size:.8rem;color:#94a3b8">${fmtEur(o.amount)}</span>` : ''}
+        </div>
+      </div>`;
+    }).join('') || '<div style="color:#475569;font-size:.83rem">Sem obrigações próximas</div>';
+
+    // faturas
+    const invEl = document.getElementById('fin-inv-list');
+    invEl.innerHTML = (inv.invoices||[]).map(i => `
+      <div class="obligation-row">
+        <span>${esc(i.client || i.entity_name || i.number)}</span>
+        <span style="font-weight:600;color:#60a5fa">${fmtEur(i.amount)}</span>
+      </div>`).join('') || '<div style="color:#475569;font-size:.83rem">Sem faturas em aberto</div>';
+
+    // payouts
+    const monday = getMondayISO();
+    const weekPayouts = (payouts.payouts||[]).filter(p => p.week_start && p.week_start.slice(0,10) === monday);
+    const payEl = document.getElementById('fin-payouts-list');
+    payEl.innerHTML = weekPayouts.length
+      ? weekPayouts.map(p => `
+          <div class="op-row">
+            <span><strong>${esc(p.worker_id)}</strong></span>
+            <span>${fmt(p.total_hours,2)}h → <strong>${fmtEur(p.amount)}</strong></span>
+          </div>`).join('')
+      : `<div style="color:#475569;font-size:.83rem">Sem pagamentos calculados para esta semana.
+           <a href="/finance" style="color:#3b82f6;text-decoration:none;margin-left:.4rem">Calcular →</a></div>`;
+  } catch(e) { console.error(e); }
+}
+
+function getMondayISO() {
+  const d = new Date();
+  const diff = (d.getDay() === 0 ? -6 : 1 - d.getDay());
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0,10);
+}
+
+// ── ops ───────────────────────────────────────────────────────────────────────
+
+async function loadOps() {
+  try {
+    const [health, workers] = await Promise.all([
+      api('/api/syshealth'),
+      api('/api/workers'),
+    ]);
+    // health
+    const hEl = document.getElementById('ops-health');
+    const h   = health || {};
+    hEl.innerHTML = `
+      <div class="op-row"><span>CPU</span><strong>${h.cpu_pct != null ? h.cpu_pct + '%' : '—'}</strong></div>
+      <div class="op-row"><span>RAM</span><strong>${h.ram_pct != null ? h.ram_pct + '%' : '—'}</strong></div>
+      <div class="op-row"><span>Disk</span><strong>${h.disk_pct != null ? h.disk_pct + '%' : '—'}</strong></div>
+      <div class="op-row"><span>Router</span><strong style="color:${h.router_ok ? '#34d399' : '#f87171'}">${h.router_ok ? 'OK' : 'DOWN'}</strong></div>`;
+
+    // workers
+    const wEl = document.getElementById('ops-workers');
+    const ws  = workers.workers || [];
+    wEl.innerHTML = ws.length
+      ? ws.map(w => {
+          const alive = w.last_seen_secs != null && w.last_seen_secs < 120;
+          return `<div class="op-row">
+            <span><strong>${esc(w.worker_id)}</strong></span>
+            <span style="color:${alive ? '#34d399' : '#f87171'}">${alive ? '● online' : '○ offline'}</span>
+          </div>`;
+        }).join('')
+      : '<div style="color:#475569;font-size:.83rem">Sem workers registados</div>';
+  } catch(e) { console.error(e); }
+}
+
+// ── nova ideia modal ──────────────────────────────────────────────────────────
+
+function openNewIdea() {
+  document.getElementById('modal-idea').classList.add('open');
+  document.getElementById('idea-title-inp').focus();
+}
+function closeModal() {
+  document.getElementById('modal-idea').classList.remove('open');
+  document.getElementById('idea-title-inp').value = '';
+  document.getElementById('idea-msg-inp').value   = '';
+}
+
+async function submitIdea() {
+  const title   = document.getElementById('idea-title-inp').value.trim();
+  const message = document.getElementById('idea-msg-inp').value.trim();
+  if (!title) { showToast('Título obrigatório', 'err'); return; }
+  try {
+    const d = await api('/api/ideas', {
+      method: 'POST',
+      body: JSON.stringify({ title, message })
+    });
+    if (d.ok) {
+      showToast('Ideia guardada!', 'ok');
+      closeModal();
+      selectedIdeaId = d.id;
+      loadIdeas();
+    } else {
+      showToast(d.error || 'Erro', 'err');
+    }
+  } catch(e) { showToast('Erro de rede', 'err'); }
+}
+
+// Enter envia modal
+document.getElementById('idea-title-inp').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitIdea();
+});
+document.getElementById('modal-idea').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+// ── init ─────────────────────────────────────────────────────────────────────
+
+async function loadAll() {
+  document.getElementById('h-date').textContent =
+    new Date().toLocaleDateString('pt-PT', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+  loadOverview();
+}
+
+loadAll();
+</script>
+</body>
+</html>

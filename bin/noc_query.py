@@ -1494,7 +1494,667 @@ def cmd_obligation_stats(_args):
     }))
 
 
+# ── obligation approve ────────────────────────────────────────────────────────
+
+def cmd_obligation_approve(args):
+    """Aprova obrigação para pagamento: obligation_id"""
+    if not args:
+        raise ValueError("obligation_id obrigatório")
+    ob_id = int(args[0])
+    engine, text = _conn()
+    with engine.begin() as c:
+        row = c.execute(text("""
+            UPDATE public.finance_obligations
+            SET status = 'approved', updated_at = NOW()
+            WHERE id = :id AND status = 'pending'
+            RETURNING id, label, due_date, amount
+        """), {"id": ob_id}).mappings().first()
+    if not row:
+        print(json.dumps({"ok": False, "error": "Obrigação não encontrada ou já aprovada"}))
+        return
+    print(json.dumps({"ok": True, "id": row["id"], "label": row["label"],
+                      "due_date": str(row["due_date"]), "amount": float(row["amount"] or 0)}))
+
+
+# ── people ────────────────────────────────────────────────────────────────────
+
+def cmd_people_list(args):
+    """Lista técnicos: [cluster] [active_only]"""
+    cluster     = args[0] if args and args[0] not in ('', 'all') else None
+    active_only = args[1].lower() not in ('0', 'false', 'no') if len(args) > 1 else True
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT id, name, role, cluster, hourly_rate, phone, email, active, created_at
+            FROM public.people
+            WHERE (:cluster IS NULL OR cluster = :cluster)
+              AND (:active IS FALSE OR active = TRUE)
+            ORDER BY name
+        """), {"cluster": cluster, "active": active_only}).mappings().all()
+    print(json.dumps({"ok": True, "people": [_row(r) for r in rows]}))
+
+
+# ── clients ───────────────────────────────────────────────────────────────────
+
+def cmd_client_list(args):
+    """Lista clientes: [active_only]"""
+    active_only = args[0].lower() not in ('0', 'false', 'no') if args else True
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT id, company_name, nif, billing_email, contact_name, phone, token, active, created_at
+            FROM public.clients
+            WHERE (:active IS FALSE OR active = TRUE)
+            ORDER BY company_name
+        """), {"active": active_only}).mappings().all()
+    print(json.dumps({"ok": True, "clients": [_row(r) for r in rows]}))
+
+
+# ── client portal — timesheets ────────────────────────────────────────────────
+
+def cmd_client_timesheets(args):
+    """Timesheets de cliente via token: token [status] [limit]"""
+    if not args:
+        raise ValueError("token obrigatório")
+    token  = args[0]
+    status = args[1] if len(args) > 1 and args[1] not in ('', 'all') else None
+    limit  = int(args[2]) if len(args) > 2 else 50
+    engine, text = _conn()
+    with engine.connect() as c:
+        client = c.execute(text("""
+            SELECT id, company_name FROM public.clients WHERE token = :t AND active = TRUE
+        """), {"t": token}).mappings().first()
+        if not client:
+            print(json.dumps({"ok": False, "error": "Token inválido"}))
+            return
+        # timesheets where event_id maps to a case linked to this client
+        # simplified: return all timesheets (MVP — sem filtro por cliente ainda)
+        rows = c.execute(text("""
+            SELECT id, worker_id, event_name, start_time, end_time, hours,
+                   notes, status, hourly_rate, created_at, updated_at
+            FROM public.event_timesheets
+            WHERE (:status IS NULL OR status = :status)
+              AND status != 'open'
+            ORDER BY created_at DESC LIMIT :lim
+        """), {"status": status, "lim": limit}).mappings().all()
+    print(json.dumps({
+        "ok": True,
+        "client": {"id": client["id"], "name": client["company_name"]},
+        "timesheets": [_row(r) for r in rows]
+    }))
+
+
+def cmd_client_timesheet_action(args):
+    """Aprova/rejeita timesheet via token cliente: token timesheet_id approved|rejected"""
+    if len(args) < 3:
+        raise ValueError("token, timesheet_id e action (approved|rejected) obrigatórios")
+    token  = args[0]
+    ts_id  = int(args[1])
+    action = args[2]
+    if action not in ('approved', 'rejected'):
+        raise ValueError("action deve ser approved ou rejected")
+    engine, text = _conn()
+    with engine.begin() as c:
+        client = c.execute(text("""
+            SELECT id, company_name FROM public.clients WHERE token = :t AND active = TRUE
+        """), {"t": token}).mappings().first()
+        if not client:
+            print(json.dumps({"ok": False, "error": "Token inválido"}))
+            return
+        row = c.execute(text("""
+            UPDATE public.event_timesheets
+            SET status = :action, updated_at = NOW()
+            WHERE id = :id AND status = 'submitted'
+            RETURNING id, worker_id, event_name, hours
+        """), {"action": action, "id": ts_id}).mappings().first()
+        if not row:
+            print(json.dumps({"ok": False, "error": "Timesheet não encontrado ou não submetido"}))
+            return
+        # registar evento
+        kind = "timesheet_approved" if action == "approved" else "timesheet_rejected"
+        c.execute(text("""
+            INSERT INTO public.events (ts, level, source, kind, message, data)
+            VALUES (NOW(), 'info', 'client_portal', :kind,
+                    :msg, CAST(:data AS jsonb))
+        """), {
+            "kind": kind,
+            "msg":  f"{kind}: {row['worker_id']} — {row['event_name']} ({row['hours']}h)",
+            "data": json.dumps({"ts_id": ts_id, "client_id": client["id"],
+                                "worker_id": row["worker_id"], "hours": float(row["hours"] or 0)})
+        })
+    print(json.dumps({"ok": True, "id": row["id"], "status": action,
+                      "worker_id": row["worker_id"], "hours": float(row["hours"] or 0)}))
+
+
+# ── payouts ───────────────────────────────────────────────────────────────────
+
+def cmd_payout_list(args):
+    """Lista payouts: [status] [limit]"""
+    status = args[0] if args and args[0] not in ('', 'all') else None
+    limit  = int(args[1]) if len(args) > 1 else 50
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT id, worker_id, week_start, total_hours, amount, status, paid_at, notes, created_at
+            FROM public.finance_payouts
+            WHERE (:status IS NULL OR status = :status)
+            ORDER BY week_start DESC, worker_id
+            LIMIT :lim
+        """), {"status": status, "lim": limit}).mappings().all()
+    print(json.dumps({"ok": True, "payouts": [_row(r) for r in rows]}))
+
+
+def cmd_payout_run(args):
+    """Calcula payouts para semana: week_start (YYYY-MM-DD). Cria se não existir."""
+    if not args:
+        raise ValueError("week_start obrigatório (YYYY-MM-DD)")
+    week_start = args[0]
+    engine, text = _conn()
+    with engine.begin() as c:
+        # horas aprovadas não pagas por worker nesta semana
+        rows = c.execute(text("""
+            SELECT t.worker_id,
+                   COALESCE(p.hourly_rate, t.hourly_rate, 0) AS rate,
+                   SUM(t.hours) AS total_hours
+            FROM public.event_timesheets t
+            LEFT JOIN public.people p ON p.name = t.worker_id
+            WHERE t.status IN ('approved')
+              AND t.start_time >= CAST(:week_start AS date)
+              AND t.start_time <  CAST(:week_start AS date) + INTERVAL '7 days'
+            GROUP BY t.worker_id, p.hourly_rate, t.hourly_rate
+        """), {"week_start": week_start}).mappings().all()
+        created = []
+        for r in rows:
+            hours  = float(r["total_hours"] or 0)
+            rate   = float(r["rate"] or 0)
+            amount = round(hours * rate, 2)
+            existing = c.execute(text("""
+                SELECT id FROM public.finance_payouts
+                WHERE worker_id = :wid AND week_start = :ws
+            """), {"wid": r["worker_id"], "ws": week_start}).first()
+            if existing:
+                c.execute(text("""
+                    UPDATE public.finance_payouts
+                    SET total_hours = :h, amount = :a, updated_at = NOW()
+                    WHERE id = :id
+                """), {"h": hours, "a": amount, "id": existing[0]})
+                created.append({"worker_id": r["worker_id"], "hours": hours, "amount": amount, "updated": True})
+            else:
+                c.execute(text("""
+                    INSERT INTO public.finance_payouts (worker_id, week_start, total_hours, amount)
+                    VALUES (:wid, :ws, :h, :a)
+                """), {"wid": r["worker_id"], "ws": week_start, "h": hours, "a": amount})
+                created.append({"worker_id": r["worker_id"], "hours": hours, "amount": amount, "updated": False})
+        total = sum(p["amount"] for p in created)
+        c.execute(text("""
+            INSERT INTO public.events (ts, level, source, kind, message, data)
+            VALUES (NOW(), 'info', 'payout_run', 'payout_run_created',
+                    :msg, CAST(:data AS jsonb))
+        """), {
+            "msg":  f"Payout run {week_start}: {len(created)} workers, total {total:.2f}€",
+            "data": json.dumps({"week_start": week_start, "workers": created, "total": total})
+        })
+    print(json.dumps({"ok": True, "week_start": week_start, "payouts": created, "total": total}))
+
+
+def cmd_payout_mark_paid(args):
+    """Marca payout como pago e as timesheets associadas como 'paid': payout_id"""
+    if not args:
+        raise ValueError("payout_id obrigatório")
+    p_id = int(args[0])
+    engine, text = _conn()
+    with engine.begin() as c:
+        row = c.execute(text("""
+            UPDATE public.finance_payouts
+            SET status = 'paid', paid_at = NOW(), updated_at = NOW()
+            WHERE id = :id AND status != 'paid'
+            RETURNING id, worker_id, week_start, amount
+        """), {"id": p_id}).mappings().first()
+        if not row:
+            print(json.dumps({"ok": False, "error": "Payout não encontrado ou já pago"}))
+            return
+        # Marcar timesheets aprovadas do worker nessa semana como 'paid'
+        ts_updated = c.execute(text("""
+            UPDATE public.event_timesheets
+            SET status = 'paid', updated_at = NOW()
+            WHERE LOWER(worker_id) = LOWER(:wid)
+              AND status = 'approved'
+              AND DATE(created_at) >= CAST(:ws AS date)
+              AND DATE(created_at) <  CAST(:ws AS date) + INTERVAL '7 days'
+        """), {
+            "wid": row["worker_id"],
+            "ws":  str(row["week_start"]),
+        }).rowcount
+        c.execute(text("""
+            INSERT INTO public.events (ts, level, source, kind, message, data)
+            VALUES (NOW(), 'info', 'payout', 'payout_paid',
+                    :msg, CAST(:data AS jsonb))
+        """), {
+            "msg":  f"Payout #{row['id']} marcado pago — {row['worker_id']} {float(row['amount']):.2f}€",
+            "data": json.dumps({"payout_id": row["id"], "worker_id": row["worker_id"],
+                                "timesheets_updated": ts_updated}),
+        })
+    print(json.dumps({"ok": True, "id": row["id"], "worker_id": row["worker_id"],
+                      "week_start": str(row["week_start"]), "amount": float(row["amount"]),
+                      "timesheets_paid": ts_updated}))
+
+
+# ── invoice engine ────────────────────────────────────────────────────────────
+
+def _import_invoice_engine():
+    """Importa invoice_engine adicionando o directório pai ao path."""
+    import sys as _s, os as _o
+    _parent = _o.path.dirname(_o.path.dirname(_o.path.abspath(__file__)))
+    if _parent not in _s.path:
+        _s.path.insert(0, _parent)
+    import importlib
+    return importlib.import_module("bin.invoice_engine")
+
+
+def cmd_invoice_generate(args):
+    """Gera invoice draft a partir de timesheets aprovadas: event_name [client_id]"""
+    if not args:
+        raise ValueError("event_name obrigatório")
+    event_name = args[0]
+    client_id  = int(args[1]) if len(args) > 1 else None
+    m = _import_invoice_engine()
+    print(json.dumps(m.generate_from_timesheets(event_name, client_id), ensure_ascii=False))
+
+
+def cmd_invoice_push_toc(args):
+    """Envia invoice para Toconline (draft): invoice_id"""
+    if not args:
+        raise ValueError("invoice_id obrigatório")
+    m = _import_invoice_engine()
+    print(json.dumps(m.push_to_toconline(int(args[0])), ensure_ascii=False))
+
+
+def cmd_invoice_drafts(_args):
+    """Lista invoices em draft."""
+    m = _import_invoice_engine()
+    print(json.dumps(m.list_drafts(), ensure_ascii=False))
+
+
+def cmd_toconline_status(_args):
+    """Estado da ligação Toconline."""
+    m = _import_invoice_engine()
+    print(json.dumps(m.toconline_status(), ensure_ascii=False))
+
+
+def cmd_timesheet_submit(args):
+    """Submete timesheet parada (stop + submit numa só chamada): timesheet_id [notes]"""
+    if not args:
+        raise ValueError("timesheet_id obrigatório")
+    ts_id = int(args[0])
+    notes = args[1] if len(args) > 1 else None
+    engine, text = _conn()
+    with engine.begin() as c:
+        row = c.execute(text("""
+            UPDATE public.event_timesheets
+            SET end_time   = COALESCE(end_time, NOW()),
+                hours      = COALESCE(hours, ROUND(EXTRACT(EPOCH FROM (COALESCE(end_time,NOW()) - start_time))/3600.0, 2)),
+                notes      = COALESCE(:notes, notes),
+                status     = 'submitted',
+                updated_at = NOW()
+            WHERE id = :id AND status IN ('open', 'submitted')
+            RETURNING id, worker_id, event_name, hours, status
+        """), {"id": ts_id, "notes": notes}).mappings().first()
+    if not row:
+        print(json.dumps({"ok": False, "error": "Timesheet não encontrado"}))
+        return
+    print(json.dumps({"ok": True, "id": row["id"], "worker_id": row["worker_id"],
+                      "event_name": row["event_name"], "hours": float(row["hours"] or 0),
+                      "status": row["status"]}))
+
+
+# ── ideas (Conselho de IA / Painel do João) ───────────────────────────────────
+
+def cmd_idea_create(args):
+    """Cria thread de ideia: title [message]"""
+    if not args:
+        raise ValueError("title obrigatório")
+    title   = args[0]
+    message = args[1] if len(args) > 1 else None
+    engine, text = _conn()
+    with engine.begin() as c:
+        row = c.execute(text("""
+            INSERT INTO public.idea_threads (title) VALUES (:t) RETURNING id, title, status, created_at
+        """), {"t": title}).mappings().first()
+        tid = row["id"]
+        if message:
+            c.execute(text("""
+                INSERT INTO public.idea_messages (thread_id, role, content)
+                VALUES (:tid, 'joao', :content)
+            """), {"tid": tid, "content": message})
+        c.execute(text("""
+            INSERT INTO public.events (ts, level, source, kind, message, data)
+            VALUES (NOW(), 'info', 'joao', 'idea_captured',
+                    :msg, CAST(:data AS jsonb))
+        """), {
+            "msg":  f"Ideia capturada: {title}",
+            "data": json.dumps({"thread_id": tid, "title": title})
+        })
+    print(json.dumps({"ok": True, "id": tid, "title": title,
+                      "status": row["status"], "created_at": row["created_at"].isoformat()}))
+
+
+def cmd_idea_list(args):
+    """Lista ideias: [status] [limit]"""
+    status = args[0] if args and args[0] not in ('', 'all') else None
+    limit  = int(args[1]) if len(args) > 1 else 30
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT t.id, t.title, t.source, t.status, t.created_at, t.updated_at,
+                   (SELECT content FROM public.idea_messages
+                    WHERE thread_id=t.id AND role='joao'
+                    ORDER BY created_at LIMIT 1) AS first_msg,
+                   (SELECT COUNT(*) FROM public.idea_reviews WHERE thread_id=t.id) AS review_count
+            FROM public.idea_threads t
+            WHERE (:status IS NULL OR t.status = :status)
+            ORDER BY t.created_at DESC LIMIT :lim
+        """), {"status": status, "lim": limit}).mappings().all()
+    print(json.dumps({"ok": True, "ideas": [_row(r) for r in rows]}))
+
+
+def cmd_idea_get(args):
+    """Obtém thread completo: thread_id"""
+    if not args:
+        raise ValueError("thread_id obrigatório")
+    tid = int(args[0])
+    engine, text = _conn()
+    with engine.connect() as c:
+        thread = c.execute(text(
+            "SELECT id, title, source, status, created_at, updated_at FROM public.idea_threads WHERE id=:id"
+        ), {"id": tid}).mappings().first()
+        if not thread:
+            print(json.dumps({"ok": False, "error": "Thread não encontrado"}))
+            return
+        msgs = c.execute(text("""
+            SELECT id, role, content, created_at FROM public.idea_messages
+            WHERE thread_id=:tid ORDER BY created_at
+        """), {"tid": tid}).mappings().all()
+        reviews = c.execute(text("""
+            SELECT id, agent, summary, risks, next_steps, score, created_at
+            FROM public.idea_reviews WHERE thread_id=:tid ORDER BY created_at
+        """), {"tid": tid}).mappings().all()
+    print(json.dumps({"ok": True, "thread": _row(thread),
+                      "messages": [_row(m) for m in msgs],
+                      "reviews":  [_row(r) for r in reviews]}))
+
+
+def cmd_idea_archive(args):
+    """Arquiva ideia: thread_id"""
+    if not args:
+        raise ValueError("thread_id obrigatório")
+    tid = int(args[0])
+    engine, text = _conn()
+    with engine.begin() as c:
+        c.execute(text("""
+            UPDATE public.idea_threads SET status='archived', updated_at=NOW() WHERE id=:id
+        """), {"id": tid})
+    print(json.dumps({"ok": True, "id": tid, "status": "archived"}))
+
+
+def cmd_idea_reviews(args):
+    """Reviews de uma ideia: thread_id"""
+    if not args:
+        raise ValueError("thread_id obrigatório")
+    tid = int(args[0])
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT id, agent, summary, risks, next_steps, score, raw, created_at
+            FROM public.idea_reviews WHERE thread_id=:tid ORDER BY created_at
+        """), {"tid": tid}).mappings().all()
+    print(json.dumps({"ok": True, "thread_id": tid, "reviews": [_row(r) for r in rows]}))
+
+
+def cmd_idea_create_case(args):
+    """Cria case Twin a partir de ideia: thread_id"""
+    if not args:
+        raise ValueError("thread_id obrigatório")
+    tid = int(args[0])
+    engine, text = _conn()
+    with engine.begin() as c:
+        thread = c.execute(text(
+            "SELECT id, title FROM public.idea_threads WHERE id=:id"
+        ), {"id": tid}).mappings().first()
+        if not thread:
+            print(json.dumps({"ok": False, "error": "Thread não encontrado"}))
+            return
+        # criar entity de tipo idea
+        ent = c.execute(text("""
+            INSERT INTO public.twin_entities (type, name, status, metadata)
+            VALUES ('idea', :name, 'active', CAST(:meta AS jsonb))
+            RETURNING id
+        """), {"name": thread["title"],
+               "meta": json.dumps({"idea_thread_id": tid})}).mappings().first()
+        ent_id = ent["id"]
+        # workflow idea_case (inserir se não existir)
+        c.execute(text("""
+            INSERT INTO public.twin_workflows (key, name, definition)
+            VALUES ('idea_case', 'Ideia → Caso', '{"states":["captured","analyzing","decided","project","archived"]}')
+            ON CONFLICT (key) DO NOTHING
+        """))
+        # criar case
+        case = c.execute(text("""
+            INSERT INTO public.twin_cases (workflow_key, entity_id, status, data)
+            VALUES ('idea_case', :eid, 'captured', CAST(:data AS jsonb))
+            RETURNING id
+        """), {"eid": ent_id,
+               "data": json.dumps({"idea_thread_id": tid, "title": thread["title"]})}).mappings().first()
+        case_id = case["id"]
+        # tasks iniciais
+        for t in ["Clarificar objetivo", "Levantar custos", "Identificar parceiros", "Definir próximo passo"]:
+            c.execute(text("""
+                INSERT INTO public.twin_tasks (case_id, title, type, status)
+                VALUES (:cid, :title, 'human', 'pending')
+            """), {"cid": case_id, "title": t})
+        # eventos
+        c.execute(text("""
+            INSERT INTO public.events (ts, level, source, kind, message, data)
+            VALUES (NOW(), 'info', 'joao', 'idea_case_created',
+                    :msg, CAST(:data AS jsonb))
+        """), {
+            "msg":  f"Case criado para ideia: {thread['title']}",
+            "data": json.dumps({"thread_id": tid, "entity_id": ent_id, "case_id": case_id})
+        })
+        # marcar thread
+        c.execute(text("""
+            UPDATE public.idea_threads SET status='project', updated_at=NOW() WHERE id=:id
+        """), {"id": tid})
+        # decisão
+        c.execute(text("""
+            INSERT INTO public.decision_queue (kind, ref_id, title)
+            VALUES ('idea_case', :ref, :title)
+        """), {"ref": str(case_id), "title": f"Rever case: {thread['title']}"})
+    print(json.dumps({"ok": True, "thread_id": tid, "entity_id": ent_id,
+                      "case_id": case_id, "status": "project"}))
+
+
+# ── decision queue ────────────────────────────────────────────────────────────
+
+def cmd_decision_list(args):
+    """Lista decisões pendentes: [status] [limit]"""
+    status = args[0] if args and args[0] not in ('', 'all') else 'pending'
+    limit  = int(args[1]) if len(args) > 1 else 20
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT id, kind, ref_id, title, status, created_at
+            FROM public.decision_queue
+            WHERE (:status IS NULL OR status = :status)
+            ORDER BY created_at DESC LIMIT :lim
+        """), {"status": status if status != 'all' else None, "lim": limit}).mappings().all()
+    print(json.dumps({"ok": True, "decisions": [_row(r) for r in rows]}))
+
+
+def cmd_decision_create(args):
+    """Cria decisão manual: title [kind]"""
+    if not args:
+        raise ValueError("title obrigatório")
+    title = args[0]
+    kind  = args[1] if len(args) > 1 else 'manual'
+    engine, text = _conn()
+    with engine.begin() as c:
+        row = c.execute(text("""
+            INSERT INTO public.decision_queue (kind, title, status)
+            VALUES (:kind, :title, 'pending')
+            RETURNING id, kind, title, status, created_at
+        """), {"kind": kind, "title": title}).mappings().first()
+    print(json.dumps({"ok": True, **_row(row)}))
+
+
+def cmd_decision_resolve(args):
+    """Resolve decisão: decision_id"""
+    if not args:
+        raise ValueError("decision_id obrigatório")
+    did = int(args[0])
+    engine, text = _conn()
+    with engine.begin() as c:
+        c.execute(text("""
+            UPDATE public.decision_queue SET status='resolved', updated_at=NOW() WHERE id=:id
+        """), {"id": did})
+    print(json.dumps({"ok": True, "id": did, "status": "resolved"}))
+
+
 # ── dispatch ──────────────────────────────────────────────────────────────────
+
+# ── agent_suggestions ────────────────────────────────────────────────────────
+
+def cmd_agent_suggestions(args):
+    """agent_suggestions [kind] [limit]"""
+    kind  = args[0] if args else None
+    limit = int(args[1]) if len(args) > 1 else 30
+    engine, text = _conn()
+    with engine.connect() as c:
+        q = """
+            SELECT id, kind, title, details, ref_kind, ref_id, score, is_read, created_at
+            FROM public.agent_suggestions
+            WHERE (:kind IS NULL OR kind = :kind)
+            ORDER BY created_at DESC LIMIT :lim
+        """
+        rows = c.execute(text(q), {"kind": kind, "lim": limit}).mappings().all()
+    print(json.dumps({"ok": True, "suggestions": [_row(r) for r in rows]}, ensure_ascii=False))
+
+
+def cmd_agent_briefing(_args):
+    """agent_briefing — latest briefing text"""
+    engine, text = _conn()
+    with engine.connect() as c:
+        row = c.execute(text("""
+            SELECT id, title, details, created_at
+            FROM public.agent_suggestions
+            WHERE kind = 'briefing'
+            ORDER BY created_at DESC LIMIT 1
+        """)).mappings().first()
+    if not row:
+        print(json.dumps({"ok": True, "briefing": None}))
+        return
+    print(json.dumps({"ok": True, "briefing": _row(row)}, ensure_ascii=False))
+
+
+def cmd_agent_suggestion_read(args):
+    """agent_suggestion_read <id>"""
+    if not args:
+        print(json.dumps({"ok": False, "error": "id required"})); return
+    sid = int(args[0])
+    engine, text = _conn()
+    with engine.begin() as c:
+        c.execute(text("UPDATE public.agent_suggestions SET is_read=TRUE WHERE id=:id"), {"id": sid})
+    print(json.dumps({"ok": True, "id": sid}))
+
+
+# ── bank reconciliation (proxy para reconcile.py) ────────────────────────────
+
+def _run_reconcile(subcmd: str, args: list) -> dict:
+    import subprocess, shlex
+    cmd = ["python3", os.path.join(os.path.dirname(__file__), "reconcile.py"), subcmd] + [str(a) for a in args]
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(__file__)))
+    try:
+        return json.loads(r.stdout)
+    except Exception:
+        return {"error": r.stderr.strip() or "reconcile error"}
+
+
+def cmd_bank_transactions(args):
+    print(json.dumps(_run_reconcile("bank_transactions", args), ensure_ascii=False))
+
+
+def cmd_bank_reconcile(args):
+    print(json.dumps(_run_reconcile("bank_reconcile", args), ensure_ascii=False))
+
+
+def cmd_bank_match(args):
+    print(json.dumps(_run_reconcile("bank_match", args), ensure_ascii=False))
+
+
+def cmd_bank_ignore(args):
+    print(json.dumps(_run_reconcile("bank_ignore", args), ensure_ascii=False))
+
+
+# ── incidents ──────────────────────────────────────────────────────────────────
+
+def cmd_incident_list(args):
+    """incident_list [limit=50] — lista incidentes activos"""
+    limit = int(args[0]) if args and args[0].isdigit() else 50
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT id, source, kind, severity, title, details, status, resolved_at, created_at
+            FROM public.incidents
+            WHERE status = 'open'
+            ORDER BY
+              CASE severity WHEN 'crit' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END,
+              created_at DESC
+            LIMIT :l
+        """), {"l": limit}).mappings().all()
+    print(json.dumps({"ok": True, "incidents": [_row(r) for r in rows]}, ensure_ascii=False))
+
+
+def cmd_incident_resolve(args):
+    """incident_resolve <id>"""
+    if not args:
+        print(json.dumps({"error": "usage: incident_resolve <id>"})); return
+    iid = int(args[0])
+    engine, text = _conn()
+    with engine.begin() as c:
+        c.execute(text("""
+            UPDATE public.incidents SET status='resolved', resolved_at=NOW()
+            WHERE id=:id
+        """), {"id": iid})
+    print(json.dumps({"ok": True, "id": iid}))
+
+
+def cmd_incident_create(args):
+    """incident_create <source> <kind> <severity> <title> [details]"""
+    if len(args) < 4:
+        print(json.dumps({"error": "usage: incident_create <source> <kind> <severity> <title> [details]"})); return
+    source   = args[0]
+    kind     = args[1]
+    severity = args[2] if args[2] in ("info","warn","crit") else "warn"
+    title    = args[3]
+    details  = args[4] if len(args) > 4 else None
+    engine, text = _conn()
+    with engine.begin() as c:
+        # Dedupe: não criar se já existe incidente open com mesmo kind+source nas últimas 4h
+        existing = c.execute(text("""
+            SELECT id FROM public.incidents
+            WHERE source=:s AND kind=:k AND status='open'
+              AND created_at > NOW() - INTERVAL '4 hours'
+            LIMIT 1
+        """), {"s": source, "k": kind}).mappings().first()
+        if existing:
+            print(json.dumps({"ok": True, "id": existing["id"], "deduped": True})); return
+        row = c.execute(text("""
+            INSERT INTO public.incidents (source, kind, severity, title, details)
+            VALUES (:source, :kind, :severity, :title, :details)
+            RETURNING id
+        """), {"source": source, "kind": kind, "severity": severity,
+               "title": title, "details": details}).mappings().first()
+    print(json.dumps({"ok": True, "id": row["id"]}))
+
 
 CMDS = {
     "telemetry_history": cmd_telemetry_history,
@@ -1537,7 +2197,39 @@ CMDS = {
     "timesheet_all":               cmd_timesheet_all,
     "obligation_list":             cmd_obligation_list,
     "obligation_pay":              cmd_obligation_pay,
+    "obligation_approve":          cmd_obligation_approve,
     "obligation_stats":            cmd_obligation_stats,
+    "people_list":                 cmd_people_list,
+    "client_list":                 cmd_client_list,
+    "client_timesheets":           cmd_client_timesheets,
+    "client_timesheet_action":     cmd_client_timesheet_action,
+    "payout_list":                 cmd_payout_list,
+    "payout_run":                  cmd_payout_run,
+    "payout_mark_paid":            cmd_payout_mark_paid,
+    "idea_create":                 cmd_idea_create,
+    "idea_list":                   cmd_idea_list,
+    "idea_get":                    cmd_idea_get,
+    "idea_archive":                cmd_idea_archive,
+    "idea_reviews":                cmd_idea_reviews,
+    "idea_create_case":            cmd_idea_create_case,
+    "decision_list":               cmd_decision_list,
+    "decision_create":             cmd_decision_create,
+    "decision_resolve":            cmd_decision_resolve,
+    "invoice_generate":            cmd_invoice_generate,
+    "invoice_push_toc":            cmd_invoice_push_toc,
+    "invoice_drafts":              cmd_invoice_drafts,
+    "toconline_status":            cmd_toconline_status,
+    "timesheet_submit":            cmd_timesheet_submit,
+    "agent_suggestions":           cmd_agent_suggestions,
+    "agent_briefing":              cmd_agent_briefing,
+    "agent_suggestion_read":       cmd_agent_suggestion_read,
+    "bank_transactions":           cmd_bank_transactions,
+    "bank_reconcile":              cmd_bank_reconcile,
+    "bank_match":                  cmd_bank_match,
+    "bank_ignore":                 cmd_bank_ignore,
+    "incident_list":               cmd_incident_list,
+    "incident_resolve":            cmd_incident_resolve,
+    "incident_create":             cmd_incident_create,
 }
 
 if __name__ == "__main__":

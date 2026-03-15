@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radar Concursos TED</title>
+<style>
+:root{
+  --bg:#f8faff;--panel:#fff;--border:#e2e8f0;
+  --blue:#3b82f6;--green:#22c55e;--yellow:#f59e0b;--gray:#94a3b8;
+  --red:#ef4444;--purple:#8b5cf6;
+  --ink:#1e293b;--ink2:#64748b;
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);min-height:100vh}
+header{background:var(--blue);color:#fff;padding:16px 24px;display:flex;align-items:center;gap:16px}
+header .logo{font-size:18px;font-weight:700}
+header .sub{font-size:13px;opacity:.8;margin-left:8px}
+header nav{margin-left:auto;display:flex;gap:12px}
+header nav a{color:rgba(255,255,255,.8);text-decoration:none;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.3)}
+header nav a:hover{background:rgba(255,255,255,.15)}
+main{max-width:1100px;margin:0 auto;padding:24px}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.metric-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center}
+.metric-card .n{font-size:28px;font-weight:700;color:var(--blue)}
+.metric-card .l{font-size:12px;color:var(--gray);margin-top:4px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px}
+.card h2{font-size:14px;font-weight:600;color:var(--ink2);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--ink2);font-weight:600;padding:8px 10px;border-bottom:2px solid var(--border);font-size:12px;white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+tr:last-child td{border:none}
+tr:hover td{background:#f8faff}
+.score-badge{display:inline-flex;align-items:center;justify-content:center;min-width:36px;padding:2px 8px;border-radius:99px;font-weight:700;font-size:12px}
+.score-hi{background:#dcfce7;color:#166534}
+.score-md{background:#dbeafe;color:#1d4ed8}
+.score-lo{background:#f1f5f9;color:#64748b}
+.estado-badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600;white-space:nowrap}
+.estado-novo       {background:#dbeafe;color:#1e40af}
+.estado-a_analisar {background:#fef9c3;color:#92400e}
+.estado-candidatar {background:#dcfce7;color:#166534}
+.estado-submetido  {background:#ede9fe;color:#5b21b6}
+.estado-ganho      {background:#dcfce7;color:#166534}
+.estado-perdido    {background:#fee2e2;color:#991b1b}
+.estado-ignorar    {background:#f1f5f9;color:#64748b}
+.titulo{font-weight:500;color:var(--ink);max-width:380px}
+.pub{font-size:11px;color:var(--gray);margin-top:2px}
+.dl{font-size:12px;color:var(--ink2)}
+.dl.red{color:var(--red);font-weight:600}
+a.pdf-link{font-size:11px;color:var(--blue);text-decoration:none;display:inline-flex;align-items:center;gap:3px}
+a.pdf-link:hover{text-decoration:underline}
+.filter-bar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.filter-bar select,.filter-bar input{padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--panel)}
+.ts-update{font-size:11px;color:var(--gray);text-align:right;margin-bottom:8px}
+.empty{text-align:center;padding:40px;color:var(--gray)}
+.estado-select{font-size:12px;border:1px solid var(--border);border-radius:6px;padding:2px 6px;background:var(--panel);cursor:pointer}
+.src-badge{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.5px;white-space:nowrap}
+.src-ted {background:#dbeafe;color:#1e40af}
+.src-base{background:#dcfce7;color:#166534}
+.src-dr  {background:#ede9fe;color:#5b21b6}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <span class="logo">📡 Radar TED</span>
+    <span class="sub">Concursos públicos Portugal</span>
+  </div>
+  <nav>
+    <a href="/ops">NOC</a>
+    <a href="/factory">Fábrica</a>
+    <span id="user-info" style="font-size:11px;opacity:.7"></span>
+    <a href="#" onclick="_logout();return false">sair</a>
+  </nav>
+</header>
+
+<main>
+  <div class="ts-update" id="ts-update"></div>
+
+  <div class="metrics" id="metrics">
+    <div class="metric-card"><div class="n" id="m-total">—</div><div class="l">Total detectados</div></div>
+    <div class="metric-card"><div class="n" id="m-novos">—</div><div class="l">Novos (sem análise)</div></div>
+    <div class="metric-card"><div class="n" id="m-cand">—</div><div class="l">A candidatar</div></div>
+    <div class="metric-card"><div class="n" id="m-urg">—</div><div class="l">Prazo &lt; 14 dias</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Concursos detectados</h2>
+    <div class="filter-bar">
+      <select id="f-source" onchange="applyFilter()">
+        <option value="">Todas as fontes</option>
+        <option value="ted">TED (Europa)</option>
+        <option value="base">BASE (Portugal)</option>
+        <option value="dr">DR (República)</option>
+      </select>
+      <select id="f-estado" onchange="applyFilter()">
+        <option value="">Todos os estados</option>
+        <option value="novo">Novo</option>
+        <option value="a_analisar">A analisar</option>
+        <option value="candidatar">Candidatar</option>
+        <option value="submetido">Submetido</option>
+        <option value="ganho">Ganho</option>
+        <option value="perdido">Perdido</option>
+        <option value="ignorar">Ignorar</option>
+      </select>
+      <select id="f-grupo" onchange="applyFilter()">
+        <option value="">Todos os grupos</option>
+        <option value="reciclagem_cabos">Reciclagem cabos</option>
+        <option value="gestao_residuos">Gestão resíduos</option>
+        <option value="manutencao_eletrica">Manutenção elétrica</option>
+        <option value="obras_industriais">Obras industriais</option>
+      </select>
+      <input type="text" id="f-search" placeholder="Pesquisar título..." oninput="applyFilter()" style="flex:1;min-width:160px">
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Score</th>
+          <th>Concurso</th>
+          <th>Prazo</th>
+          <th>Tipo</th>
+          <th>Fonte</th>
+          <th>Estado</th>
+          <th>Link</th>
+        </tr>
+      </thead>
+      <tbody id="tenders-body">
+        <tr><td colspan="6" class="empty">A carregar...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+// ── Auth ──────────────────────────────────────────────────────────────────────
+const _jwt = localStorage.getItem('aios_jwt');
+if (!_jwt) window.location = '/login?next=/tenders';
+
+function _authHeaders() {
+  return _jwt ? { 'Authorization': 'Bearer ' + _jwt } : {};
+}
+function _logout() {
+  localStorage.removeItem('aios_jwt');
+  localStorage.removeItem('aios_user');
+  window.location = '/login';
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+let allTenders = [];
+
+const ESTADO_PT = {
+  novo:'Novo', a_analisar:'A analisar', candidatar:'Candidatar',
+  submetido:'Submetido', ganho:'Ganho', perdido:'Perdido', ignorar:'Ignorar'
+};
+
+async function load() {
+  try {
+    const r = await fetch('/api/twin/tenders?limit=100', { headers: _authHeaders() });
+    if (r.status === 401) { _logout(); return; }
+    allTenders = await r.json();
+    if (!Array.isArray(allTenders)) allTenders = [];
+    updateMetrics();
+    applyFilter();
+    document.getElementById('ts-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt');
+  } catch(e) {
+    document.getElementById('tenders-body').innerHTML =
+      '<tr><td colspan="6" class="empty">Erro ao carregar.</td></tr>';
+  }
+}
+
+function updateMetrics() {
+  const now  = new Date();
+  const d14  = new Date(now.getTime() + 14*24*3600*1000);
+  document.getElementById('m-total').textContent = allTenders.length;
+  document.getElementById('m-novos').textContent = allTenders.filter(t => t.estado === 'novo').length;
+  document.getElementById('m-cand').textContent  = allTenders.filter(t => t.estado === 'candidatar').length;
+  document.getElementById('m-urg').textContent   = allTenders.filter(t => {
+    if (!t.deadline) return false;
+    const dl = new Date(t.deadline);
+    return dl >= now && dl <= d14;
+  }).length;
+}
+
+function applyFilter() {
+  const fSource = document.getElementById('f-source').value;
+  const fEstado = document.getElementById('f-estado').value;
+  const fGrupo  = document.getElementById('f-grupo').value;
+  const fSearch = document.getElementById('f-search').value.toLowerCase();
+  const filtered = allTenders.filter(t => {
+    if (fSource && (t.source||'ted') !== fSource) return false;
+    if (fEstado && t.estado !== fEstado) return false;
+    if (fGrupo  && t.grupo  !== fGrupo)  return false;
+    if (fSearch && !(t.title||'').toLowerCase().includes(fSearch) &&
+                   !(t.entity_name||'').toLowerCase().includes(fSearch)) return false;
+    return true;
+  });
+  renderTable(filtered);
+}
+
+function daysUntil(dl) {
+  if (!dl) return null;
+  const diff = Math.round((new Date(dl) - new Date()) / 86400000);
+  return diff;
+}
+
+function scoreClass(s) {
+  if (s >= 30) return 'score-hi';
+  if (s >= 15) return 'score-md';
+  return 'score-lo';
+}
+
+const SRC_LABEL = { ted:'TED', base:'BASE', dr:'DR' };
+
+function renderTable(tenders) {
+  const tbody = document.getElementById('tenders-body');
+  if (!tenders.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum concurso encontrado.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = tenders.map(t => {
+    const days  = daysUntil(t.deadline);
+    const dlStr = t.deadline
+      ? `<span class="dl${days !== null && days < 14 ? ' red' : ''}">${t.deadline}${days !== null ? ` (${days}d)` : ''}</span>`
+      : '<span class="dl">—</span>';
+    const src  = t.source || 'ted';
+    const link = t.pdf_url || t.url || '';
+    const extLink = link
+      ? `<a class="pdf-link" href="${escapeHtml(link)}" target="_blank">↗ ver</a>`
+      : '—';
+    const estadoOpts = ['novo','a_analisar','candidatar','ignorar','submetido','ganho','perdido']
+      .map(e => `<option value="${e}"${e===t.estado?' selected':''}>${ESTADO_PT[e]||e}</option>`).join('');
+    const subtitle = t.entity_name
+      ? escapeHtml(t.entity_name)
+      : escapeHtml(t.pub_num || '');
+
+    return `<tr>
+      <td><span class="score-badge ${scoreClass(t.score)}">${t.score}</span></td>
+      <td>
+        <div class="titulo">${escapeHtml(t.title||'—')}</div>
+        <div class="pub">${subtitle} · ${escapeHtml(t.grupo||'')}</div>
+      </td>
+      <td>${dlStr}</td>
+      <td style="font-size:11px;color:var(--ink2)">${escapeHtml(t.nature||t.grupo||'—')}</td>
+      <td><span class="src-badge src-${src}">${SRC_LABEL[src]||src.toUpperCase()}</span></td>
+      <td>
+        <select class="estado-select estado-${t.estado}" onchange="updateEstado(${t.entity_id}, this)">
+          ${estadoOpts}
+        </select>
+      </td>
+      <td>${extLink}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function updateEstado(entityId, sel) {
+  const estado = sel.value;
+  sel.className = `estado-select estado-${estado}`;
+  try {
+    const r = await fetch(`/api/twin/tender/${entityId}/estado`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ..._authHeaders() },
+      body: JSON.stringify({ estado }),
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      alert('Erro ao actualizar: ' + (d.error || 'desconhecido'));
+      load(); // reload to reset
+    } else {
+      // update local data
+      const t = allTenders.find(x => x.entity_id === entityId);
+      if (t) t.estado = estado;
+      updateMetrics();
+    }
+  } catch(e) {
+    alert('Erro de rede: ' + e);
+    load();
+  }
+}
+
+function escapeHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+try {
+  const u = JSON.parse(localStorage.getItem('aios_user') || '{}');
+  if (u.username) document.getElementById('user-info').textContent = u.username;
+} catch {}
+
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+print("architect agent ready")

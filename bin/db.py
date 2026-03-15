@@ -6,7 +6,7 @@ audit_log é imutável (apenas INSERT — UPDATE/DELETE bloqueados via evento OR
 """
 import os, pathlib, datetime
 from sqlalchemy import (
-    create_engine, event, Column, Integer, String, Text,
+    create_engine, event, Column, Integer, BigInteger, String, Text,
     DateTime, Boolean, ForeignKey, Index,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
@@ -54,7 +54,7 @@ class User(Base):
 
 class Job(Base):
     __tablename__ = "jobs"
-    id         = Column(String(64), primary_key=True)
+    id         = Column(BigInteger, primary_key=True, autoincrement=True)
     title      = Column(String(256), nullable=True)
     goal       = Column(Text, nullable=True)
     status     = Column(String(32), default="pending")   # pending/running/done/failed/waiting_approval/archived
@@ -75,7 +75,7 @@ class Job(Base):
 class Step(Base):
     __tablename__ = "steps"
     id       = Column(Integer, primary_key=True, autoincrement=True)
-    job_id   = Column(String(64), ForeignKey("jobs.id"), nullable=False)
+    job_id   = Column(BigInteger, ForeignKey("jobs.id"), nullable=False)
     tool     = Column(String(64), nullable=False)
     input    = Column(Text, nullable=True)
     result   = Column(Text, nullable=True)
@@ -92,7 +92,7 @@ class Approval(Base):
     tool         = Column(String(64), nullable=False)
     input        = Column(Text, nullable=True)
     status       = Column(String(32), default="pending")
-    job_id       = Column(String(64), nullable=True)
+    job_id       = Column(BigInteger, nullable=True)
     requested_at = Column(DateTime, default=datetime.datetime.utcnow)
     resolved_at  = Column(DateTime, nullable=True)
     resolved_by  = Column(Integer, ForeignKey("users.id"), nullable=True)

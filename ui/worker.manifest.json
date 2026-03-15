@@ -1,0 +1,11 @@
+{
+  "name": "AI-OS Worker",
+  "short_name": "Worker",
+  "description": "Tarefas de campo — AI-OS",
+  "start_url": "/worker",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1e293b",
+  "theme_color": "#3b82f6",
+  "icons": [{"src": "/favicon.ico", "sizes": "any", "type": "image/x-icon"}]
+}

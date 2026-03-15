@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI-OS Control Room</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%;background:#050d1a;color:#e2e8f0;font-family:'Inter',sans-serif;overflow:hidden}
+
+  /* Header */
+  #header{display:flex;align-items:center;justify-content:space-between;
+    padding:.5rem 1.2rem;background:#070f1f;border-bottom:1px solid #0f2040;height:48px}
+  #header h1{font-size:1rem;font-weight:700;color:#60a5fa;letter-spacing:.1em;text-transform:uppercase}
+  #clock{font-size:1.4rem;font-weight:700;color:#f8fafc;font-variant-numeric:tabular-nums}
+  #date-str{font-size:.75rem;color:#64748b;margin-left:.75rem}
+  #status-dot{width:.6rem;height:.6rem;border-radius:50%;background:#34d399;
+    box-shadow:0 0 6px #34d399;animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+  /* Incident badge in header */
+  #inc-badge{display:none;background:#7f1d1d;color:#f87171;font-size:.7rem;font-weight:700;
+    padding:.15rem .55rem;border-radius:2rem;border:1px solid #f87171;animation:pulse 2s infinite}
+
+  /* Grid */
+  #grid{display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    grid-template-rows:1fr 1fr;
+    gap:.5rem;padding:.5rem;
+    height:calc(100vh - 48px);
+    transition: opacity .4s ease}
+
+  /* Zone */
+  .zone{background:#070f1f;border:1px solid #0f2040;border-radius:.5rem;
+    overflow:hidden;display:flex;flex-direction:column;position:relative;
+    transition: border-color .5s ease, box-shadow .5s ease}
+  .zone-hdr{display:flex;align-items:center;justify-content:space-between;
+    padding:.45rem .85rem;border-bottom:1px solid #0f2040;flex-shrink:0}
+  .zone-title{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:#475569}
+  .zone-badge{font-size:.65rem;font-weight:700;padding:.1rem .45rem;border-radius:2rem}
+  .zone-body{flex:1;overflow:hidden;padding:.6rem .85rem;display:flex;flex-direction:column;gap:.35rem}
+
+  /* Zone accent colours (default) */
+  .zone.radar    .zone-hdr{border-bottom-color:#1d4ed8}
+  .zone.radar    .zone-title{color:#60a5fa}
+  .zone.ops      .zone-hdr{border-bottom-color:#0f5132}
+  .zone.ops      .zone-title{color:#34d399}
+  .zone.finance  .zone-hdr{border-bottom-color:#7c3aed}
+  .zone.finance  .zone-title{color:#a78bfa}
+  .zone.projects .zone-hdr{border-bottom-color:#9a3412}
+  .zone.projects .zone-title{color:#fb923c}
+  .zone.infra    .zone-hdr{border-bottom-color:#164e63}
+  .zone.infra    .zone-title{color:#67e8f9}
+  .zone.alerts   .zone-hdr{border-bottom-color:#7f1d1d}
+  .zone.alerts   .zone-title{color:#f87171}
+
+  /* Semáforo severity borders */
+  .zone.sev-crit{border-color:#7f1d1d;box-shadow:0 0 12px rgba(248,113,113,.25)}
+  .zone.sev-warn{border-color:#78350f;box-shadow:0 0 8px rgba(251,146,60,.15)}
+  .zone.sev-ok  {border-color:#064e3b}
+
+  /* Incident severity dot in zone header */
+  .sev-dot{width:.55rem;height:.55rem;border-radius:50%;flex-shrink:0;margin-left:.4rem}
+  .sev-dot.crit{background:#f87171;box-shadow:0 0 5px #f87171;animation:pulse 1.5s infinite}
+  .sev-dot.warn{background:#fb923c}
+  .sev-dot.ok  {background:#34d399}
+
+  /* Row items */
+  .row{display:flex;align-items:center;justify-content:space-between;
+    padding:.25rem 0;border-bottom:1px solid #0d1d35;font-size:.8rem;gap:.5rem}
+  .row:last-child{border-bottom:none}
+  .row .lbl{color:#94a3b8;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .row .val{color:#f8fafc;font-weight:600;white-space:nowrap;flex-shrink:0}
+  .row .tag{font-size:.65rem;font-weight:700;padding:.1rem .4rem;border-radius:2rem;flex-shrink:0}
+
+  /* Metrics row */
+  .metrics-row{display:flex;gap:.5rem;flex-shrink:0;margin-bottom:.25rem}
+  .m-card{flex:1;background:#0a1628;border:1px solid #0f2040;border-radius:.4rem;
+    padding:.4rem .6rem;text-align:center}
+  .m-card .mv{font-size:1.5rem;font-weight:700;color:#f8fafc;line-height:1}
+  .m-card .ml{font-size:.6rem;color:#64748b;text-transform:uppercase;margin-top:.15rem}
+
+  /* Status tags */
+  .tag.ok{background:#064e3b;color:#34d399}
+  .tag.warn{background:#451a03;color:#fb923c}
+  .tag.err{background:#450a0a;color:#f87171}
+  .tag.info{background:#1e3a5f;color:#60a5fa}
+  .tag.purple{background:#2e1065;color:#a78bfa}
+
+  /* Alert rows */
+  .alert-row{display:flex;align-items:flex-start;gap:.5rem;
+    padding:.3rem 0;border-bottom:1px solid #0d1d35;font-size:.78rem}
+  .alert-row:last-child{border-bottom:none}
+  .alert-dot{width:.45rem;height:.45rem;border-radius:50%;flex-shrink:0;margin-top:.3rem}
+  .alert-dot.crit{background:#f87171;box-shadow:0 0 4px #f87171}
+  .alert-dot.warn{background:#fb923c}
+  .alert-dot.info{background:#60a5fa}
+  .alert-dot.high{background:#f87171;box-shadow:0 0 4px #f87171}
+  .alert-dot.mid{background:#fb923c}
+  .alert-dot.low{background:#fbbf24}
+  .alert-txt{color:#e2e8f0;line-height:1.4;flex:1}
+  .alert-resolve{background:#0a1628;border:1px solid #1e3a5f;color:#475569;
+    font-size:.65rem;padding:.1rem .4rem;border-radius:.25rem;cursor:pointer;white-space:nowrap}
+  .alert-resolve:hover{border-color:#3b82f6;color:#60a5fa}
+
+  /* Worker chips */
+  .chip{display:inline-flex;align-items:center;gap:.3rem;background:#0a1628;
+    border:1px solid #0f2040;border-radius:2rem;padding:.2rem .55rem;font-size:.72rem;margin:.1rem}
+  .chip-dot{width:.45rem;height:.45rem;border-radius:50%;background:#34d399}
+  .chip-dot.idle{background:#64748b}
+
+  /* Infra service rows */
+  .svc-row{display:flex;align-items:center;justify-content:space-between;
+    padding:.2rem 0;font-size:.78rem}
+  .svc-name{color:#94a3b8}
+  .svc-ok{color:#34d399;font-weight:700}
+  .svc-err{color:#f87171;font-weight:700}
+
+  /* Last updated */
+  .last-upd{font-size:.6rem;color:#1e3a5f;position:absolute;bottom:.3rem;right:.6rem}
+
+  /* Finance amount */
+  .amt-ok{color:#34d399}
+  .amt-warn{color:#fb923c}
+  .amt-err{color:#f87171}
+
+  /* Fullscreen btn */
+  #fs-btn{background:none;border:1px solid #1e3a5f;color:#475569;
+    padding:.2rem .6rem;border-radius:.3rem;cursor:pointer;font-size:.7rem}
+  #fs-btn:hover{border-color:#3b82f6;color:#60a5fa}
+
+  /* Sound btn */
+  #snd-btn{background:none;border:1px solid #1e3a5f;color:#475569;
+    padding:.2rem .6rem;border-radius:.3rem;cursor:pointer;font-size:.7rem}
+  #snd-btn:hover{border-color:#fb923c;color:#fb923c}
+
+  /* Wall mode label */
+  #wall-label{font-size:.7rem;color:#1d4ed8;display:none;animation:pulse 2s infinite}
+
+  /* Big timer (wall mode) */
+  .big-timer{text-align:center;padding:.75rem 0}
+  .big-timer .bt-label{font-size:.65rem;color:#64748b;text-transform:uppercase;letter-spacing:.1em}
+  .big-timer .bt-value{font-size:2.8rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+  .big-timer .bt-name{font-size:.8rem;color:#94a3b8;margin-top:.15rem}
+
+  /* Empty state */
+  .empty{color:#1e3a5f;font-size:.75rem;padding:.5rem 0}
+
+  /* Slide transition for wall mode */
+  @keyframes slideIn{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}
+  .wall-slide{animation:slideIn .4s ease}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div style="display:flex;align-items:center;gap:.75rem">
+    <div id="status-dot"></div>
+    <h1>AI-OS Control Room</h1>
+    <span id="inc-badge">0 CRIT</span>
+    <span id="wall-label">● WALL</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:.5rem">
+    <span id="clock">--:--:--</span>
+    <span id="date-str"></span>
+    <button id="snd-btn" onclick="toggleSound()" title="Sound alerts">🔇</button>
+    <button id="fs-btn" onclick="toggleFS()">⛶ Fullscreen</button>
+  </div>
+</div>
+
+<div id="grid">
+
+  <!-- RADAR -->
+  <div class="zone radar" id="zone-radar">
+    <div class="zone-hdr">
+      <span class="zone-title">📡 Radar — Oportunidades</span>
+      <span class="zone-badge tag info" id="r-count">—</span>
+    </div>
+    <div class="zone-body" id="z-radar">
+      <div class="empty">A carregar...</div>
+    </div>
+    <span class="last-upd" id="upd-radar"></span>
+  </div>
+
+  <!-- OPERAÇÃO -->
+  <div class="zone ops" id="zone-ops">
+    <div class="zone-hdr">
+      <span class="zone-title">👷 Operação — Workers</span>
+      <span class="zone-badge tag ok" id="w-count">—</span>
+    </div>
+    <div class="zone-body" id="z-ops">
+      <div class="empty">A carregar...</div>
+    </div>
+    <span class="last-upd" id="upd-ops"></span>
+  </div>
+
+  <!-- FINANCEIRO -->
+  <div class="zone finance" id="zone-finance">
+    <div class="zone-hdr">
+      <span class="zone-title">💰 Financeiro</span>
+      <span class="zone-badge tag purple" id="f-count">—</span>
+    </div>
+    <div class="zone-body" id="z-finance">
+      <div class="empty">A carregar...</div>
+    </div>
+    <span class="last-upd" id="upd-finance"></span>
+  </div>
+
+  <!-- PROJETOS / CASES -->
+  <div class="zone projects" id="zone-projects">
+    <div class="zone-hdr">
+      <span class="zone-title">📁 Projetos — Cases</span>
+      <span class="zone-badge tag warn" id="p-count">—</span>
+    </div>
+    <div class="zone-body" id="z-projects">
+      <div class="empty">A carregar...</div>
+    </div>
+    <span class="last-upd" id="upd-projects"></span>
+  </div>
+
+  <!-- INFRAESTRUTURA -->
+  <div class="zone infra" id="zone-infra">
+    <div class="zone-hdr">
+      <span class="zone-title">🖥 Infraestrutura</span>
+      <span class="zone-badge tag info" id="i-status">—</span>
+    </div>
+    <div class="zone-body" id="z-infra">
+      <div class="empty">A carregar...</div>
+    </div>
+    <span class="last-upd" id="upd-infra"></span>
+  </div>
+
+  <!-- INCIDENTES -->
+  <div class="zone alerts" id="zone-alerts">
+    <div class="zone-hdr">
+      <span class="zone-title">🚨 Incidentes</span>
+      <span class="zone-badge tag err" id="a-count">—</span>
+    </div>
+    <div class="zone-body" id="z-alerts">
+      <div class="empty">A carregar...</div>
+    </div>
+    <span class="last-upd" id="upd-alerts"></span>
+  </div>
+
+</div>
+
+<script>
+// ── clock ──────────────────────────────────────────────────────────────────────
+function tickClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toLocaleTimeString('pt-PT');
+  document.getElementById('date-str').textContent = now.toLocaleDateString('pt-PT',
+    {weekday:'short', day:'2-digit', month:'short'});
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+function toggleFS() {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+  else document.exitFullscreen();
+}
+document.addEventListener('keydown', e => { if (e.key === 'F11') { e.preventDefault(); toggleFS(); }});
+
+function fmtEur(n) {
+  return '€' + Number(n).toLocaleString('pt-PT', {minimumFractionDigits:0, maximumFractionDigits:0});
+}
+function fmtTime(s) { return s ? String(s).slice(11,16) : ''; }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function upd(id) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = 'upd ' + new Date().toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'});
+}
+
+// ── Sound ──────────────────────────────────────────────────────────────────────
+let soundEnabled = false;
+let _lastCritCount = 0;
+let _audioCtx = null;
+
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  document.getElementById('snd-btn').textContent = soundEnabled ? '🔊' : '🔇';
+}
+
+function _beep(freq=440, dur=0.15, vol=0.3) {
+  try {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc  = _audioCtx.createOscillator();
+    const gain = _audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(_audioCtx.destination);
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol, _audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, _audioCtx.currentTime + dur);
+    osc.start(_audioCtx.currentTime);
+    osc.stop(_audioCtx.currentTime + dur);
+  } catch(_) {}
+}
+
+function alertSound() {
+  if (!soundEnabled) return;
+  // Two-tone alert
+  setTimeout(() => _beep(880, 0.12), 0);
+  setTimeout(() => _beep(660, 0.15), 150);
+}
+
+// ── Semáforo helpers ───────────────────────────────────────────────────────────
+function setZoneSeverity(zoneId, severity) {
+  const el = document.getElementById(zoneId);
+  if (!el) return;
+  el.classList.remove('sev-crit','sev-warn','sev-ok');
+  if (severity === 'crit') el.classList.add('sev-crit');
+  else if (severity === 'warn') el.classList.add('sev-warn');
+  else el.classList.add('sev-ok');
+}
+
+// Map incident source → zone
+const SRC_ZONE = {
+  workers: 'zone-ops',
+  tasks:   'zone-projects',
+  finance: 'zone-finance',
+  tender:  'zone-radar',
+  infra:   'zone-infra',
+  bank:    'zone-finance',
+};
+
+function applyIncidentSeverities(incidents) {
+  const zoneSev = {};
+  for (const inc of incidents) {
+    const zid = SRC_ZONE[inc.source];
+    if (!zid) continue;
+    const cur = zoneSev[zid] || 'ok';
+    if (inc.severity === 'crit') zoneSev[zid] = 'crit';
+    else if (inc.severity === 'warn' && cur !== 'crit') zoneSev[zid] = 'warn';
+  }
+  // Incidents zone itself
+  const crits = incidents.filter(i => i.severity === 'crit').length;
+  zoneSev['zone-alerts'] = crits > 0 ? 'crit' : incidents.length > 0 ? 'warn' : 'ok';
+
+  // Apply to all zones (default ok if no incident)
+  ['zone-radar','zone-ops','zone-finance','zone-projects','zone-infra','zone-alerts'].forEach(zid => {
+    setZoneSeverity(zid, zoneSev[zid] || 'ok');
+  });
+
+  // Header badge
+  const badge = document.getElementById('inc-badge');
+  if (crits > 0) {
+    badge.style.display = '';
+    badge.textContent   = `${crits} CRIT`;
+    document.title = `[${crits}!] AI-OS Control Room`;
+  } else {
+    badge.style.display = 'none';
+    document.title = 'AI-OS Control Room';
+  }
+
+  // Sound when new crits appear
+  if (crits > _lastCritCount) alertSound();
+  _lastCritCount = crits;
+}
+
+// ── API (no auth needed for /api/control/overview) ────────────────────────────
+async function fetchOverview() {
+  try {
+    const r = await fetch('/api/control/overview');
+    if (!r.ok) return null;
+    return r.json();
+  } catch(e) { return null; }
+}
+
+// ── JWT helper (needed only for incident resolve button) ──────────────────────
+const _JWT = localStorage.getItem('aios_jwt');
+
+async function resolveIncident(id, btn) {
+  if (!_JWT) { alert('Login necessário para resolver incidentes'); return; }
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const r = await fetch(`/api/incidents/${id}/resolve`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + _JWT, 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    if (r.ok) { refresh(); }
+  } catch(_) { btn.disabled = false; btn.textContent = 'Resolver'; }
+}
+
+// ── RADAR ──────────────────────────────────────────────────────────────────────
+function renderRadar(tenders) {
+  const el = document.getElementById('z-radar');
+  if (!tenders || !tenders.length) {
+    el.innerHTML = '<div class="empty">Sem oportunidades no radar</div>';
+    document.getElementById('r-count').textContent = '0';
+    return;
+  }
+  document.getElementById('r-count').textContent = tenders.length;
+  el.innerHTML = tenders.slice(0,6).map(t => {
+    const meta  = t.metadata || {};
+    const score = meta.score || 0;
+    const scoreCls = score >= 8 ? 'err' : score >= 6 ? 'warn' : 'info';
+    const deadline = meta.deadline ? meta.deadline.slice(0,10) : '—';
+    const days = meta.deadline
+      ? Math.ceil((new Date(meta.deadline) - new Date()) / 86400000)
+      : null;
+    const daysTxt = days !== null ? (days < 0 ? `<span style="color:#f87171">${Math.abs(days)}d atraso</span>` : `${days}d`) : '—';
+    return `<div class="row">
+      <span class="lbl" title="${esc(t.name)}">${esc(t.name)}</span>
+      <span class="tag ${scoreCls}" style="margin-right:.3rem">${score}</span>
+      <span class="val" style="font-size:.7rem;color:#64748b">${daysTxt}</span>
+    </div>`;
+  }).join('');
+  upd('upd-radar');
+}
+
+// ── OPERAÇÃO ───────────────────────────────────────────────────────────────────
+function renderOps(data) {
+  const el = document.getElementById('z-ops');
+  const workers  = data.workers  || [];
+  const tasks    = data.tasks    || [];
+  const online   = workers.filter(w => w.online);
+  document.getElementById('w-count').textContent = `${online.length}/${workers.length}`;
+
+  let html = '';
+  const tasksDoing = tasks.filter(t => t.status === 'in_progress' || t.status === 'running');
+  const tasksPend  = tasks.filter(t => t.status === 'pending' || t.status === 'open');
+  html += `<div class="metrics-row">
+    <div class="m-card"><div class="mv">${online.length}</div><div class="ml">Online</div></div>
+    <div class="m-card"><div class="mv" style="color:#fb923c">${tasksDoing.length}</div><div class="ml">Em curso</div></div>
+    <div class="m-card"><div class="mv" style="color:#60a5fa">${tasksPend.length}</div><div class="ml">Pendentes</div></div>
+  </div>`;
+  if (workers.length) {
+    html += `<div style="display:flex;flex-wrap:wrap;gap:.15rem;margin-bottom:.25rem">`;
+    html += workers.slice(0,10).map(w => {
+      const dotCls = w.online ? '' : 'idle';
+      return `<span class="chip"><span class="chip-dot ${dotCls}"></span>${esc(w.id || w.worker_id || '?')}</span>`;
+    }).join('');
+    html += `</div>`;
+  }
+  const recentTasks = [...tasksDoing, ...tasksPend].slice(0,4);
+  if (recentTasks.length) {
+    html += recentTasks.map(t => `<div class="row">
+      <span class="lbl">${esc(t.title || t.goal || t.task_type || '?')}</span>
+      <span class="tag ${t.status === 'in_progress' || t.status === 'running' ? 'ok' : 'info'}">${esc(t.status)}</span>
+    </div>`).join('');
+  } else {
+    html += '<div class="empty">Sem tarefas activas</div>';
+  }
+
+  el.innerHTML = html;
+  upd('upd-ops');
+}
+
+// ── FINANCEIRO ─────────────────────────────────────────────────────────────────
+function renderFinance(data) {
+  const el     = document.getElementById('z-finance');
+  const obls   = data.obligations || [];
+  const payouts = data.payouts || [];
+  const stats  = data.finance_stats || {};
+  const bankUnmatched = data.bank_unmatched || 0;
+
+  const oblCount = obls.filter(o => parseInt(o.days_left) <= 7).length;
+  document.getElementById('f-count').textContent = `${oblCount} urgente${oblCount !== 1 ? 's' : ''}`;
+
+  let html = `<div class="metrics-row">
+    <div class="m-card">
+      <div class="mv ${stats.total_vencido > 0 ? 'amt-err' : 'amt-ok'}">${fmtEur(stats.total_pendente || 0)}</div>
+      <div class="ml">Pendente</div>
+    </div>
+    <div class="m-card">
+      <div class="mv amt-err">${fmtEur(stats.total_vencido || 0)}</div>
+      <div class="ml">Vencido</div>
+    </div>
+    <div class="m-card">
+      <div class="mv ${bankUnmatched > 0 ? 'amt-warn' : ''}">${bankUnmatched}</div>
+      <div class="ml">Por recon.</div>
+    </div>
+  </div>`;
+
+  if (obls.length) {
+    html += obls.slice(0,4).map(o => {
+      const days = parseInt(o.days_left);
+      const cls  = days < 0 ? 'err' : days <= 3 ? 'warn' : 'info';
+      const daysTxt = days < 0 ? `VENCIDA ${Math.abs(days)}d` : `${days}d`;
+      const amt  = o.amount ? fmtEur(o.amount) : '—';
+      return `<div class="row">
+        <span class="lbl">${esc(o.label)}</span>
+        <span style="font-size:.72rem;color:#64748b;margin-right:.3rem">${amt}</span>
+        <span class="tag ${cls}">${daysTxt}</span>
+      </div>`;
+    }).join('');
+  }
+
+  if (payouts.length) {
+    const total = payouts.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    html += `<div class="row">
+      <span class="lbl">RH pendente (${payouts.length} workers)</span>
+      <span class="val amt-warn">${fmtEur(total)}</span>
+    </div>`;
+  }
+
+  el.innerHTML = html || '<div class="empty">Sem dados financeiros</div>';
+  upd('upd-finance');
+}
+
+// ── PROJETOS ───────────────────────────────────────────────────────────────────
+function renderProjects(data) {
+  const el    = document.getElementById('z-projects');
+  const cases = data.cases || [];
+  const ideas = data.ideas || [];
+
+  document.getElementById('p-count').textContent = `${cases.length} cases`;
+
+  let html = '';
+  if (cases.length) {
+    html += cases.slice(0,5).map(c => {
+      const statusCls = c.status === 'open' ? 'ok' : c.status === 'blocked' ? 'err' : 'info';
+      return `<div class="row">
+        <span class="lbl">${esc(c.title || c.name || c.id)}</span>
+        <span class="tag ${statusCls}">${esc(c.status || '—')}</span>
+      </div>`;
+    }).join('');
+  } else {
+    html += '<div class="empty">Sem cases activos</div>';
+  }
+
+  if (ideas.length) {
+    html += `<div style="margin-top:.4rem;font-size:.65rem;text-transform:uppercase;color:#475569;font-weight:700">Ideias</div>`;
+    html += ideas.slice(0,3).map(i => `<div class="row">
+      <span class="lbl">${esc(i.title)}</span>
+      <span class="tag ${i.status === 'analyzed' ? 'ok' : 'info'}">${esc(i.status)}</span>
+    </div>`).join('');
+  }
+
+  el.innerHTML = html;
+  upd('upd-projects');
+}
+
+// ── INFRA ──────────────────────────────────────────────────────────────────────
+function renderInfra(data) {
+  const el     = document.getElementById('z-infra');
+  const health = data.health || {};
+  const svcs   = health.services || [];
+  const backlog= health.backlog  || {};
+
+  const allOk  = svcs.every(s => s.ok !== false);
+  document.getElementById('i-status').textContent = allOk ? 'OK' : 'DEGRADADO';
+  document.getElementById('i-status').className   = 'zone-badge tag ' + (allOk ? 'ok' : 'err');
+
+  let html = `<div class="metrics-row">
+    <div class="m-card"><div class="mv">${backlog.pending || 0}</div><div class="ml">Pending</div></div>
+    <div class="m-card"><div class="mv" style="color:#34d399">${backlog.done_1h || 0}</div><div class="ml">Done 1h</div></div>
+    <div class="m-card"><div class="mv" style="color:#f87171">${backlog.failed || 0}</div><div class="ml">Failed</div></div>
+  </div>`;
+
+  if (svcs.length) {
+    html += svcs.slice(0,8).map(s => `<div class="svc-row">
+      <span class="svc-name">${esc(s.name)}</span>
+      <span class="${s.ok !== false ? 'svc-ok' : 'svc-err'}">${s.ok !== false ? '●' : '✗'}</span>
+    </div>`).join('');
+  } else {
+    html += `<div class="svc-row"><span class="svc-name">Postgres</span><span class="svc-ok">●</span></div>`;
+    html += `<div class="svc-row"><span class="svc-name">agent-router</span><span class="${health.router_ok ? 'svc-ok' : 'svc-err'}">${health.router_ok ? '●' : '✗'}</span></div>`;
+  }
+
+  el.innerHTML = html;
+  upd('upd-infra');
+}
+
+// ── INCIDENTES (Sprint M) ──────────────────────────────────────────────────────
+function renderIncidents(incidents, agentAlerts) {
+  const el = document.getElementById('z-alerts');
+  const all = [...(incidents || [])];
+
+  // Add unread agent alerts as info-level items
+  (agentAlerts || []).filter(a => !a.is_read).forEach(a => {
+    all.push({ id: 'ag_' + a.id, source: 'agent', kind: 'suggestion',
+               severity: a.score >= 9 ? 'crit' : a.score >= 7 ? 'warn' : 'info',
+               title: a.title, status: 'open', _agent: true });
+  });
+
+  const open = all.filter(a => a.status === 'open');
+  document.getElementById('a-count').textContent = open.length || '0';
+
+  if (!open.length) {
+    el.innerHTML = '<div class="empty" style="color:#1a3020">Sem incidentes activos ✓</div>';
+    upd('upd-alerts');
+    return;
+  }
+
+  el.innerHTML = open.slice(0, 8).map(a => {
+    const dotCls = a.severity === 'crit' ? 'crit' : a.severity === 'warn' ? 'warn' : 'info';
+    const resolveBtn = !a._agent && typeof a.id === 'number'
+      ? `<button class="alert-resolve" onclick="resolveIncident(${a.id}, this)">Resolver</button>`
+      : '';
+    return `<div class="alert-row">
+      <span class="alert-dot ${dotCls}"></span>
+      <span class="alert-txt">${esc(a.title)}</span>
+      ${resolveBtn}
+    </div>`;
+  }).join('');
+  upd('upd-alerts');
+}
+
+// ── Big Timer (Sprint N — next fiscal obligation) ──────────────────────────────
+function renderBigTimer(obligations) {
+  // Only used in wall mode — renders into z-finance when rotated
+  const next = (obligations || [])
+    .filter(o => parseInt(o.days_left) >= 0)
+    .sort((a,b) => parseInt(a.days_left) - parseInt(b.days_left))[0];
+
+  if (!next) return '';
+  const days = parseInt(next.days_left);
+  const color = days <= 3 ? '#f87171' : days <= 7 ? '#fb923c' : '#34d399';
+  return `<div class="big-timer">
+    <div class="bt-label">Próxima obrigação fiscal</div>
+    <div class="bt-value" style="color:${color}">${days}d</div>
+    <div class="bt-name">${esc(next.label)}</div>
+  </div>`;
+}
+
+// ── WALL MODE (Sprint N) ───────────────────────────────────────────────────────
+const WALL_MODE = new URLSearchParams(location.search).get('wall') === '1';
+let _wallView   = 0;  // 0=overview, 1=finance-focus, 2=ops-focus
+let _lastData   = null;
+
+if (WALL_MODE) {
+  document.getElementById('wall-label').style.display = '';
+}
+
+function applyWallView(view, data) {
+  const grid = document.getElementById('grid');
+  grid.classList.remove('wall-slide');
+  void grid.offsetWidth; // force reflow
+  grid.classList.add('wall-slide');
+
+  if (view === 0 || !data) {
+    // Normal 6-zone layout
+    grid.style.gridTemplateColumns = '1fr 1fr 1fr';
+    grid.style.gridTemplateRows    = '1fr 1fr';
+    ['zone-radar','zone-ops','zone-finance','zone-projects','zone-infra','zone-alerts'].forEach(id => {
+      document.getElementById(id).style.display = '';
+    });
+    return;
+  }
+
+  if (view === 1) {
+    // Finance focus: hide some zones, enlarge finance + incidents
+    grid.style.gridTemplateColumns = '1fr 1fr';
+    grid.style.gridTemplateRows    = '1fr 1fr';
+    ['zone-radar','zone-ops'].forEach(id => { document.getElementById(id).style.display = 'none'; });
+    ['zone-finance','zone-projects','zone-infra','zone-alerts'].forEach(id => {
+      document.getElementById(id).style.display = '';
+    });
+    // Big timer in finance zone
+    const finEl = document.getElementById('z-finance');
+    if (data.obligations) {
+      const bt = renderBigTimer(data.obligations);
+      if (bt && !finEl.querySelector('.big-timer')) {
+        finEl.insertAdjacentHTML('beforeend', bt);
+      }
+    }
+    return;
+  }
+
+  if (view === 2) {
+    // Ops focus: radar + ops + infra large
+    grid.style.gridTemplateColumns = '1fr 1fr 1fr';
+    grid.style.gridTemplateRows    = '1fr';
+    ['zone-finance','zone-projects','zone-alerts'].forEach(id => { document.getElementById(id).style.display = 'none'; });
+    ['zone-radar','zone-ops','zone-infra'].forEach(id => { document.getElementById(id).style.display = ''; });
+    return;
+  }
+}
+
+// ── MAIN REFRESH ───────────────────────────────────────────────────────────────
+async function refresh() {
+  const d = await fetchOverview();
+  if (!d || !d.ok) return;
+  _lastData = d;
+
+  const incidents = d.incidents || [];
+  applyIncidentSeverities(incidents);
+
+  renderRadar(d.tenders);
+  renderOps(d);
+  renderFinance(d);
+  renderProjects(d);
+  renderInfra(d);
+  renderIncidents(incidents, d.alerts);
+
+  if (WALL_MODE) applyWallView(_wallView, d);
+}
+
+refresh();
+setInterval(refresh, 12000);  // 12s full refresh
+
+// Wall rotation — every 30s cycle through views
+if (WALL_MODE) {
+  setInterval(() => {
+    _wallView = (_wallView + 1) % 3;
+    if (_lastData) applyWallView(_wallView, _lastData);
+  }, 30000);
+}
+</script>
+</body>
+</html>

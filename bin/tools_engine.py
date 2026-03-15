@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-ai-os Tools Engine v1
+ai-os Tools Engine v2
 Executa tools tipadas com validação, sandbox e audit log.
-Tools: bash_safe, write_file, read_file, git_commit, git_status
+Tools: bash_safe, write_file, read_file, git_commit, git_status, llm
+Routing híbrido: Claude (Anthropic) / Ollama com fallback automático.
 """
-import sys, os, json, subprocess, pathlib, datetime, hashlib
+import sys, os, json, subprocess, pathlib, datetime, hashlib, urllib.request, urllib.error
 
 AIOS_ROOT = pathlib.Path(os.environ.get("AIOS_ROOT", os.path.expanduser("~/ai-os"))).resolve()
 WORKSPACE = AIOS_ROOT / "workspace"
@@ -149,6 +150,217 @@ def check_approved(tool, inp):
             return True
     return False
 
+# ── LLM routing ───────────────────────────────────────────────────────────────
+
+_model_router   = None
+_provider_health = None
+
+def _get_model_router():
+    global _model_router
+    if _model_router is None:
+        try:
+            import importlib.util as _ilu
+            spec = _ilu.spec_from_file_location("model_router", AIOS_ROOT / "bin" / "model_router.py")
+            mod  = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _model_router = mod
+        except Exception as e:
+            log(f"model_router não carregado: {e}")
+            _model_router = False
+    return _model_router if _model_router else None
+
+
+def _get_provider_health():
+    global _provider_health
+    if _provider_health is None:
+        try:
+            import importlib.util as _ilu
+            spec = _ilu.spec_from_file_location("provider_health", AIOS_ROOT / "bin" / "provider_health.py")
+            mod  = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _provider_health = mod
+        except Exception as e:
+            log(f"provider_health não carregado: {e}")
+            _provider_health = False
+    return _provider_health if _provider_health else None
+
+
+def _call_claude(prompt: str, model: str, system: str = None) -> dict:
+    """Chama Anthropic API directamente via urllib."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return {"ok": False, "error": "ANTHROPIC_API_KEY_MISSING"}
+
+    messages = [{"role": "user", "content": prompt}]
+    body = json.dumps({
+        "model":      model,
+        "max_tokens": 4096,
+        "messages":   messages,
+        **({"system": system} if system else {}),
+    }).encode()
+
+    try:
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=body,
+            headers={
+                "x-api-key":         api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            }
+        )
+        with urllib.request.urlopen(req, timeout=60) as r:
+            resp = json.loads(r.read())
+        text = resp.get("content", [{}])[0].get("text", "")
+        usage = resp.get("usage", {})
+        # regista tokens no credit monitor (best-effort)
+        try:
+            import importlib.util as _ilu
+            spec = _ilu.spec_from_file_location("credit_monitor", AIOS_ROOT / "bin" / "credit_monitor.py")
+            cm   = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(cm)
+            cm.record_usage(usage.get("input_tokens", 0), usage.get("output_tokens", 0), model)
+        except Exception:
+            pass
+        return {"ok": True, "text": text, "usage": usage, "provider": "claude", "model": model}
+
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode(errors="replace")[:300]
+        code = e.code
+        if   code == 401: err = "AUTH_ERROR"
+        elif code == 429: err = "RATE_LIMIT"
+        elif code >= 500: err = "SERVER_ERROR"
+        else:             err = f"HTTP_{code}"
+        return {"ok": False, "error": err, "detail": err_body, "recoverable": code in (429, 500, 503)}
+
+    except Exception as e:
+        return {"ok": False, "error": f"NETWORK_{type(e).__name__}", "detail": str(e), "recoverable": True}
+
+
+def _call_ollama(prompt: str, model: str, system: str = None) -> dict:
+    """Chama Ollama local via urllib."""
+    ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+    msg = [{"role": "user", "content": prompt}]
+    if system:
+        msg = [{"role": "system", "content": system}] + msg
+
+    body = json.dumps({
+        "model":    model,
+        "messages": msg,
+        "stream":   False,
+    }).encode()
+
+    try:
+        req = urllib.request.Request(
+            f"{ollama_url}/api/chat",
+            data=body,
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=120) as r:
+            resp = json.loads(r.read())
+        text = resp.get("message", {}).get("content", "")
+        return {"ok": True, "text": text, "provider": "ollama", "model": model}
+    except Exception as e:
+        return {"ok": False, "error": f"OLLAMA_{type(e).__name__}", "detail": str(e), "recoverable": False}
+
+
+def call_llm(prompt: str, job: dict = None, system: str = None) -> dict:
+    """
+    Chama o provider LLM certo com fallback automático.
+    Regista provider escolhido, motivo e se houve fallback.
+    """
+    if job is None: job = {}
+
+    mr = _get_model_router()
+    ph = _get_provider_health()
+
+    # Obter estado de saúde dos providers
+    system_state = {}
+    if ph:
+        try:
+            ps = ph.get_provider_state()
+            system_state = {
+                "claude_available": ps["claude"]["available"],
+                "ollama_available": ps["ollama"]["available"],
+            }
+        except Exception:
+            pass
+
+    # Decidir provider
+    if mr:
+        decision = mr.decide_model(job=job, system_state=system_state)
+    else:
+        # fallback se model_router não carregar
+        decision = {
+            "provider":         "claude",
+            "model":            os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6"),
+            "reason":           "model_router_unavailable",
+            "fallback_allowed": True,
+        }
+
+    provider = decision.get("provider")
+    model    = decision.get("model")
+    reason   = decision.get("reason", "")
+    job_id   = job.get("id", job.get("job_id", ""))
+
+    if not provider:
+        log(f"LLM job={job_id} error=all_providers_unavailable")
+        return {"ok": False, "error": decision.get("error", "no_provider"), "job_id": job_id}
+
+    log(f"LLM job={job_id} provider={provider} model={model} reason={reason}")
+
+    # Chamar provider escolhido
+    if provider == "claude":
+        result = _call_claude(prompt, model, system)
+    else:
+        result = _call_ollama(prompt, model, system)
+
+    # Fallback automático se falhou e é recuperável
+    if not result["ok"] and decision.get("fallback_allowed"):
+        orig_err   = result.get("error", "")
+        fallback_p = "ollama" if provider == "claude" else "claude"
+        fallback_m = os.environ.get("OLLAMA_MODEL", "qwen2.5:14b") if fallback_p == "ollama" \
+                     else os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
+
+        log(f"LLM job={job_id} fallback provider={fallback_p} original_error={orig_err}")
+
+        if fallback_p == "claude":
+            result = _call_claude(prompt, fallback_m, system)
+        else:
+            result = _call_ollama(prompt, fallback_m, system)
+
+        result["fallback"]         = True
+        result["original_provider"] = provider
+        result["original_error"]    = orig_err
+
+        if ph:
+            try:
+                ph.record_routing(fallback_p, f"fallback:{orig_err}", job_id=job_id,
+                                  fallback=True, original_error=orig_err)
+            except Exception:
+                pass
+    else:
+        if ph:
+            try:
+                ph.record_routing(provider, reason, job_id=job_id, fallback=False)
+            except Exception:
+                pass
+
+    result["job_id"]   = job_id
+    result["decision"] = decision
+    return result
+
+
+def tool_llm(p: dict) -> dict:
+    """Tool 'llm': chama o provider LLM com routing híbrido."""
+    prompt = p.get("prompt") or p.get("text") or p.get("message") or ""
+    system = p.get("system")
+    job    = p.get("job") or {}
+    if not prompt:
+        return {"ok": False, "error": "prompt obrigatório"}
+    return call_llm(prompt, job=job, system=system)
+
+
 TOOLS = {
     "bash_safe":   lambda p: tool_bash_safe(p.get("cmd",""), p.get("cwd")),
     "bash":        lambda p: tool_bash_safe(p.get("cmd",""), p.get("cwd")),
@@ -156,6 +368,7 @@ TOOLS = {
     "read_file":   lambda p: tool_read_file(p.get("path","")),
     "git_commit":  lambda p: tool_git_commit(p.get("msg","auto-commit"), p.get("cwd")),
     "git_status":  lambda p: tool_git_status(p.get("cwd")),
+    "llm":         tool_llm,
 }
 
 def run(steps, log_path=None):

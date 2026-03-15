@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-OS Factory</title>
+<style>
+:root{
+  --bg:#04060f;--panel:#0b0f1e;--border:#1a2040;
+  --blue:#4f8eff;--cyan:#00d4ff;--green:#22c55e;
+  --yellow:#fbbf24;--red:#f87171;--gray:#64748b;
+  --ink:#e2e8f8;--ink2:#8892b0;--ok:#22c55e;--warn:#fbbf24;--crit:#f87171;
+  --font:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:13px;min-height:100vh}
+a{color:var(--blue);text-decoration:none}
+
+#topbar{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 20px;background:var(--panel);
+  border-bottom:1px solid var(--border);
+  position:sticky;top:0;z-index:100;
+}
+#topbar h1{font-size:15px;color:var(--cyan);letter-spacing:2px}
+#topbar .ts{font-size:11px;color:var(--gray);margin-left:auto}
+
+/* METRICS */
+#metrics{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:12px;
+  padding:16px;
+}
+.metric{
+  background:var(--panel);border:1px solid var(--border);border-radius:8px;
+  padding:14px 16px;
+}
+.metric .label{font-size:10px;color:var(--ink2);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.metric .value{font-size:22px;color:var(--cyan);font-weight:bold}
+.metric .sub{font-size:11px;color:var(--gray);margin-top:4px}
+
+/* LOTES TABLE */
+#lotes-section{padding:0 16px 16px}
+.section-head{
+  font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--ink2);
+  padding:8px 0 8px;display:flex;align-items:center;gap:8px;
+}
+.section-head a{font-size:11px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+
+table{width:100%;border-collapse:collapse}
+th{padding:8px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--ink2);border-bottom:1px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid #0d1228;font-size:12px}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#0d1535}
+
+.badge{
+  display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;
+  background:#1a2040;
+}
+.badge-agendado   {color:var(--gray);background:#12182c}
+.badge-chegou     {color:var(--cyan);background:#0a1d2e}
+.badge-em_processamento{color:var(--blue);background:#0e1a35}
+.badge-separacao  {color:var(--yellow);background:#1d1a0d}
+.badge-concluido  {color:var(--green);background:#0d1f16}
+.badge-pronto_levantar{color:var(--green);background:#0d1f16}
+.badge-faturado   {color:#a78bfa;background:#150f2e}
+.badge-fechado    {color:var(--gray);background:#0d1020}
+
+/* ESTADO BAR */
+#estado-bar{
+  display:flex;gap:8px;padding:12px 16px;flex-wrap:wrap;
+}
+.est-chip{
+  padding:4px 10px;border-radius:20px;font-size:11px;
+  background:var(--panel);border:1px solid var(--border);
+  display:flex;align-items:center;gap:5px;
+}
+.est-chip .n{
+  font-weight:bold;color:var(--cyan);
+}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <h1>FACTORY</h1>
+  <a href="/ops" style="font-size:11px;color:var(--gray)">← NOC /ops</a>
+  <span class="ts" id="ts">—</span>
+  <span id="user-info" style="font-size:11px;color:var(--ink2)"></span>
+  <a href="#" onclick="_logout();return false" style="font-size:11px;color:var(--gray)">sair</a>
+</div>
+
+<!-- METRICS -->
+<div id="metrics">
+  <div class="metric">
+    <div class="label">Lotes Ativos</div>
+    <div class="value" id="m-ativos">—</div>
+    <div class="sub" id="m-total">total: —</div>
+  </div>
+  <div class="metric">
+    <div class="label">Kg Entrada (hoje)</div>
+    <div class="value" id="m-kg">—</div>
+    <div class="sub" id="m-lotes-hoje">lotes hoje: —</div>
+  </div>
+  <div class="metric">
+    <div class="label">Cobre Recuperado (hoje)</div>
+    <div class="value" id="m-cobre">—</div>
+    <div class="sub" id="m-plastico">plástico: — kg</div>
+  </div>
+  <div class="metric">
+    <div class="label">Receita Estimada (hoje)</div>
+    <div class="value" id="m-receita">—</div>
+    <div class="sub">faturações aprovadas</div>
+  </div>
+</div>
+
+<!-- ESTADO BAR -->
+<div id="estado-bar"></div>
+
+<!-- LOTES TABLE -->
+<div id="lotes-section">
+  <div class="section-head">
+    <span>Lotes</span>
+    <a href="#" onclick="load();return false">↻ atualizar</a>
+  </div>
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Cliente</th>
+          <th>Entrada</th>
+          <th>Estado</th>
+          <th>Cobre</th>
+          <th>Plástico</th>
+          <th>Valor €</th>
+          <th>Criado</th>
+        </tr>
+      </thead>
+      <tbody id="lotes-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const ESTADOS_PT = {
+  agendado:'Agendado', chegou:'Chegou', em_processamento:'Em proc.',
+  separacao:'Separação', concluido:'Concluído', pronto_levantar:'Pronto',
+  faturado:'Faturado', fechado:'Fechado'
+};
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+const _jwt = localStorage.getItem('aios_jwt');
+if (!_jwt) window.location = '/login?next=/factory';
+
+function _authHeaders() {
+  return _jwt ? { 'Authorization': 'Bearer ' + _jwt } : {};
+}
+
+function _logout() {
+  localStorage.removeItem('aios_jwt');
+  localStorage.removeItem('aios_user');
+  window.location = '/login';
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function API(path) {
+  try {
+    const r = await fetch(path, { headers: _authHeaders() });
+    if (r.status === 401) { _logout(); return null; }
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+function fmt(v, dec=0) {
+  if (v == null || v === '' || isNaN(Number(v))) return '—';
+  return Number(v).toFixed(dec);
+}
+
+async function load() {
+  document.getElementById('ts').textContent = new Date().toLocaleTimeString('pt');
+
+  const [cases, stats] = await Promise.all([
+    API('/api/twin/cases?limit=50'),
+    API('/api/twin/factory/stats'),
+  ]);
+
+  // Metrics
+  if (stats) {
+    const h = stats.hoje || {};
+    const t = stats.total || {};
+    document.getElementById('m-ativos').textContent  = t.ativos ?? '—';
+    document.getElementById('m-total').textContent   = `total: ${t.total ?? '—'}`;
+    document.getElementById('m-kg').textContent      = fmt(h.kg_entrada) + ' kg';
+    document.getElementById('m-lotes-hoje').textContent = `lotes hoje: ${h.lotes_hoje ?? '—'}`;
+    document.getElementById('m-cobre').textContent   = fmt(h.kg_cobre) + ' kg';
+    document.getElementById('m-plastico').textContent= `plástico: ${fmt(h.kg_plastico)} kg`;
+    const receita = Number(h.receita || 0);
+    document.getElementById('m-receita').textContent = receita > 0 ? `€${receita.toFixed(2)}` : '€0';
+
+    // Estado bar
+    const bar = document.getElementById('estado-bar');
+    bar.innerHTML = (stats.by_estado || []).map(e =>
+      `<div class="est-chip"><span>${ESTADOS_PT[e.estado] || e.estado}</span><span class="n">${e.n}</span></div>`
+    ).join('');
+  }
+
+  // Lotes table
+  if (!Array.isArray(cases)) return;
+  const lotes = cases.filter(r => r.workflow_key === 'cable_batch');
+  document.getElementById('lotes-body').innerHTML = lotes.map(r => {
+    const est = r.estado || '';
+    const badge = `<span class="badge badge-${est}">${ESTADOS_PT[est] || est}</span>`;
+    const valor = r.valor_fatura ? `€${Number(r.valor_fatura).toFixed(2)}` : '—';
+    return `<tr>
+      <td>#${r.entity_id || r.id}</td>
+      <td>${r.client || r.entity_name || '—'}</td>
+      <td>${fmt(r.kg)} kg</td>
+      <td>${badge}</td>
+      <td>${fmt(r.kg_cobre)} kg</td>
+      <td>${fmt(r.kg_plastico)} kg</td>
+      <td>${valor}</td>
+      <td>${(r.created_at||'').slice(0,16).replace('T',' ')}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" style="color:var(--gray);text-align:center">sem lotes</td></tr>';
+}
+
+// Mostrar utilizador
+try {
+  const u = JSON.parse(localStorage.getItem('aios_user') || '{}');
+  if (u.username) document.getElementById('user-info').textContent = u.username + ' (' + u.role + ')';
+} catch {}
+
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>

@@ -86,6 +86,9 @@
   <button id="ftab-invoices"     onclick="setFTab('invoices')"     style="padding:.5rem 1.2rem;border:none;border-bottom:3px solid #3b82f6;background:transparent;color:#f8fafc;font-weight:700;cursor:pointer;font-size:.9rem">Faturas</button>
   <button id="ftab-obligations"  onclick="setFTab('obligations')"  style="padding:.5rem 1.2rem;border:none;border-bottom:3px solid transparent;background:transparent;color:#94a3b8;font-weight:600;cursor:pointer;font-size:.9rem">Obrigações Fiscais</button>
   <button id="ftab-timesheets"   onclick="setFTab('timesheets')"   style="padding:.5rem 1.2rem;border:none;border-bottom:3px solid transparent;background:transparent;color:#94a3b8;font-weight:600;cursor:pointer;font-size:.9rem">Horas Eventos</button>
+  <button id="ftab-payouts"      onclick="setFTab('payouts')"      style="padding:.5rem 1.2rem;border:none;border-bottom:3px solid transparent;background:transparent;color:#94a3b8;font-weight:600;cursor:pointer;font-size:.9rem">Pagamentos RH</button>
+  <button id="ftab-drafts"            onclick="setFTab('drafts')"            style="padding:.5rem 1.2rem;border:none;border-bottom:3px solid transparent;background:transparent;color:#94a3b8;font-weight:600;cursor:pointer;font-size:.9rem">Rascunhos Toconline</button>
+  <button id="ftab-reconciliation"   onclick="setFTab('reconciliation')"   style="padding:.5rem 1.2rem;border:none;border-bottom:3px solid transparent;background:transparent;color:#94a3b8;font-weight:600;cursor:pointer;font-size:.9rem">Reconciliação Bancária</button>
 </div>
 
 <!-- VIEW: Faturas -->
@@ -155,6 +158,11 @@
 
 <!-- VIEW: Horas Eventos -->
 <div id="fview-timesheets" style="display:none">
+<div class="filters" style="display:flex;gap:.5rem;padding:0 1.5rem .75rem;align-items:center">
+  <span style="font-size:.83rem;color:#94a3b8">Gerar fatura de evento:</span>
+  <input id="ts-event-inp" type="text" placeholder="nome do evento" style="background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:.35rem .7rem;border-radius:.35rem;font-size:.83rem;width:200px">
+  <button class="pay-btn" style="background:#3b82f6" onclick="generateInvoice()">⚡ Gerar Fatura Draft</button>
+</div>
 <div class="table-wrap">
   <table>
     <thead>
@@ -172,6 +180,117 @@
       <tr><td colspan="7" class="loading"><div class="spinner"></div></td></tr>
     </tbody>
   </table>
+</div>
+</div>
+
+<!-- VIEW: Rascunhos Toconline -->
+<div id="fview-drafts" style="display:none">
+<div class="metrics" id="toc-metrics">
+  <div class="metric-card"><div class="label">Estado Toconline</div><div class="value" id="toc-status" style="font-size:1rem">—</div></div>
+  <div class="metric-card pending"><div class="label">Rascunhos locais</div><div class="value" id="toc-drafts-count">—</div></div>
+  <div class="metric-card paid"><div class="label">Enviados Toconline</div><div class="value" id="toc-sent-count">—</div></div>
+</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Nº Fatura</th>
+        <th>Evento / Cliente</th>
+        <th>Linhas</th>
+        <th>Total</th>
+        <th>Vencimento</th>
+        <th>Toconline</th>
+        <th>Ação</th>
+      </tr>
+    </thead>
+    <tbody id="drafts-tbody">
+      <tr><td colspan="7" class="loading"><div class="spinner"></div></td></tr>
+    </tbody>
+  </table>
+</div>
+</div>
+
+<!-- VIEW: Pagamentos RH -->
+<div id="fview-payouts" style="display:none">
+<div class="metrics">
+  <div class="metric-card pending"><div class="label">Pendente</div><div class="value" id="py-pending">—</div><div class="sub" id="py-pending-eur">—</div></div>
+  <div class="metric-card paid"><div class="label">Pago</div><div class="value" id="py-paid">—</div><div class="sub" id="py-paid-eur">—</div></div>
+  <div class="metric-card"><div class="label">Semana actual</div><div class="value" id="py-week">—</div><div class="sub" id="py-week-eur">—</div></div>
+</div>
+<div class="filters">
+  <button class="pay-btn" style="background:#3b82f6" onclick="runPayouts()">⚡ Calcular semana actual</button>
+</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Worker</th>
+        <th>Semana</th>
+        <th>Horas</th>
+        <th>Valor</th>
+        <th>Estado</th>
+        <th>Pago em</th>
+        <th>Ação</th>
+      </tr>
+    </thead>
+    <tbody id="py-tbody">
+      <tr><td colspan="7" class="loading"><div class="spinner"></div></td></tr>
+    </tbody>
+  </table>
+</div>
+</div>
+
+<!-- VIEW: Reconciliação Bancária -->
+<div id="fview-reconciliation" style="display:none">
+<div class="metrics" id="bank-metrics">
+  <div class="metric-card overdue"><div class="label">Por reconciliar</div><div class="value" id="bk-unmatched">—</div></div>
+  <div class="metric-card paid"><div class="label">Reconciliados</div><div class="value" id="bk-matched">—</div></div>
+  <div class="metric-card"><div class="label">Total movimentos</div><div class="value" id="bk-total">—</div></div>
+  <div class="metric-card pending"><div class="label">Ignorados</div><div class="value" id="bk-ignored">—</div></div>
+</div>
+<div class="filters" style="align-items:center">
+  <label style="background:#1e293b;border:1px solid #334155;border-radius:.4rem;padding:.35rem .8rem;cursor:pointer;font-size:.82rem;color:#94a3b8">
+    📂 Importar CSV banco
+    <input type="file" id="bank-csv-input" accept=".csv,.txt" style="display:none" onchange="importBankCSV(this)">
+  </label>
+  <button class="pay-btn" style="background:#3b82f6" onclick="autoReconcile()">⚡ Reconciliar Auto</button>
+  <button class="pay-btn" style="background:#334155;color:#94a3b8" onclick="loadReconciliation()">↻ Actualizar</button>
+  <div style="display:flex;gap:.5rem;margin-left:auto">
+    <button id="bkf-all"       class="filters" style="padding:.35rem .85rem;border-radius:2rem;border:1px solid #3b82f6;background:#3b82f6;color:#fff;cursor:pointer;font-size:.8rem;font-weight:600" onclick="setBankFilter('',this)">Todos</button>
+    <button id="bkf-unmatched" class="filters" style="padding:.35rem .85rem;border-radius:2rem;border:1px solid #334155;background:#1e293b;color:#94a3b8;cursor:pointer;font-size:.8rem;font-weight:600" onclick="setBankFilter('unmatched',this)">Por reconciliar</button>
+    <button id="bkf-matched"   class="filters" style="padding:.35rem .85rem;border-radius:2rem;border:1px solid #334155;background:#1e293b;color:#94a3b8;cursor:pointer;font-size:.8rem;font-weight:600" onclick="setBankFilter('matched',this)">Reconciliados</button>
+  </div>
+</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Data</th>
+        <th>Descrição</th>
+        <th>Referência</th>
+        <th>Valor</th>
+        <th>Estado</th>
+        <th>Fatura</th>
+        <th>Ações</th>
+      </tr>
+    </thead>
+    <tbody id="bank-tbody">
+      <tr><td colspan="7" class="loading"><div class="spinner"></div></td></tr>
+    </tbody>
+  </table>
+</div>
+<!-- Modal match manual -->
+<div id="bank-match-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:center;justify-content:center">
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:.75rem;padding:1.5rem;min-width:360px;max-width:500px">
+    <h3 style="color:#f8fafc;margin-bottom:1rem">Match Manual</h3>
+    <input type="hidden" id="mm-tx-id">
+    <p style="font-size:.85rem;color:#94a3b8;margin-bottom:.75rem">ID da fatura a ligar:</p>
+    <input id="mm-inv-id" type="number" placeholder="ID fatura" style="width:100%;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:.5rem .75rem;border-radius:.4rem;font-size:.9rem;margin-bottom:1rem">
+    <div style="display:flex;gap:.75rem">
+      <button class="pay-btn" onclick="confirmManualMatch()">Confirmar</button>
+      <button class="pay-btn" style="background:#334155" onclick="closeMM()">Cancelar</button>
+    </div>
+  </div>
 </div>
 </div>
 
@@ -283,14 +402,17 @@ let currentFTab = 'invoices';
 
 function setFTab(tab) {
   currentFTab = tab;
-  ['invoices','obligations','timesheets'].forEach(t => {
+  ['invoices','obligations','timesheets','payouts','drafts','reconciliation'].forEach(t => {
     document.getElementById('fview-' + t).style.display  = t === tab ? '' : 'none';
     const btn = document.getElementById('ftab-' + t);
     btn.style.borderBottomColor = t === tab ? '#3b82f6' : 'transparent';
     btn.style.color             = t === tab ? '#f8fafc' : '#94a3b8';
   });
-  if (tab === 'obligations') loadObligations();
-  if (tab === 'timesheets')  loadTimesheets();
+  if (tab === 'obligations')    loadObligations();
+  if (tab === 'timesheets')     loadTimesheets();
+  if (tab === 'payouts')        loadPayouts();
+  if (tab === 'drafts')         loadDrafts();
+  if (tab === 'reconciliation') loadReconciliation();
 }
 
 // ── Obligations ────────────────────────────────────────────────────────────────
@@ -331,8 +453,10 @@ async function loadObligations() {
       const badgeClass = o.status === 'paid' ? 'paid' : isOverdue ? 'overdue' : 'issued';
       const badgeLabel = o.status === 'paid' ? 'Pago' : isOverdue ? 'Vencida' : 'Pendente';
       const payBtn = o.status === 'pending'
-        ? `<button class="pay-btn" onclick="payObligation(${o.id}, this)">✓ Pagar</button>`
-        : '—';
+        ? `<button class="pay-btn" style="background:#f59e0b;margin-right:4px" onclick="approveObligation(${o.id},this)">Aprovar</button><button class="pay-btn" onclick="payObligation(${o.id}, this)">✓ Pagar</button>`
+        : o.status === 'approved'
+          ? `<button class="pay-btn" onclick="payObligation(${o.id}, this)">✓ Pagar</button>`
+          : '—';
       return `<tr style="${rowBg}">
         <td><strong>${o.label}</strong></td>
         <td>${o.entity}</td>
@@ -355,6 +479,91 @@ async function payObligation(id, btn) {
     if (d.ok) { showToast('Obrigação marcada como paga', 'ok'); loadObligations(); }
     else { showToast(d.error || 'Erro', 'err'); btn.disabled = false; btn.textContent = '✓ Pagar'; }
   } catch(e) { showToast('Erro de rede', 'err'); btn.disabled = false; btn.textContent = '✓ Pagar'; }
+}
+
+async function approveObligation(id, btn) {
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const d = await apiFetch(`/api/twin/obligations/${id}/approve`, { method: 'POST', body: '{}' });
+    if (d.ok) { showToast('Obrigação aprovada', 'ok'); loadObligations(); }
+    else { showToast(d.error || 'Erro', 'err'); btn.disabled = false; btn.textContent = 'Aprovar'; }
+  } catch(e) { showToast('Erro de rede', 'err'); btn.disabled = false; btn.textContent = 'Aprovar'; }
+}
+
+// ── Payouts ─────────────────────────────────────────────────────────────────────
+async function loadPayouts() {
+  const tbody = document.getElementById('py-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" class="loading"><div class="spinner"></div></td></tr>';
+  try {
+    const d = await apiFetch('/api/finance/payouts?limit=50');
+    // stats
+    const pending = d.payouts ? d.payouts.filter(p => p.status !== 'paid') : [];
+    const paid    = d.payouts ? d.payouts.filter(p => p.status === 'paid')  : [];
+    // week
+    const monday  = getMondayISO();
+    const weekPs  = d.payouts ? d.payouts.filter(p => p.week_start && p.week_start.slice(0,10) === monday) : [];
+    document.getElementById('py-pending').textContent    = pending.length;
+    document.getElementById('py-pending-eur').textContent = fmtEur(pending.reduce((s,p) => s + Number(p.amount||0), 0));
+    document.getElementById('py-paid').textContent       = paid.length;
+    document.getElementById('py-paid-eur').textContent   = fmtEur(paid.reduce((s,p) => s + Number(p.amount||0), 0));
+    document.getElementById('py-week').textContent       = weekPs.length + (weekPs.length === 0 ? ' (não calc.)' : '');
+    document.getElementById('py-week-eur').textContent   = weekPs.length ? fmtEur(weekPs.reduce((s,p) => s + Number(p.amount||0), 0)) : '—';
+
+    if (!d.ok || !d.payouts || !d.payouts.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">Sem pagamentos — clique "Calcular semana actual"</td></tr>';
+      return;
+    }
+    tbody.innerHTML = d.payouts.map(p => {
+      const badgeClass = p.status === 'paid' ? 'paid' : 'issued';
+      const badgeLabel = p.status === 'paid' ? 'Pago' : 'Pendente';
+      const payBtn = p.status !== 'paid'
+        ? `<button class="pay-btn" onclick="markPayoutPaid(${p.id}, this)">✓ Marcar pago</button>`
+        : '—';
+      return `<tr>
+        <td><strong>${p.worker_id}</strong></td>
+        <td>${p.week_start ? p.week_start.slice(0,10) : '—'}</td>
+        <td>${p.total_hours != null ? Number(p.total_hours).toFixed(2) + 'h' : '—'}</td>
+        <td>${fmtEur(p.amount)}</td>
+        <td><span class="badge ${badgeClass}">${badgeLabel}</span></td>
+        <td>${p.paid_at ? p.paid_at.slice(0,10) : '—'}</td>
+        <td>${payBtn}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">Erro ao carregar payouts</td></tr>';
+  }
+}
+
+function getMondayISO() {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = (day === 0 ? -6 : 1 - day);
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0,10);
+}
+
+async function runPayouts() {
+  const week = getMondayISO();
+  try {
+    const d = await apiFetch('/api/finance/payouts/run', {
+      method: 'POST', body: JSON.stringify({ week_start: week })
+    });
+    if (d.ok) {
+      showToast(`Payouts calculados: ${d.payouts.length} workers, total ${fmtEur(d.total)}`, 'ok');
+      loadPayouts();
+    } else {
+      showToast(d.error || 'Erro', 'err');
+    }
+  } catch(e) { showToast('Erro de rede', 'err'); }
+}
+
+async function markPayoutPaid(id, btn) {
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const d = await apiFetch(`/api/finance/payouts/${id}/paid`, { method: 'POST', body: '{}' });
+    if (d.ok) { showToast('Pagamento marcado como pago', 'ok'); loadPayouts(); }
+    else { showToast(d.error || 'Erro', 'err'); btn.disabled = false; btn.textContent = '✓ Marcar pago'; }
+  } catch(e) { showToast('Erro de rede', 'err'); btn.disabled = false; btn.textContent = '✓ Marcar pago'; }
 }
 
 // ── Timesheets ─────────────────────────────────────────────────────────────────
@@ -399,12 +608,252 @@ async function approveTs(id, btn) {
   } catch(e) { showToast('Erro de rede', 'err'); btn.disabled = false; btn.textContent = '✓ Aprovar'; }
 }
 
+// ── Rascunhos Toconline ─────────────────────────────────────────────────────────
+async function generateInvoice() {
+  const evName = document.getElementById('ts-event-inp').value.trim();
+  if (!evName) { showToast('Insere o nome do evento', 'err'); return; }
+  try {
+    const d = await apiFetch('/api/finance/invoice/generate', {
+      method: 'POST', body: JSON.stringify({ event_name: evName })
+    });
+    if (d.ok) {
+      const msg = d.already_exists
+        ? `Fatura ${d.number} já existe (${fmtEur(d.total)}) — ver aba Rascunhos`
+        : `Fatura draft ${d.number} criada — ${fmtEur(d.total)} (${d.lines} linhas)`;
+      showToast(msg, 'ok');
+      document.getElementById('ts-event-inp').value = '';
+      setFTab('drafts');
+    } else {
+      showToast(d.error || 'Erro ao gerar fatura', 'err');
+    }
+  } catch(e) { showToast('Erro de rede', 'err'); }
+}
+
+async function loadDrafts() {
+  const tbody = document.getElementById('drafts-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" class="loading"><div class="spinner"></div></td></tr>';
+  try {
+    const [dHealth, dDrafts] = await Promise.all([
+      fetch('/api/finance/toconline/health').then(r => r.json()).catch(() => ({})),
+      apiFetch('/api/finance/invoice/drafts')
+    ]);
+    // status card — usando health endpoint (sem auth)
+    const tocEl = document.getElementById('toc-status');
+    if (dHealth.connected) {
+      tocEl.textContent = '✓ Ligado';
+      tocEl.style.color = '#34d399';
+    } else {
+      tocEl.textContent = '✗ Token expirado';
+      tocEl.style.color = '#f87171';
+      // banner de aviso
+      const banner = document.createElement('div');
+      banner.style.cssText = 'background:#450a0a;border:1px solid #f87171;border-radius:.4rem;padding:.6rem 1rem;font-size:.82rem;color:#fca5a5;margin:0 1.5rem .75rem';
+      banner.textContent = '⚠ Token Toconline expirado — faz login em toconline.pt e actualiza ~/.toc_token.json';
+      const existing = document.getElementById('toc-banner');
+      if (!existing) { banner.id = 'toc-banner'; document.getElementById('fview-drafts').insertBefore(banner, tbody.closest('.table-wrap')); }
+    }
+    // counts
+    if (dDrafts.ok) {
+      const all  = dDrafts.drafts || [];
+      const sent = all.filter(d => d.toconline_id);
+      document.getElementById('toc-drafts-count').textContent = all.length;
+      document.getElementById('toc-sent-count').textContent   = sent.length;
+      if (!all.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">Sem rascunhos — gera uma fatura na aba Horas Eventos</td></tr>';
+        return;
+      }
+      tbody.innerHTML = all.map(inv => {
+        const tocBadge = inv.toconline_id
+          ? `<span class="badge paid">Enviado #${inv.toconline_id}</span>`
+          : `<span class="badge issued">Local</span>`;
+        const pushBtn = !inv.toconline_id
+          ? `<button class="pay-btn" style="background:#7c3aed" onclick="pushToToconline(${inv.id}, this)">→ Toconline</button>`
+          : '—';
+        return `<tr>
+          <td><strong>${inv.number}</strong></td>
+          <td>${inv.event_name || inv.client}</td>
+          <td>${inv.lines}</td>
+          <td>${fmtEur(inv.amount)}</td>
+          <td>${fmtDate(inv.due_date)}</td>
+          <td>${tocBadge}</td>
+          <td>${pushBtn}</td>
+        </tr>`;
+      }).join('');
+    } else {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">Erro ao carregar rascunhos</td></tr>';
+    }
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">Erro de rede</td></tr>';
+  }
+}
+
+async function pushToToconline(id, btn) {
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const d = await apiFetch(`/api/finance/invoice/${id}/push_toconline`, { method: 'POST', body: '{}' });
+    if (d.ok) {
+      showToast(`Enviado como rascunho Toconline #${d.toconline_id}`, 'ok');
+      loadDrafts();
+    } else {
+      showToast(d.error || 'Erro Toconline', 'err');
+      btn.disabled = false; btn.textContent = '→ Toconline';
+    }
+  } catch(e) {
+    showToast('Erro de rede', 'err');
+    btn.disabled = false; btn.textContent = '→ Toconline';
+  }
+}
+
 async function loadAll() {
   document.getElementById('last-updated').textContent = 'A actualizar...';
   await Promise.all([loadStats(), loadInvoices(currentFilter)]);
-  if (currentFTab === 'obligations') loadObligations();
-  if (currentFTab === 'timesheets')  loadTimesheets();
+  if (currentFTab === 'obligations')    loadObligations();
+  if (currentFTab === 'timesheets')     loadTimesheets();
+  if (currentFTab === 'payouts')        loadPayouts();
+  if (currentFTab === 'drafts')         loadDrafts();
+  if (currentFTab === 'reconciliation') loadReconciliation();
   document.getElementById('last-updated').textContent = 'Actualizado: ' + new Date().toLocaleTimeString('pt-PT');
+}
+
+// ── Reconciliação Bancária ─────────────────────────────────────────────────────
+let currentBankFilter = '';
+
+function setBankFilter(status, btn) {
+  currentBankFilter = status;
+  ['bkf-all','bkf-unmatched','bkf-matched'].forEach(id => {
+    const b = document.getElementById(id);
+    b.style.background = 'transparent';
+    b.style.borderColor = '#334155';
+    b.style.color = '#94a3b8';
+  });
+  btn.style.background = '#3b82f6';
+  btn.style.borderColor = '#3b82f6';
+  btn.style.color = '#fff';
+  loadReconciliation(status);
+}
+
+async function loadReconciliation(status) {
+  const s = status !== undefined ? status : currentBankFilter;
+  const tbody = document.getElementById('bank-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" class="loading"><div class="spinner"></div></td></tr>';
+  try {
+    const url = '/api/finance/bank/transactions?limit=200' + (s ? '&status=' + s : '');
+    const d = await apiFetch(url);
+    const sum = d.summary || {};
+    document.getElementById('bk-total').textContent     = sum.total    || 0;
+    document.getElementById('bk-matched').textContent   = sum.matched  || 0;
+    document.getElementById('bk-unmatched').textContent = sum.unmatched || 0;
+    document.getElementById('bk-ignored').textContent   = sum.ignored  || 0;
+
+    const txs = d.transactions || [];
+    if (!txs.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">Sem movimentos' + (s ? ' com este filtro' : ' — importa um CSV bancário') + '</td></tr>';
+      return;
+    }
+    tbody.innerHTML = txs.map(tx => {
+      const amtColor = tx.amount >= 0 ? '#34d399' : '#f87171';
+      const amtSign  = tx.amount >= 0 ? '+' : '';
+      const badge = {
+        matched:   '<span class="badge paid">Reconciliado</span>',
+        unmatched: '<span class="badge issued">Por reconciliar</span>',
+        ignored:   '<span class="badge cancelled">Ignorado</span>',
+      }[tx.status] || '';
+      const invCell = tx.invoice_number
+        ? `<strong>${tx.invoice_number}</strong>`
+        : '—';
+      const actions = tx.status === 'unmatched' ? `
+        <button class="pay-btn" style="background:#7c3aed;font-size:.75rem" onclick="openMM(${tx.id})">Match</button>
+        <button class="pay-btn" style="background:#334155;color:#94a3b8;font-size:.75rem" onclick="ignoreBank(${tx.id}, this)">Ignorar</button>
+      ` : '—';
+      return `<tr>
+        <td>${(tx.date||'').slice(0,10)}</td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${tx.description||''}">${tx.description||'—'}</td>
+        <td style="font-size:.78rem;color:#94a3b8">${tx.reference||'—'}</td>
+        <td style="color:${amtColor};font-weight:700">${amtSign}${fmtEur(tx.amount)}</td>
+        <td>${badge}</td>
+        <td>${invCell}</td>
+        <td style="white-space:nowrap">${actions}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">Erro ao carregar</td></tr>';
+  }
+}
+
+async function importBankCSV(input) {
+  const file = input.files[0];
+  if (!file) return;
+  showToast('A importar CSV...', 'ok');
+  try {
+    const text = await file.text();
+    const res = await fetch('/api/finance/bank/import', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'text/csv' },
+      body: text
+    });
+    const d = await res.json();
+    if (d.ok) {
+      showToast(`Importado: ${d.inserted} novos movimentos (${d.parsed} linhas lidas)`, 'ok');
+      loadReconciliation();
+    } else {
+      showToast(d.error || 'Erro ao importar', 'err');
+    }
+  } catch(e) {
+    showToast('Erro ao importar CSV', 'err');
+  }
+  input.value = '';
+}
+
+async function autoReconcile() {
+  showToast('A reconciliar automaticamente...', 'ok');
+  try {
+    const d = await apiFetch('/api/finance/bank/reconcile', { method: 'POST', body: '{}' });
+    if (d.ok) {
+      showToast(`Reconciliação concluída: ${d.matched} faturas pagas automaticamente`, 'ok');
+      loadReconciliation();
+    } else {
+      showToast(d.error || 'Erro na reconciliação', 'err');
+    }
+  } catch(e) { showToast('Erro de rede', 'err'); }
+}
+
+function openMM(txId) {
+  document.getElementById('mm-tx-id').value = txId;
+  document.getElementById('mm-inv-id').value = '';
+  const modal = document.getElementById('bank-match-modal');
+  modal.style.display = 'flex';
+}
+function closeMM() {
+  document.getElementById('bank-match-modal').style.display = 'none';
+}
+
+async function confirmManualMatch() {
+  const txId  = parseInt(document.getElementById('mm-tx-id').value, 10);
+  const invId = parseInt(document.getElementById('mm-inv-id').value, 10);
+  if (!invId) { showToast('Insere o ID da fatura', 'err'); return; }
+  try {
+    const d = await apiFetch('/api/finance/bank/match', {
+      method: 'POST', body: JSON.stringify({ transaction_id: txId, invoice_id: invId })
+    });
+    if (d.ok) {
+      showToast(`Fatura ${d.invoice_number} marcada como paga`, 'ok');
+      closeMM();
+      loadReconciliation();
+    } else {
+      showToast(d.error || 'Erro no match', 'err');
+    }
+  } catch(e) { showToast('Erro de rede', 'err'); }
+}
+
+async function ignoreBank(txId, btn) {
+  btn.disabled = true;
+  try {
+    const d = await apiFetch('/api/finance/bank/ignore', {
+      method: 'POST', body: JSON.stringify({ transaction_id: txId })
+    });
+    if (d.ok) { showToast('Movimento ignorado', 'ok'); loadReconciliation(); }
+    else { showToast(d.error || 'Erro', 'err'); btn.disabled = false; }
+  } catch(e) { showToast('Erro de rede', 'err'); btn.disabled = false; }
 }
 
 loadAll();

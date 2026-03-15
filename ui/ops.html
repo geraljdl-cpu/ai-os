@@ -245,6 +245,44 @@ pre.log{
     </div>
   </div>
 
+  <!-- TWIN LOTES (cable_batch) -->
+  <div class="card" style="grid-column:span 2">
+    <div class="card-head"><span>Lotes (Fábrica Cabos)</span><span id="lotes-count" style="color:var(--cyan)">—</span><a href="#" onclick="loadLotes();return false">↻</a></div>
+    <div class="card-body">
+      <table id="lotes-table">
+        <thead><tr><th>#</th><th>Cliente</th><th>Kg</th><th>Estado</th><th>Criado</th></tr></thead>
+        <tbody id="lotes-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- RADAR TED (concursos) -->
+  <div class="card" style="grid-column:span 2">
+    <div class="card-head">
+      <span>Radar TED — Concursos PT</span>
+      <span id="radar-count" style="color:var(--cyan)">—</span>
+      <a href="/tenders" style="font-size:11px;color:var(--gray)">ver todos →</a>
+      <a href="#" onclick="loadRadar();return false">↻</a>
+    </div>
+    <div class="card-body">
+      <table id="radar-table">
+        <thead><tr><th>Score</th><th>Ref</th><th>Tipo</th><th>Prazo</th><th>Estado</th></tr></thead>
+        <tbody id="radar-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- TWIN APPROVALS -->
+  <div class="card" style="grid-column:span 2">
+    <div class="card-head"><span>Approvals Pendentes</span><span id="approvals-count" style="color:var(--warn)">—</span><a href="#" onclick="loadApprovals();return false">↻</a></div>
+    <div class="card-body">
+      <table id="approvals-table">
+        <thead><tr><th>#</th><th>Ação</th><th>Resumo</th><th>Pedido em</th><th>Estado</th></tr></thead>
+        <tbody id="approvals-body"></tbody>
+      </table>
+    </div>
+  </div>
+
 </div><!-- /grid -->
 
 <script>
@@ -460,6 +498,75 @@ async function loadWJobs() {
     </tr>`).join('') || '<tr><td colspan="4" style="color:var(--gray)">sem jobs</td></tr>';
 }
 
+const ESTADOS_PT = {
+  agendado:'Agendado', chegou:'Chegou', em_processamento:'Em processamento',
+  separacao:'Separação', concluido:'Concluído', pronto_levantar:'Pronto a levantar', faturado:'Faturado'
+};
+const ESTADOS_COR = {
+  agendado:'var(--gray)', chegou:'var(--cyan)', em_processamento:'var(--blue)',
+  separacao:'var(--yellow)', concluido:'var(--green)', pronto_levantar:'var(--green)', faturado:'var(--ok)'
+};
+async function loadLotes() {
+  const data = await API('/api/twin/cases?limit=20');
+  if (!Array.isArray(data)) return;
+  const lotes = data.filter(r => r.workflow_key === 'cable_batch');
+  $('lotes-count').textContent = `${lotes.length} lote(s)`;
+  $('lotes-body').innerHTML = lotes.map(r => {
+    const est = r.estado || '';
+    const cor = ESTADOS_COR[est] || 'var(--fg)';
+    const label = ESTADOS_PT[est] || est || r.status;
+    return `<tr>
+      <td>#${r.entity_id||r.id}</td>
+      <td>${r.client || r.entity_name || '—'}</td>
+      <td>${r.kg ? Number(r.kg).toFixed(0)+'kg' : '—'}</td>
+      <td style="color:${cor}">${label}</td>
+      <td>${(r.created_at||'').slice(0,16).replace('T',' ')}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" style="color:var(--gray)">sem lotes</td></tr>';
+}
+
+async function loadRadar() {
+  const data = await API('/api/twin/tenders?limit=8');
+  if (!Array.isArray(data)) return;
+  const novos = data.filter(r => r.estado === 'novo').length;
+  $('radar-count').textContent = `${data.length} detectados, ${novos} novos`;
+  $('radar-count').style.color = novos > 0 ? 'var(--warn)' : 'var(--ok)';
+  $('radar-body').innerHTML = data.map(r => {
+    const score = r.score || 0;
+    const sc = score >= 30 ? 'var(--ok)' : score >= 20 ? 'var(--cyan)' : 'var(--gray)';
+    const dl = r.deadline || '—';
+    const dlStyle = dl !== '—' && new Date(dl) < new Date(Date.now() + 14*86400000) ? 'color:var(--crit)' : '';
+    const est = r.estado || 'novo';
+    const estColor = est === 'candidatar' ? 'var(--ok)' : est === 'ignorar' ? 'var(--gray)' : 'var(--cyan)';
+    return `<tr>
+      <td><b style="color:${sc}">${score}</b></td>
+      <td style="font-size:11px"><a href="${r.pdf_url||'#'}" target="_blank" style="color:var(--blue)">${r.pub_num}</a></td>
+      <td style="font-size:11px;color:var(--ink2)">${(r.nature||'—').split(',')[0]}</td>
+      <td style="font-size:11px;${dlStyle}">${dl}</td>
+      <td style="color:${estColor};font-size:11px">${est}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" style="color:var(--gray)">sem concursos detectados</td></tr>';
+}
+
+async function loadApprovals() {
+  const data = await API('/api/twin/approvals?limit=10');
+  if (!Array.isArray(data)) return;
+  const pending = data.filter(r => r.status === 'pending').length;
+  $('approvals-count').textContent = pending > 0 ? `${pending} pendente(s)` : '0 pendentes';
+  $('approvals-count').style.color = pending > 0 ? 'var(--warn)' : 'var(--ok)';
+  const tbody = $('approvals-body');
+  tbody.innerHTML = data.map(r => {
+    const color = r.status === 'pending' ? 'var(--warn)' : r.status === 'approved' ? 'var(--ok)' : 'var(--crit)';
+    return `<tr>
+      <td>${r.id}</td>
+      <td>${r.action}</td>
+      <td>${r.summary || ''}</td>
+      <td>${(r.requested_at||'').replace('T',' ').slice(0,19)}</td>
+      <td style="color:${color}">${r.status}</td>
+    </tr>`;
+  }).join('');
+}
+
 async function loadJobs() {
   const data = await API('/api/jobs/recent?limit=12');
   if (!Array.isArray(data)) return;
@@ -502,6 +609,9 @@ async function refreshAll() {
     loadEvents(),
     loadWJobs(),
     loadJobs(),
+    loadApprovals(),
+    loadLotes(),
+    loadRadar(),
   ]);
 }
 

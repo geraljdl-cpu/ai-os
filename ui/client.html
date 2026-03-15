@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portal Cliente — JDL</title>
+<style>
+:root{
+  --bg:#f8faff;--panel:#fff;--border:#e2e8f0;
+  --blue:#3b82f6;--green:#22c55e;--yellow:#f59e0b;--gray:#94a3b8;
+  --red:#ef4444;--purple:#8b5cf6;
+  --ink:#1e293b;--ink2:#64748b;
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);min-height:100vh}
+
+/* ── Header ── */
+header{
+  background:linear-gradient(135deg,#1e40af,#3b82f6);color:#fff;
+  padding:24px 20px 20px;
+}
+header .brand{font-size:13px;opacity:.75;font-weight:500;letter-spacing:.5px;margin-bottom:6px}
+header .name{font-size:22px;font-weight:700;margin-bottom:8px}
+header .badge-wrap{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.state-badge{
+  display:inline-block;padding:4px 14px;border-radius:99px;
+  font-size:13px;font-weight:600;
+}
+.state-agendado        {background:#e0e7ff;color:#3730a3}
+.state-chegou          {background:#cffafe;color:#0e7490}
+.state-em_processamento{background:#dbeafe;color:#1d4ed8}
+.state-separacao       {background:#fef9c3;color:#854d0e}
+.state-concluido       {background:#dcfce7;color:#166534}
+.state-pronto_levantar {background:#dcfce7;color:#166534}
+.state-faturado        {background:#ede9fe;color:#5b21b6}
+.state-fechado         {background:#f1f5f9;color:#475569}
+header .ts{font-size:11px;opacity:.6}
+
+/* ── Layout ── */
+main{max-width:640px;margin:0 auto;padding:20px}
+.card{
+  background:var(--panel);border:1px solid var(--border);border-radius:12px;
+  padding:20px;margin-bottom:14px;
+}
+.card-title{
+  font-size:12px;font-weight:700;color:var(--ink2);
+  text-transform:uppercase;letter-spacing:1px;margin-bottom:14px;
+}
+
+/* ── Progress ── */
+.steps{display:flex;gap:0;margin-bottom:10px;overflow:hidden;border-radius:8px}
+.step{
+  flex:1;height:8px;background:#e2e8f0;
+  transition:background .3s;
+}
+.step.done{background:var(--green)}
+.step.active{background:var(--blue)}
+.step:first-child{border-radius:8px 0 0 8px}
+.step:last-child{border-radius:0 8px 8px 0}
+.progress-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--gray);margin-top:4px}
+.progress-pct{text-align:right;font-size:12px;color:var(--ink2);margin-top:6px;font-weight:600}
+
+/* ── Info rows ── */
+.info-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #f1f5f9}
+.info-row:last-child{border:none}
+.info-row .lbl{font-size:13px;color:var(--ink2)}
+.info-row .val{font-size:13px;font-weight:600;color:var(--ink)}
+
+/* ── Resultado ── */
+.result-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.result-box{text-align:center;background:#f8faff;border:1px solid var(--border);border-radius:10px;padding:14px 8px}
+.result-box .n{font-size:20px;font-weight:700;color:var(--blue)}
+.result-box .n.green{color:#059669}
+.result-box .l{font-size:11px;color:var(--gray);margin-top:3px}
+
+/* ── Aprovação ── */
+.approval-box{
+  border:2px solid #fbbf24;border-radius:10px;padding:16px;
+  background:#fffbeb;margin-bottom:0;
+}
+.approval-box .amount{font-size:24px;font-weight:700;color:#92400e;margin:8px 0}
+.approval-box .desc{font-size:13px;color:#78350f;margin-bottom:14px}
+.btn-row{display:flex;gap:10px}
+.btn{
+  flex:1;padding:12px;border-radius:8px;border:none;
+  font-size:14px;font-weight:600;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.btn-approve{background:var(--green);color:#fff}
+.btn-approve:hover{background:#16a34a}
+.btn-approve:disabled{opacity:.6;cursor:not-allowed}
+.btn-reject{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+.btn-reject:hover{background:#fecaca}
+.btn-reject:disabled{opacity:.6;cursor:not-allowed}
+.approval-done{
+  display:flex;align-items:center;gap:8px;
+  padding:12px;border-radius:8px;font-size:14px;font-weight:600;
+}
+.approval-done.approved{background:#dcfce7;color:#166534}
+.approval-done.rejected{background:#fee2e2;color:#991b1b}
+
+/* ── Documentos ── */
+.doc-list{display:flex;flex-direction:column;gap:8px}
+.doc-link{
+  display:flex;align-items:center;gap:10px;
+  padding:12px 14px;border-radius:8px;border:1px solid var(--border);
+  text-decoration:none;color:var(--ink);background:var(--bg);
+  font-size:14px;
+}
+.doc-link:hover{background:#f1f5f9;border-color:var(--blue)}
+.doc-link .doc-icon{font-size:20px}
+.doc-link .doc-name{flex:1;font-weight:500}
+.doc-link .doc-arrow{color:var(--blue);font-size:12px}
+.doc-disabled{
+  display:flex;align-items:center;gap:10px;
+  padding:12px 14px;border-radius:8px;border:1px solid var(--border);
+  color:var(--gray);background:#f8faff;font-size:14px;
+}
+.doc-disabled .doc-icon{font-size:20px;opacity:.4}
+
+/* ── Tarefas ── */
+.task-item{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid #f1f5f9;font-size:13px}
+.task-item:last-child{border:none}
+.check{
+  width:20px;height:20px;min-width:20px;border-radius:50%;
+  border:2px solid var(--border);display:flex;align-items:center;
+  justify-content:center;font-size:11px;margin-top:1px;
+}
+.check.done{background:var(--green);border-color:var(--green);color:#fff}
+.check.inprog{background:var(--blue);border-color:var(--blue);color:#fff;font-size:9px}
+
+/* ── Timeline ── */
+.timeline{list-style:none;position:relative}
+.timeline::before{content:'';position:absolute;left:9px;top:0;bottom:0;width:2px;background:#e2e8f0}
+.timeline li{position:relative;padding:0 0 12px 28px;font-size:13px;color:var(--ink2)}
+.timeline li::before{
+  content:'';position:absolute;left:5px;top:5px;
+  width:10px;height:10px;border-radius:50%;
+  background:var(--blue);border:2px solid #fff;
+}
+.timeline .ts{color:var(--gray);font-size:11px;margin-right:6px}
+
+/* ── Misc ── */
+.ts-update{font-size:11px;color:var(--gray);text-align:right;margin-bottom:10px}
+.error-msg{text-align:center;padding:60px 20px;color:var(--gray)}
+.error-msg .icon{font-size:48px;margin-bottom:12px}
+
+/* ── Timesheets ── */
+.ts-row{display:flex;flex-direction:column;gap:12px;margin-top:4px}
+.ts-card{background:#f8faff;border:1px solid var(--border);border-radius:10px;padding:14px}
+.ts-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.ts-worker{font-weight:700;font-size:14px;color:var(--ink)}
+.ts-event{font-size:12px;color:var(--ink2);margin-top:2px}
+.ts-meta{font-size:12px;color:var(--gray)}
+.ts-hours{font-size:20px;font-weight:700;color:var(--blue)}
+.ts-notes{font-size:12px;color:var(--ink2);margin-top:6px;padding-top:6px;border-top:1px solid var(--border)}
+.ts-actions{display:flex;gap:8px;margin-top:10px}
+.ts-badge{padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700}
+.ts-badge.submitted{background:#fef3c7;color:#92400e}
+.ts-badge.approved{background:#dcfce7;color:#166534}
+.ts-badge.rejected{background:#fee2e2;color:#991b1b}
+.ts-badge.open{background:#dbeafe;color:#1d4ed8}
+.ts-badge.paid{background:#f0fdf4;color:#14532d}
+.btn-sm{padding:8px 14px;border-radius:7px;border:none;font-size:13px;font-weight:600;cursor:pointer}
+.btn-sm-approve{background:var(--green);color:#fff}
+.btn-sm-approve:hover{background:#16a34a}
+.btn-sm-reject{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+.btn-sm-reject:hover{background:#fecaca}
+.btn-sm:disabled{opacity:.5;cursor:not-allowed}
+</style>
+</head>
+<body>
+
+<header id="page-header" style="display:none">
+  <div class="brand">JDL · Granulação de Cabos</div>
+  <div class="name" id="h-name">—</div>
+  <div class="badge-wrap">
+    <span class="state-badge" id="h-estado"></span>
+    <span class="ts" id="h-date"></span>
+  </div>
+</header>
+
+<main>
+  <div class="ts-update" id="ts-update"></div>
+  <div id="content">
+    <div class="error-msg"><div class="icon">⏳</div>A carregar...</div>
+  </div>
+  <div id="timesheets-section" style="display:none">
+    <div class="card">
+      <div class="card-title">Horas — Aprovação</div>
+      <div id="ts-list" class="ts-row"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const ESTADOS_PT = {
+  agendado:'Agendado', chegou:'Chegou à fábrica', em_processamento:'Em processamento',
+  separacao:'Separação cobre/plástico', concluido:'Concluído',
+  pronto_levantar:'Pronto a levantar', faturado:'Faturado', fechado:'Fechado'
+};
+const BATCH_STATES = ['agendado','chegou','em_processamento','separacao',
+                      'concluido','pronto_levantar','faturado','fechado'];
+
+const token = location.pathname.split('/client/')[1]?.split('?')[0] || '';
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function fmt(v, decimals=0) {
+  if (v == null || v === '') return '—';
+  return Number(v).toFixed(decimals);
+}
+
+let _lastApprovalResult = null;
+
+async function load() {
+  if (!token) {
+    document.getElementById('content').innerHTML =
+      '<div class="error-msg"><div class="icon">🔗</div>Link inválido.</div>';
+    return;
+  }
+  try {
+    const r = await fetch(`/api/twin/batch/by-token/${token}`);
+    const d = await r.json();
+    if (d.error || !d.entity_id) {
+      document.getElementById('content').innerHTML =
+        '<div class="error-msg"><div class="icon">🔍</div>Lote não encontrado ou link expirado.</div>';
+      return;
+    }
+    render(d);
+    document.getElementById('ts-update').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt');
+  } catch(e) {
+    document.getElementById('content').innerHTML =
+      '<div class="error-msg"><div class="icon">⚠️</div>Erro ao carregar. Verifique a ligação.</div>';
+  }
+}
+
+function render(d) {
+  const estado   = d.estado || '';
+  const estadoPT = ESTADOS_PT[estado] || estado;
+  const pct      = d.progresso_pct || 0;
+  const idx      = BATCH_STATES.indexOf(estado);
+
+  // Header
+  const hdr = document.getElementById('page-header');
+  hdr.style.display = '';
+  document.getElementById('h-name').textContent  = `Lote #${d.entity_id} — ${d.client || 'Cliente'}`;
+  document.getElementById('h-date').textContent  = (d.created_at||'').slice(0,10);
+  const hEstado = document.getElementById('h-estado');
+  hEstado.textContent  = estadoPT;
+  hEstado.className    = `state-badge state-${estado}`;
+
+  // ── Progresso ──
+  const stepsHtml = BATCH_STATES.map((s, i) => {
+    const cls = i < idx ? 'done' : (i === idx ? 'active' : '');
+    return `<div class="step ${cls}" title="${ESTADOS_PT[s]||s}"></div>`;
+  }).join('');
+
+  const progressCard = `
+    <div class="card">
+      <div class="card-title">Progresso</div>
+      <div class="steps">${stepsHtml}</div>
+      <div class="progress-labels">
+        <span>Agendado</span><span>Fechado</span>
+      </div>
+      <div class="progress-pct">${pct}% — ${estadoPT}</div>
+    </div>`;
+
+  // ── Informação geral ──
+  const infoCard = `
+    <div class="card">
+      <div class="card-title">Informação do Lote</div>
+      <div class="info-row"><span class="lbl">Nº Lote</span><span class="val">#${d.entity_id}</span></div>
+      <div class="info-row"><span class="lbl">Cliente</span><span class="val">${esc(d.client||'—')}</span></div>
+      <div class="info-row"><span class="lbl">Peso de entrada</span><span class="val">${fmt(d.kg)} kg</span></div>
+      <div class="info-row"><span class="lbl">Data entrada</span><span class="val">${(d.created_at||'').slice(0,10).replace(/-/g,'/')}</span></div>
+      <div class="info-row"><span class="lbl">Estado actual</span><span class="val"><span class="state-badge state-${estado}">${estadoPT}</span></span></div>
+    </div>`;
+
+  // ── Resultado ──
+  const resultCard = d.kg_cobre ? `
+    <div class="card">
+      <div class="card-title">Resultado do Processamento</div>
+      <div class="result-grid">
+        <div class="result-box">
+          <div class="n">${fmt(d.kg_cobre)} kg</div>
+          <div class="l">Cobre recuperado</div>
+        </div>
+        <div class="result-box">
+          <div class="n">${fmt(d.kg_plastico)} kg</div>
+          <div class="l">Plástico recuperado</div>
+        </div>
+        <div class="result-box">
+          <div class="n ${d.valor_fatura ? 'green' : ''}">${d.valor_fatura ? 'EUR ' + fmt(d.valor_fatura, 2) : '—'}</div>
+          <div class="l">Valor do serviço</div>
+        </div>
+      </div>
+    </div>` : '';
+
+  // ── Aprovações ──
+  let approvalCard = '';
+  const approvals = d.approvals || [];
+  if (approvals.length > 0 && !_lastApprovalResult) {
+    const appr = approvals[0];
+    const ctx  = appr.context || {};
+    const valor = ctx.valor ? `EUR ${fmt(ctx.valor, 2)}` : '';
+    const actionLabel = appr.action === 'faturar_lote' ? 'Aprovação de Faturação' : appr.action;
+    approvalCard = `
+      <div class="card">
+        <div class="card-title">Aprovação Pendente</div>
+        <div class="approval-box">
+          <div style="font-weight:600;color:#92400e">${esc(actionLabel)}</div>
+          ${valor ? `<div class="amount">${valor}</div>` : ''}
+          <div class="desc">
+            ${ctx.kg_cobre ? `${fmt(ctx.kg_cobre)} kg cobre × EUR ${fmt(ctx.preco_kg,2)}/kg` : ''}
+            Aguarda a sua aprovação para continuar.
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-approve" id="btn-approve" onclick="doApprove(${appr.id},'approved')">
+              ✓ Aprovar
+            </button>
+            <button class="btn btn-reject" id="btn-reject" onclick="doApprove(${appr.id},'rejected')">
+              ✗ Rejeitar
+            </button>
+          </div>
+        </div>
+      </div>`;
+  } else if (_lastApprovalResult) {
+    const isOk = _lastApprovalResult.action === 'approved';
+    approvalCard = `
+      <div class="card">
+        <div class="card-title">Aprovação</div>
+        <div class="approval-done ${isOk ? 'approved' : 'rejected'}">
+          ${isOk ? '✓ Aprovado — obrigado!' : '✗ Rejeitado'}
+        </div>
+      </div>`;
+  }
+
+  // ── Documentos ──
+  const hasFatura  = ['faturado','fechado'].includes(estado);
+  const docGuia    = `<a class="doc-link" href="/api/twin/batch/by-token/${token}/doc/guia" target="_blank">
+    <span class="doc-icon">📄</span>
+    <span class="doc-name">Guia de Processamento</span>
+    <span class="doc-arrow">↗ PDF</span>
+  </a>`;
+  const docFatura  = hasFatura
+    ? `<a class="doc-link" href="/api/twin/batch/by-token/${token}/doc/fatura" target="_blank">
+        <span class="doc-icon">🧾</span>
+        <span class="doc-name">Fatura do Serviço</span>
+        <span class="doc-arrow">↗ PDF</span>
+       </a>`
+    : `<div class="doc-disabled">
+        <span class="doc-icon">🧾</span>
+        <span style="color:var(--gray)">Fatura disponível após faturação</span>
+       </div>`;
+  const docsCard = `
+    <div class="card">
+      <div class="card-title">Documentos</div>
+      <div class="doc-list">${docGuia}${docFatura}</div>
+    </div>`;
+
+  // ── Tarefas ──
+  const tasks = d.tasks || [];
+  let tasksCard = '';
+  if (tasks.length) {
+    const taskItems = tasks.map(t => {
+      const done = t.status === 'done';
+      const inprog = t.status === 'in_progress';
+      return `<div class="task-item">
+        <div class="check ${done ? 'done' : inprog ? 'inprog' : ''}">${done ? '✓' : inprog ? '▶' : ''}</div>
+        <span style="color:${done ? '#166534' : inprog ? 'var(--blue)' : 'var(--ink2)'}">${esc(t.title)}</span>
+      </div>`;
+    }).join('');
+    tasksCard = `<div class="card"><div class="card-title">Tarefas</div>${taskItems}</div>`;
+  }
+
+  // ── Timeline ──
+  const events = d.events || [];
+  let timelineCard = '';
+  if (events.length) {
+    const evItems = events.slice().reverse().map(e =>
+      `<li><span class="ts">${esc(e.ts)}</span>${esc(e.msg)}</li>`
+    ).join('');
+    timelineCard = `<div class="card"><div class="card-title">Histórico</div><ul class="timeline">${evItems}</ul></div>`;
+  }
+
+  document.getElementById('content').innerHTML =
+    progressCard + infoCard + resultCard + approvalCard + docsCard + tasksCard + timelineCard;
+}
+
+async function doApprove(approvalId, action) {
+  const btnApprove = document.getElementById('btn-approve');
+  const btnReject  = document.getElementById('btn-reject');
+  if (btnApprove) btnApprove.disabled = true;
+  if (btnReject)  btnReject.disabled  = true;
+  if (btnApprove) btnApprove.textContent = '...';
+  try {
+    const r = await fetch(`/api/twin/client/${token}/approve/${approvalId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      _lastApprovalResult = { action, approval_id: approvalId };
+      await load(); // reload to show updated state
+    } else {
+      alert('Erro: ' + (d.error || 'desconhecido'));
+      if (btnApprove) { btnApprove.disabled = false; btnApprove.textContent = '✓ Aprovar'; }
+      if (btnReject)  { btnReject.disabled  = false; }
+    }
+  } catch(e) {
+    alert('Erro de rede.');
+    if (btnApprove) { btnApprove.disabled = false; btnApprove.textContent = '✓ Aprovar'; }
+    if (btnReject)  { btnReject.disabled  = false; }
+  }
+}
+
+load();
+loadTimesheets();
+setInterval(() => { load(); loadTimesheets(); }, 30000);
+
+// ── Timesheets ────────────────────────────────────────────────────────────────
+
+async function loadTimesheets() {
+  try {
+    const r = await fetch(`/api/client/${token}/timesheets`);
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!d.ok || !d.timesheets || d.timesheets.length === 0) return;
+
+    const section = document.getElementById('timesheets-section');
+    const list    = document.getElementById('ts-list');
+    section.style.display = '';
+
+    list.innerHTML = d.timesheets.map(ts => {
+      const start = ts.start_time ? new Date(ts.start_time).toLocaleString('pt') : '—';
+      const end   = ts.end_time   ? new Date(ts.end_time).toLocaleString('pt')   : '—';
+      const rate  = ts.hourly_rate ? ` × ${Number(ts.hourly_rate).toFixed(2)}€/h` : '';
+      const total = (ts.hours && ts.hourly_rate) ? ` = ${(ts.hours * ts.hourly_rate).toFixed(2)}€` : '';
+      const canAct = ts.status === 'submitted';
+
+      return `<div class="ts-card" id="tscard-${ts.id}">
+        <div class="ts-card-header">
+          <div>
+            <div class="ts-worker">${esc(ts.worker_id)}</div>
+            <div class="ts-event">${esc(ts.event_name)}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="ts-hours">${ts.hours != null ? Number(ts.hours).toFixed(2) + 'h' : '—'}</div>
+            <span class="ts-badge ${ts.status}">${ts.status}</span>
+          </div>
+        </div>
+        <div class="ts-meta">${start} → ${end}${rate}${total}</div>
+        ${ts.notes ? `<div class="ts-notes">${esc(ts.notes)}</div>` : ''}
+        ${canAct ? `
+        <div class="ts-actions">
+          <button class="btn-sm btn-sm-approve" onclick="tsAction(${ts.id},'approve')" id="ts-app-${ts.id}">✓ Aprovar</button>
+          <button class="btn-sm btn-sm-reject"  onclick="tsAction(${ts.id},'reject')"  id="ts-rej-${ts.id}">✗ Rejeitar</button>
+        </div>` : ''}
+      </div>`;
+    }).join('');
+  } catch(e) {
+    // silencioso — pode ser token de batch sem timesheets
+  }
+}
+
+async function tsAction(tsId, action) {
+  const appBtn = document.getElementById(`ts-app-${tsId}`);
+  const rejBtn = document.getElementById(`ts-rej-${tsId}`);
+  if (appBtn) appBtn.disabled = true;
+  if (rejBtn) rejBtn.disabled = true;
+  try {
+    const r = await fetch(`/api/client/${token}/timesheet/${tsId}/${action}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'}
+    });
+    const d = await r.json();
+    if (d.ok) {
+      const card = document.getElementById(`tscard-${tsId}`);
+      if (card) {
+        const badge  = card.querySelector('.ts-badge');
+        const acts   = card.querySelector('.ts-actions');
+        if (badge) { badge.className = `ts-badge ${d.status}`; badge.textContent = d.status; }
+        if (acts)  acts.remove();
+      }
+    } else {
+      alert('Erro: ' + (d.error || 'desconhecido'));
+      if (appBtn) appBtn.disabled = false;
+      if (rejBtn) rejBtn.disabled = false;
+    }
+  } catch(e) {
+    alert('Erro de rede.');
+    if (appBtn) appBtn.disabled = false;
+    if (rejBtn) rejBtn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>
