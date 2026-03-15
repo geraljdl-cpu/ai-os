@@ -2360,6 +2360,158 @@ def cmd_pipeline_incidents(args):
     print(json.dumps({"ok": True, "job_id": job_id}))
 
 
+# ── Document Vault ───────────────────────────────────────────────────────────
+
+def cmd_doc_summary(args):
+    """Resumo documental: contagens por status + pedidos abertos."""
+    engine, text = _conn()
+    with engine.connect() as c:
+        counts = c.execute(text("""
+            SELECT status, COUNT(*) AS n FROM public.documents GROUP BY status
+        """)).mappings().all()
+        requests = c.execute(text("""
+            SELECT status, COUNT(*) AS n FROM public.document_requests GROUP BY status
+        """)).mappings().all()
+        critical = c.execute(text("""
+            SELECT d.id, d.title, d.doc_type, d.owner_type, d.owner_id,
+                   d.expiry_date, d.status, d.sensitivity
+            FROM public.documents d
+            WHERE d.status IN ('expired','expiring')
+            ORDER BY d.expiry_date ASC NULLS LAST
+            LIMIT 10
+        """)).mappings().all()
+    doc_counts = {r["status"]: r["n"] for r in counts}
+    req_counts = {r["status"]: r["n"] for r in requests}
+    print(json.dumps({
+        "doc_counts":    doc_counts,
+        "req_counts":    req_counts,
+        "critical_docs": [_row(r) for r in critical],
+    }, ensure_ascii=False))
+
+
+def cmd_doc_list(args):
+    """Lista documentos. Args: [--status valid|expiring|expired] [--owner-type X] [limit]"""
+    status     = None
+    owner_type = None
+    limit      = 30
+    i = 0
+    while i < len(args):
+        if args[i] == "--status" and i + 1 < len(args):
+            status = args[i+1]; i += 2
+        elif args[i] == "--owner-type" and i + 1 < len(args):
+            owner_type = args[i+1]; i += 2
+        elif args[i].isdigit():
+            limit = int(args[i]); i += 1
+        else:
+            i += 1
+    filters  = ""
+    params: dict = {"n": limit}
+    if status:
+        filters += " AND d.status = :status"; params["status"] = status
+    if owner_type:
+        filters += " AND d.owner_type = :ot"; params["ot"] = owner_type
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text(f"""
+            SELECT d.id, d.owner_type, d.owner_id, d.doc_type, d.title,
+                   d.issuer, d.expiry_date, d.status, d.sensitivity, d.source,
+                   d.issue_date, d.notes, d.created_at
+            FROM public.documents d
+            WHERE 1=1 {filters}
+            ORDER BY d.expiry_date ASC NULLS LAST, d.created_at DESC
+            LIMIT :n
+        """), params).mappings().all()
+    print(json.dumps([_row(r) for r in rows], ensure_ascii=False))
+
+
+def cmd_doc_expiring(args):
+    """Documentos a expirar nos próximos N dias. Args: [days=30]"""
+    days = int(args[0]) if args and args[0].isdigit() else 30
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT d.id, d.owner_type, d.owner_id, d.doc_type, d.title,
+                   d.issuer, d.expiry_date, d.status, d.sensitivity,
+                   d.expiry_date - CURRENT_DATE AS days_left
+            FROM public.documents d
+            WHERE d.expiry_date IS NOT NULL
+              AND d.expiry_date >= CURRENT_DATE
+              AND d.expiry_date <= CURRENT_DATE + (:days || ' days')::interval
+            ORDER BY d.expiry_date ASC
+        """), {"days": str(days)}).mappings().all()
+    print(json.dumps([_row(r) for r in rows], ensure_ascii=False))
+
+
+def cmd_doc_requests(args):
+    """Pedidos documentais abertos. Args: [limit]"""
+    limit = int(args[0]) if args and args[0].isdigit() else 20
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT r.id, r.owner_type, r.owner_id, r.doc_type, r.status,
+                   r.process_type, r.linked_case_id, r.due_date, r.notes,
+                   r.requested_at,
+                   r.due_date - CURRENT_DATE AS days_left
+            FROM public.document_requests r
+            WHERE r.status NOT IN ('done','failed')
+            ORDER BY r.due_date ASC NULLS LAST, r.requested_at DESC
+            LIMIT :n
+        """), {"n": limit}).mappings().all()
+    print(json.dumps([_row(r) for r in rows], ensure_ascii=False))
+
+
+# ── Vehicles ─────────────────────────────────────────────────────────────────
+
+def cmd_vehicle_list(args):
+    """Lista viaturas com estado dos documentos. Args: [limit]"""
+    limit = int(args[0]) if args and args[0].isdigit() else 20
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT v.id, v.matricula, v.marca, v.modelo, v.ano, v.cor,
+                   v.estado, v.owner_type, v.owner_id, v.notes,
+                   COUNT(d.id)                                                   AS total_docs,
+                   COUNT(d.id) FILTER (WHERE d.status = 'expired')              AS docs_expired,
+                   COUNT(d.id) FILTER (WHERE d.status = 'expiring')             AS docs_expiring,
+                   COUNT(d.id) FILTER (WHERE d.status = 'valid')                AS docs_valid
+            FROM public.vehicles v
+            LEFT JOIN public.documents d ON d.owner_type = 'vehicle' AND d.owner_id = v.id
+            WHERE v.estado != 'vendido'
+            GROUP BY v.id
+            ORDER BY docs_expired DESC, docs_expiring DESC, v.matricula
+            LIMIT :n
+        """), {"n": limit}).mappings().all()
+    print(json.dumps([_row(r) for r in rows], ensure_ascii=False))
+
+
+def cmd_vehicle_get(args):
+    """Detalhe viatura + docs. Args: <id|matricula>"""
+    if not args:
+        print(json.dumps({"error": "id ou matricula obrigatório"})); return
+    engine, text = _conn()
+    lookup = args[0]
+    param  = {"v": lookup}
+    col    = "v.id = :v::int" if lookup.isdigit() else "v.matricula = :v"
+    with engine.connect() as c:
+        v = c.execute(text(f"""
+            SELECT v.id, v.matricula, v.marca, v.modelo, v.ano, v.cor,
+                   v.estado, v.owner_type, v.owner_id, v.notes, v.created_at
+            FROM public.vehicles v WHERE {col}
+        """), param).mappings().first()
+        if not v:
+            print(json.dumps({"error": "viatura não encontrada"})); return
+        docs = c.execute(text("""
+            SELECT id, doc_type, title, issuer, expiry_date, status, sensitivity, file_path
+            FROM public.documents
+            WHERE owner_type = 'vehicle' AND owner_id = :vid
+            ORDER BY expiry_date ASC NULLS LAST
+        """), {"vid": v["id"]}).mappings().all()
+    print(json.dumps({
+        "vehicle": _row(v),
+        "documents": [_row(d) for d in docs],
+    }, ensure_ascii=False))
+
+
 CMDS = {
     "telemetry_history": cmd_telemetry_history,
     "telemetry_live":    cmd_telemetry_live,
@@ -2439,6 +2591,14 @@ CMDS = {
     "pipeline_idea_analyze":       cmd_pipeline_idea_analyze,
     "pipeline_radar_score":        cmd_pipeline_radar_score,
     "pipeline_incidents":          cmd_pipeline_incidents,
+    # Document Vault
+    "doc_summary":                 cmd_doc_summary,
+    "doc_list":                    cmd_doc_list,
+    "doc_expiring":                cmd_doc_expiring,
+    "doc_requests":                cmd_doc_requests,
+    # Vehicles
+    "vehicle_list":                cmd_vehicle_list,
+    "vehicle_get":                 cmd_vehicle_get,
 }
 
 if __name__ == "__main__":

@@ -557,6 +557,89 @@ def handle_finance(_args) -> str:
     return "\n".join(lines)
 
 
+# ── Documents (/docs) ────────────────────────────────────────────────────────
+
+_DOC_TYPE_LABEL = {
+    "certidao_permanente": "Certidão Permanente", "registo_criminal": "Reg. Criminal",
+    "nao_divida_at": "Não Dívida AT",             "nao_divida_ss": "Não Dívida SS",
+    "seguro_viatura": "Seguro",                   "inspecao_viatura": "Inspeção",
+    "iuc": "IUC",                                 "contrato_concurso": "Contrato/Concurso",
+}
+
+def _noc_json(path: str) -> dict | list:
+    headers = {"x-aios-ops-token": OPS_TOKEN} if OPS_TOKEN else {}
+    r = requests.get(f"{UI_BASE}/api{path}", headers=headers, timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+def handle_docs(args: list) -> str:
+    sub = args[0].lower() if args else ""
+    try:
+        if sub == "expirados":
+            docs = _noc_json("/docs?status=expired&limit=15")
+            if not isinstance(docs, list) or not docs:
+                return "✅ Sem documentos expirados."
+            lines = [f"🔴 *Documentos Expirados* ({len(docs)})", ""]
+            for d in docs:
+                label = _DOC_TYPE_LABEL.get(d.get("doc_type",""), d.get("doc_type",""))
+                exp   = str(d.get("expiry_date",""))[:10]
+                lines.append(f"• {d.get('owner_type','?')}#{d.get('owner_id','?')} — {label} ({exp})")
+            return "\n".join(lines)
+
+        elif sub in ("viaturas", "veiculos"):
+            vehs = _noc_json("/vehicles?limit=20")
+            if not isinstance(vehs, list) or not vehs:
+                return "Sem viaturas registadas."
+            lines = [f"🚗 *Viaturas* ({len(vehs)})", ""]
+            for v in vehs:
+                exp_icon = "🔴" if v.get("docs_expired",0) > 0 else ("🟡" if v.get("docs_expiring",0) > 0 else "✅")
+                lines.append(
+                    f"{exp_icon} *{v['matricula']}* {v.get('marca','')} {v.get('modelo','')} "
+                    f"— exp:{v.get('docs_expired',0)} soon:{v.get('docs_expiring',0)} ok:{v.get('docs_valid',0)}"
+                )
+            return "\n".join(lines)
+
+        elif sub == "empresa":
+            docs = _noc_json("/docs?owner_type=company&limit=15")
+            if not isinstance(docs, list) or not docs:
+                return "Sem documentos de empresa registados."
+            lines = [f"🏢 *Docs Empresa* ({len(docs)})", ""]
+            for d in docs:
+                label  = _DOC_TYPE_LABEL.get(d.get("doc_type",""), d.get("doc_type",""))
+                status = d.get("status","?")
+                icon   = "🔴" if status=="expired" else "🟡" if status=="expiring" else "✅"
+                exp    = str(d.get("expiry_date",""))[:10] if d.get("expiry_date") else "—"
+                lines.append(f"{icon} {label} — {status} ({exp})")
+            return "\n".join(lines)
+
+        else:
+            # Resumo geral
+            d = _noc_json("/docs/summary")
+            if isinstance(d, dict) and "error" in d:
+                return f"Erro ao carregar documentos: {d['error']}"
+            counts = d.get("doc_counts", {})
+            reqs   = d.get("req_counts", {})
+            lines  = [f"📄 *Document Vault* — {nowz()}", ""]
+            lines.append(f"🔴 Expirados: {counts.get('expired',0)}")
+            lines.append(f"🟡 A expirar: {counts.get('expiring',0)}")
+            lines.append(f"✅ Válidos:   {counts.get('valid',0)}")
+            lines.append("")
+            req_open = reqs.get("open",0) + reqs.get("drafted",0)
+            lines.append(f"📋 Pedidos pendentes: {req_open}")
+            crit = d.get("critical_docs", [])[:3]
+            if crit:
+                lines.append("")
+                lines.append("⚠️ *Críticos:*")
+                for doc in crit:
+                    label = _DOC_TYPE_LABEL.get(doc.get("doc_type",""), doc.get("doc_type",""))
+                    exp   = str(doc.get("expiry_date",""))[:10]
+                    lines.append(f"  • {doc.get('owner_type','?')} — {label} ({exp})")
+            lines.append(f"\n🌐 {UI_BASE}/joao")
+            return "\n".join(lines)
+    except Exception as e:
+        return f"Erro /docs: {e}"
+
+
 # ── Cluster agents (/cluster) ─────────────────────────────────────────────────
 
 def handle_cluster(_args) -> str:
@@ -774,6 +857,9 @@ def handle_command(text: str):
     if t.startswith("/alertas"):
         send(handle_alertas(t.split()[1:]))
         return
+    if t.startswith("/docs"):
+        send(handle_docs(t.split()[1:]))
+        return
     if t.startswith("/control"):
         send(
             f"📺 *Control Room*\n{UI_BASE}/control\n\n"
@@ -792,6 +878,7 @@ def handle_command(text: str):
             "/alertas — incidentes abertos\n"
             "/finance — obrigações e pagamentos RH\n"
             "/case list|ver <id> — gestão de casos\n"
+            "/docs — Document Vault (expirados|viaturas|empresa)\n"
             "/control — link para o control room\n"
             "/status — estado da infra\n"
             "/approvals — aprovações da fábrica\n"

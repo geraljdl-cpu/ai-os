@@ -89,6 +89,9 @@ app.use('/api', (req, res, next) => {
   if (req.path.startsWith('/twin/batch'))  return next();  // auth própria em cada endpoint
   if (req.path.startsWith('/twin/client')) return next(); // client portal — token validado no noc_query
   if (req.path.match(/^\/client\/[a-zA-Z0-9]+\/(timesheets|timesheet)/)) return next(); // client timesheet portal
+  // OPS token bypasses JWT entirely (system/bot calls)
+  const opsTokGlobal = String(req.headers['x-aios-ops-token'] || '').trim();
+  if (OPS_TOKEN && opsTokGlobal === OPS_TOKEN) return next();
   const auth  = req.headers['authorization'] || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
   if (!token) return res.status(401).json({ ok: false, error: 'unauthorized' });
@@ -598,6 +601,42 @@ app.post('/api/twin/tender/:id/estado', requireRole('operator'), (req, res) => {
   const estado = String(req.body?.estado || '').trim();
   if (!id || !estado) return res.status(400).json({ ok: false, error: 'id e estado obrigatórios' });
   res.json(nocExec(`twin_tender_update ${id} ${estado}`, 8000));
+});
+
+// ── Document Vault ───────────────────────────────────────────────────────────
+app.get('/api/docs/summary', requireRole('viewer'), (req, res) => {
+  res.json(nocExec('doc_summary'));
+});
+
+app.get('/api/docs', requireRole('viewer'), (req, res) => {
+  const limit  = parseInt(req.query.limit, 10) || 30;
+  const status = String(req.query.status || '').replace(/[^a-z_]/g, '');
+  const otype  = String(req.query.owner_type || '').replace(/[^a-z_]/g, '');
+  let cmd = `doc_list ${limit}`;
+  if (status) cmd += ` --status ${status}`;
+  if (otype)  cmd += ` --owner-type ${otype}`;
+  res.json(nocExec(cmd));
+});
+
+app.get('/api/docs/expiring', requireRole('viewer'), (req, res) => {
+  const days = parseInt(req.query.days, 10) || 30;
+  res.json(nocExec(`doc_expiring ${days}`));
+});
+
+app.get('/api/docs/requests', requireRole('viewer'), (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 20;
+  res.json(nocExec(`doc_requests ${limit}`));
+});
+
+// ── Vehicles ─────────────────────────────────────────────────────────────────
+app.get('/api/vehicles', requireRole('viewer'), (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 20;
+  res.json(nocExec(`vehicle_list ${limit}`));
+});
+
+app.get('/api/vehicles/:id', requireRole('viewer'), (req, res) => {
+  const id = String(req.params.id).replace(/[^a-zA-Z0-9-]/g, '');
+  res.json(nocExec(`vehicle_get ${id}`));
 });
 
 // Twin Batch — guia pública via client_token (portal cliente)
