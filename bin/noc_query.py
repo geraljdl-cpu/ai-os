@@ -2202,6 +2202,23 @@ def cmd_incident_create(args):
 
 # ── Pipeline helpers ───────────────────────────────────────────────────────────
 
+def cmd_cluster_metrics(args):
+    """Latest telemetry per node. Args: [limit=6]"""
+    limit = int(args[0]) if args else 6
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT DISTINCT ON (node)
+                node, ip, cpu_pct, ram_used_mb, ram_total_mb,
+                load_1, disk_used_pct, worker_state, current_job_id,
+                node_role, jobs_24h, failures_24h, created_at
+            FROM public.cluster_node_metrics
+            ORDER BY node, created_at DESC
+            LIMIT :n
+        """), {"n": limit}).mappings().all()
+    print(json.dumps([_row(r) for r in rows], ensure_ascii=False))
+
+
 def cmd_pipeline_idea_analyze(args):
     """Enfileira análise de ideia no cluster. Args: <thread_id>"""
     if not args:
@@ -2325,6 +2342,7 @@ CMDS = {
     "incident_list":               cmd_incident_list,
     "incident_resolve":            cmd_incident_resolve,
     "incident_create":             cmd_incident_create,
+    "cluster_metrics":             cmd_cluster_metrics,
     "pipeline_idea_analyze":       cmd_pipeline_idea_analyze,
     "pipeline_radar_score":        cmd_pipeline_radar_score,
     "pipeline_incidents":          cmd_pipeline_incidents,

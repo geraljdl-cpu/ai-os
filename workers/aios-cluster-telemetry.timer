@@ -1,0 +1,11 @@
+[Unit]
+Description=AI-OS Cluster Telemetry Timer (every 30s)
+Requires=aios-cluster-telemetry.service
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

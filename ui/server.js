@@ -1222,7 +1222,8 @@ app.get('/api/control/overview', (req, res) => {
     const ideas      = nocExec('idea_list _ 8');
     const incidents  = nocExec('incident_list 20');
     const bankTxs    = nocExec('bank_transactions 5 unmatched');
-    const clusterJobs = nocExec('worker_jobs 15');
+    const clusterJobs    = nocExec('worker_jobs 15');
+    const clusterMetrics = nocExec('cluster_metrics 6');
 
     const arr = v => Array.isArray(v) ? v : [];
     res.json({
@@ -1239,7 +1240,8 @@ app.get('/api/control/overview', (req, res) => {
       ideas:         ideas.ideas       || arr(ideas),
       incidents:     incidents.incidents || [],
       bank_unmatched: bankTxs.summary?.unmatched || 0,
-      cluster_jobs:  arr(clusterJobs),
+      cluster_jobs:    arr(clusterJobs),
+      cluster_metrics: arr(clusterMetrics),
       generated_at:  new Date().toISOString(),
     });
   } catch(e) {
