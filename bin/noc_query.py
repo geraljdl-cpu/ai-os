@@ -1844,8 +1844,12 @@ def cmd_idea_create(args):
 
 def cmd_idea_list(args):
     """Lista ideias: [status] [limit]"""
-    status = args[0] if args and args[0] not in ('', 'all') else None
-    limit  = int(args[1]) if len(args) > 1 else 30
+    # args[0] pode ser status (texto) ou limit (número) quando status omitido
+    if args and args[0].lstrip('-').isdigit():
+        status, limit = None, int(args[0])
+    else:
+        status = args[0] if args and args[0] not in ('', 'all', '_') else None
+        limit  = int(args[1]) if len(args) > 1 else 30
     engine, text = _conn()
     with engine.connect() as c:
         rows = c.execute(text("""

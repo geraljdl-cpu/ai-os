@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS public.idea_reviews (
     summary     TEXT,
     risks       TEXT,
     next_steps  TEXT,
-    raw         JSONB NOT NULL DEFAULT '{}',
+    raw         TEXT NOT NULL DEFAULT '',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idea_reviews_thread ON public.idea_reviews(thread_id);
