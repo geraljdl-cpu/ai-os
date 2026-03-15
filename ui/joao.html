@@ -610,6 +610,22 @@ function renderIdeaDetail(d) {
       Sem análises ainda. Clica "Analisar com Conselho IA".
     </div>` : '';
 
+  const caseInfo = d.case ? (() => {
+    const tasks = (d.tasks || []);
+    const tasksHtml = tasks.map(t =>
+      `<div style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;border-bottom:1px solid #1e293b">
+        <span style="width:10px;height:10px;border-radius:50%;background:${t.status==='done'?'#22c55e':'#475569'};flex-shrink:0"></span>
+        <span style="font-size:.82rem;color:${t.status==='done'?'#86efac':'#cbd5e1'}">${esc(t.title)}</span>
+      </div>`).join('');
+    return `<div style="background:#0f172a;border:1px solid #3b0764;border-radius:.6rem;padding:1rem;margin-top:.75rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem">
+        <span style="font-size:.78rem;font-weight:700;color:#c084fc;letter-spacing:.05em">PROJETO CRIADO</span>
+        <a href="/factory" style="font-size:.75rem;color:#60a5fa;text-decoration:none">Case #${d.case.case_id} →</a>
+      </div>
+      ${tasksHtml}
+    </div>`;
+  })() : '';
+
   document.getElementById('idea-detail').innerHTML = `
     <div class="detail-panel">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.75rem">
@@ -624,6 +640,7 @@ function renderIdeaDetail(d) {
       ${reviewsHtml}
       ${synthesisHtml}
       ${noReviews}
+      ${caseInfo}
     </div>`;
 }
 

@@ -1883,12 +1883,28 @@ def cmd_idea_get(args):
             WHERE thread_id=:tid ORDER BY created_at
         """), {"tid": tid}).mappings().all()
         reviews = c.execute(text("""
-            SELECT id, agent, summary, risks, next_steps, score, created_at
+            SELECT id, agent, summary, risks, next_steps, score, raw, created_at
             FROM public.idea_reviews WHERE thread_id=:tid ORDER BY created_at
         """), {"tid": tid}).mappings().all()
+        # caso associado (se ideia já foi convertida em projeto)
+        case_row = c.execute(text("""
+            SELECT tc.id AS case_id, tc.status AS case_status
+            FROM public.twin_entities te
+            JOIN public.twin_cases tc ON tc.entity_id = te.id
+            WHERE te.type='idea' AND te.metadata->>'idea_thread_id' = :tid
+            ORDER BY tc.id DESC LIMIT 1
+        """), {"tid": str(tid)}).mappings().first()
+        tasks = []
+        if case_row:
+            tasks = c.execute(text("""
+                SELECT id, title, status FROM public.twin_tasks
+                WHERE case_id=:cid ORDER BY id
+            """), {"cid": case_row["case_id"]}).mappings().all()
     print(json.dumps({"ok": True, "thread": _row(thread),
                       "messages": [_row(m) for m in msgs],
-                      "reviews":  [_row(r) for r in reviews]}))
+                      "reviews":  [_row(r) for r in reviews],
+                      "case":     _row(case_row) if case_row else None,
+                      "tasks":    [_row(t) for t in tasks]}))
 
 
 def cmd_idea_archive(args):
@@ -1930,6 +1946,20 @@ def cmd_idea_create_case(args):
         ), {"id": tid}).mappings().first()
         if not thread:
             print(json.dumps({"ok": False, "error": "Thread não encontrado"}))
+            return
+        # idempotência: devolver case existente se já foi criado
+        existing = c.execute(text("""
+            SELECT te.id AS entity_id, tc.id AS case_id
+            FROM public.twin_entities te
+            JOIN public.twin_cases tc ON tc.entity_id = te.id
+            WHERE te.type='idea' AND te.metadata->>'idea_thread_id' = :tid
+            ORDER BY tc.id DESC LIMIT 1
+        """), {"tid": str(tid)}).mappings().first()
+        if existing:
+            print(json.dumps({"ok": True, "thread_id": tid,
+                              "entity_id": existing["entity_id"],
+                              "case_id": existing["case_id"],
+                              "status": "project", "existing": True}))
             return
         # criar entity de tipo idea
         ent = c.execute(text("""
