@@ -860,6 +860,23 @@ def handle_command(text: str):
     if t.startswith("/docs"):
         send(handle_docs(t.split()[1:]))
         return
+    if t.startswith("/pendentes"):
+        try:
+            data = _noc_json("/inbox/pending")
+            items = data.get("items", [])
+            if not items:
+                send("✓ Sem pendentes")
+                return
+            lines = [f"📥 *Pendentes ({len(items)})*", ""]
+            for it in items[:10]:
+                urg = "🔴" if it.get("urgency") == "high" else "🟡"
+                lines.append(f"{urg} [{it['type']}] {it['title']}")
+                if it.get("summary"):
+                    lines.append(f"   _{it['summary']}_")
+            send("\n".join(lines))
+        except Exception as e:
+            send(f"Erro: {e}")
+        return
     if t.startswith("/council"):
         topic = t[len("/council"):].strip()
         if not topic:
@@ -907,6 +924,7 @@ def handle_command(text: str):
             "/finance — obrigações e pagamentos RH\n"
             "/case list|ver <id> — gestão de casos\n"
             "/docs — Document Vault (expirados|viaturas|empresa)\n"
+            "/pendentes — inbox aprovações/sugestões unificado\n"
             "/council <texto> — análise multi-agente de qualquer tópico\n"
             "/control — link para o control room\n"
             "/status — estado da infra\n"

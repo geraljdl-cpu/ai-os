@@ -2332,6 +2332,74 @@ def cmd_pipeline_idea_analyze(args):
     print(json.dumps({"ok": True, "job_id": job_id, "thread_id": thread_id}))
 
 
+def cmd_inbox_pending(args):
+    """Aggregate all pending approvals across sources."""
+    engine, text = _conn()
+    items = []
+
+    with engine.connect() as c:
+        # 1. twin_approvals pending (faturação/workflow)
+        rows = c.execute(text("""
+            SELECT a.id, a.kind, a.title, a.status, a.created_at,
+                   tc.workflow_key, te.name AS entity_name
+            FROM public.twin_approvals a
+            LEFT JOIN public.twin_cases tc ON tc.id = a.case_id
+            LEFT JOIN public.twin_entities te ON te.id = tc.entity_id
+            WHERE a.status = 'pending'
+            ORDER BY a.created_at ASC LIMIT 20
+        """)).mappings().all()
+        for r in rows:
+            items.append({
+                "source":   "approval",
+                "type":     r["kind"] or "approval",
+                "title":    r["title"] or f"Aprovação #{r['id']}",
+                "summary":  r["entity_name"] or r["workflow_key"] or "",
+                "urgency":  "high",
+                "ref_id":   str(r["id"]),
+                "created_at": str(r["created_at"]),
+            })
+
+        # 2. document_requests ready for approval
+        rows = c.execute(text("""
+            SELECT id, doc_type, owner_type, owner_id, status, due_date, process_type, linked_case_id
+            FROM public.document_requests
+            WHERE status IN ('ready_for_approval', 'open')
+            ORDER BY due_date ASC NULLS LAST LIMIT 20
+        """)).mappings().all()
+        for r in rows:
+            urgency = "high" if r["status"] == "ready_for_approval" else "medium"
+            items.append({
+                "source":   "doc_request",
+                "type":     "document",
+                "title":    f"Pedido documento: {r['doc_type']}",
+                "summary":  f"{r['owner_type']}#{r['owner_id']} · {r['process_type'] or ''}",
+                "urgency":  urgency,
+                "ref_id":   str(r["id"]),
+                "created_at": None,
+            })
+
+        # 3. agent_suggestions unread with high score
+        rows = c.execute(text("""
+            SELECT id, kind, title, details, score, created_at
+            FROM public.agent_suggestions
+            WHERE is_read = false AND kind IN ('alert','task_suggestion')
+              AND score >= 7
+            ORDER BY score DESC, created_at DESC LIMIT 10
+        """)).mappings().all()
+        for r in rows:
+            items.append({
+                "source":   "suggestion",
+                "type":     r["kind"],
+                "title":    r["title"],
+                "summary":  (r["details"] or "")[:80],
+                "urgency":  "high" if r["score"] >= 9 else "medium",
+                "ref_id":   str(r["id"]),
+                "created_at": str(r["created_at"]),
+            })
+
+    print(json.dumps({"items": items, "total": len(items)}, ensure_ascii=False, default=str))
+
+
 def cmd_council_analyze(args):
     """Run council analysis on a topic. Args: <topic_text> [kind=general]"""
     if not args:
@@ -2677,6 +2745,8 @@ CMDS = {
     # Council
     "council_analyze":             cmd_council_analyze,
     "council_list":                cmd_council_list,
+    # Inbox
+    "inbox_pending":               cmd_inbox_pending,
 }
 
 if __name__ == "__main__":

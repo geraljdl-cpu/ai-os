@@ -1355,6 +1355,11 @@ app.get('/api/model-router/state', (req, res) => {
   }
 });
 
+// ── Inbox (Aprovações unificadas) ────────────────────────────────────────────
+app.get('/api/inbox/pending', requireRole('viewer'), (req, res) => {
+  res.json(nocExec('inbox_pending'));
+});
+
 // ── Council (AI Council) ──────────────────────────────────────────────────────
 app.get('/api/council', requireRole('viewer'), (req, res) => {
   try {
