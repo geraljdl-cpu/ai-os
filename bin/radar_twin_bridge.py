@@ -15,6 +15,7 @@ if _bin_dir in _sys.path:
     _sys.path.remove(_bin_dir)
 
 import argparse, json
+from datetime import date as _date
 
 import sqlalchemy as sa
 
@@ -49,6 +50,59 @@ def _find_entity(c, text, source: str, external_id: str) -> int | None:
     return row["id"] if row else None
 
 # ── Bridge ────────────────────────────────────────────────────────────────────
+
+def _ensure_doc_requests(c, text, case_id: int, tender_deadline: str | None):
+    """Para cada requisito documental de contexto 'tender', verificar se a empresa
+    tem o documento válido. Criar document_request para os que estão em falta/expirados.
+    Usa company_id=1 (empresa principal) como owner por omissão."""
+    COMPANY_OWNER_TYPE = "company"
+    COMPANY_OWNER_ID   = 1
+    due = tender_deadline[:10] if tender_deadline else None
+
+    reqs = c.execute(text("""
+        SELECT id, doc_type, max_age_days FROM public.document_requirements
+        WHERE context_type = 'tender' AND target_type = 'company'
+    """)).mappings().all()
+
+    for req in reqs:
+        # Check if valid doc exists
+        age_filter = ""
+        if req["max_age_days"]:
+            age_filter = f"AND issue_date >= CURRENT_DATE - interval '{req['max_age_days']} days'"
+        existing = c.execute(text(f"""
+            SELECT id FROM public.documents
+            WHERE owner_type = :ot AND owner_id = :oid
+              AND doc_type = :dt
+              AND status NOT IN ('expired', 'missing')
+              AND expiry_date > CURRENT_DATE
+              {age_filter}
+            LIMIT 1
+        """), {"ot": COMPANY_OWNER_TYPE, "oid": COMPANY_OWNER_ID, "dt": req["doc_type"]}).first()
+
+        if existing:
+            continue  # doc válido existe — nada a fazer
+
+        # Check if request already open for this context+doc
+        already = c.execute(text("""
+            SELECT id FROM public.document_requests
+            WHERE owner_type = :ot AND owner_id = :oid
+              AND doc_type = :dt AND linked_case_id = :cid
+              AND status NOT IN ('done', 'failed')
+            LIMIT 1
+        """), {"ot": COMPANY_OWNER_TYPE, "oid": COMPANY_OWNER_ID,
+               "dt": req["doc_type"], "cid": case_id}).first()
+
+        if already:
+            continue
+
+        c.execute(text("""
+            INSERT INTO public.document_requests
+              (requirement_id, owner_type, owner_id, doc_type, status,
+               process_type, linked_case_id, due_date)
+            VALUES (:rid, :ot, :oid, :dt, 'open', 'tender_intake', :cid, :due)
+        """), {"rid": req["id"], "ot": COMPANY_OWNER_TYPE, "oid": COMPANY_OWNER_ID,
+               "dt": req["doc_type"], "cid": case_id, "due": due})
+
 
 def run(source: str, run_id: int | None = None) -> dict:
     text = sa.text
@@ -154,6 +208,10 @@ def run(source: str, run_id: int | None = None) -> dict:
                     "msg": f"Radar {src.upper()}: concurso detectado — score {score} — {eid}",
                     "data": json.dumps({"source": src, "external_id": eid, "score": score, "grupo": group_name}),
                 })
+
+                # Auto-checklist: criar doc_requests para docs em falta/expirados
+                _ensure_doc_requests(c, text, case_id, meta.get("deadline"))
+
                 created += 1
 
     # Update radar_runs if run_id given
