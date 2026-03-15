@@ -1211,7 +1211,7 @@ app.post('/api/incidents/:id/resolve', requireRole('admin','supervisor'), (req, 
 app.get('/api/control/overview', (req, res) => {
   try {
     // Parallel reads via nocExec (synchronous but fast — cached Postgres)
-    const tenders    = nocExec('twin_tenders 8');
+    const tenders    = nocExec('twin_tenders 20 --pin-sources');
     const workers    = nocExec('workers');
     const tasks      = nocExec('backlog_recent 20');
     const obls       = nocExec('obligation_list 30');

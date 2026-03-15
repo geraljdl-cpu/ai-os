@@ -1054,13 +1054,19 @@ def cmd_worker_task_skip(args):
 # ── twin_tenders ──────────────────────────────────────────────────────────────
 
 def cmd_twin_tenders(args):
-    """Lista tenders. Args: [limit] [--source ted|base|dr]"""
-    limit  = 30
-    source = None
+    """Lista tenders. Args: [limit] [--source ted|base|dr] [--pin-sources]
+    --pin-sources: garante ≥1 item por source no topo, resto por score (para NOC).
+                   Sem flag: ranking puro por score (para /tenders).
+    """
+    limit       = 30
+    source      = None
+    pin_sources = False
     i = 0
     while i < len(args):
         if args[i] == "--source" and i + 1 < len(args):
             source = args[i + 1]; i += 2
+        elif args[i] == "--pin-sources":
+            pin_sources = True; i += 1
         elif args[i].isdigit():
             limit = int(args[i]); i += 1
         else:
@@ -1068,8 +1074,8 @@ def cmd_twin_tenders(args):
 
     engine, text = _conn()
     src_filter = "AND e.metadata->>'source' = :src" if source else ""
-    # Fetch more rows than limit so we can guarantee 1 per source
-    fetch_n = max(limit * 5, 200) if not source else limit
+    # With pin_sources fetch a pool large enough to find the top per source
+    fetch_n = max(limit * 5, 200) if (pin_sources and not source) else limit
     with engine.connect() as c:
         rows = c.execute(text(f"""
             SELECT e.id, e.name, e.metadata, e.created_at,
@@ -1102,20 +1108,30 @@ def cmd_twin_tenders(args):
             "created_at":  r["created_at"].isoformat() if r["created_at"] else "",
         }
 
-    # Guarantee at least 1 item per source, then fill up to limit by score
-    seen_sources: set = set()
-    guaranteed, rest = [], []
-    for r in rows:
-        meta = r["metadata"] if isinstance(r["metadata"], dict) else json.loads(r["metadata"] or "{}")
-        src = meta.get("source", "ted")
-        if src not in seen_sources:
-            guaranteed.append(_fmt(r))
-            seen_sources.add(src)
-        else:
-            rest.append(_fmt(r))
+    if pin_sources:
+        # 1. Pick top-scored item per source (guaranteed, shown first, sorted by score desc)
+        # 2. Fill remaining slots with the next best global items (no duplicates)
+        seen_ids: set = set()
+        seen_sources: set = set()
+        guaranteed, rest = [], []
+        for r in rows:
+            meta = r["metadata"] if isinstance(r["metadata"], dict) else json.loads(r["metadata"] or "{}")
+            src = meta.get("source", "ted")
+            if src not in seen_sources:
+                t = _fmt(r)
+                guaranteed.append(t)
+                seen_sources.add(src)
+                seen_ids.add(r["id"])
+            else:
+                rest.append((r["id"], r))
 
-    out = guaranteed + rest[:max(0, limit - len(guaranteed))]
-    out.sort(key=lambda t: t["score"] or 0, reverse=True)
+        guaranteed.sort(key=lambda t: t["score"] or 0, reverse=True)
+        fill = [_fmt(r) for rid, r in rest if rid not in seen_ids]
+        out = guaranteed + fill[:max(0, limit - len(guaranteed))]
+    else:
+        # Pure score ranking — no pinning
+        out = [_fmt(r) for r in rows]
+
     print(json.dumps(out[:limit], ensure_ascii=False))
 
 
