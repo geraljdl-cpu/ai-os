@@ -1,12 +1,12 @@
 {
   "_comment": "Roles por node — escalável. Adicionar nodes sem refazer nada.",
   "nodes": {
-    "node2": {"roles": ["ai_analysis"],                              "ip": "192.168.1.112"},
-    "node3": {"roles": ["preprocess", "general"],                    "ip": "192.168.1.121"},
-    "node4": {"roles": ["radar", "automation", "ai_analysis"],       "ip": "192.168.1.122"},
-    "node5": {"roles": ["general"],                                  "ip": "192.168.1.123"},
-    "node6": {"roles": ["general"],                                  "ip": "192.168.1.124"},
-    "node7": {"roles": ["watchdog", "light", "echo", "fallback"],    "ip": "192.168.1.125"}
+    "node2": {"roles": ["ai_analysis"],                           "ip": "192.168.1.112", "agent": "Strategist",  "agent_desc": "Análise de ideias com LLM"},
+    "node3": {"roles": ["preprocess", "general"],                 "ip": "192.168.1.121", "agent": "Engineering", "agent_desc": "Pré-processamento e tarefas técnicas"},
+    "node4": {"roles": ["radar", "automation", "ai_analysis"],   "ip": "192.168.1.122", "agent": "Operations",  "agent_desc": "Radar TED, automação, análise backup"},
+    "node5": {"roles": ["general"],                               "ip": "192.168.1.123", "agent": "Finance",     "agent_desc": "Obrigações fiscais e payouts"},
+    "node6": {"roles": ["general"],                               "ip": "192.168.1.124", "agent": "Radar",       "agent_desc": "Monitorização de oportunidades"},
+    "node7": {"roles": ["watchdog", "light", "echo", "fallback"],"ip": "192.168.1.125", "agent": "Watchdog",    "agent_desc": "Saúde de infra e fallback"}
   },
   "db": {
     "host": "192.168.1.101",
