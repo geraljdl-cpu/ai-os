@@ -2332,6 +2332,38 @@ def cmd_pipeline_idea_analyze(args):
     print(json.dumps({"ok": True, "job_id": job_id, "thread_id": thread_id}))
 
 
+def cmd_council_analyze(args):
+    """Run council analysis on a topic. Args: <topic_text> [kind=general]"""
+    if not args:
+        raise ValueError("usage: council_analyze <topic> [kind]")
+    topic = args[0]
+    kind  = args[1] if len(args) > 1 else "general"
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(__file__), "council.py"),
+         "analyze", topic, "--kind", kind],
+        capture_output=True, text=True, timeout=180,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"council.py error: {result.stderr[:300]}")
+    print(result.stdout.strip())
+
+
+def cmd_council_list(args):
+    """List recent council analyses. Args: [kind] [limit=10]"""
+    kind  = args[0] if args else None
+    limit = int(args[1]) if len(args) > 1 else 10
+    import subprocess
+    cmd = [sys.executable, os.path.join(os.path.dirname(__file__), "council.py"), "list"]
+    if kind:
+        cmd += ["--kind", kind]
+    cmd += ["--limit", str(limit)]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[:300])
+    print(result.stdout.strip())
+
+
 def cmd_pipeline_radar_score(args):
     """Enfileira scoring de radar no cluster. Args: [source=ted]"""
     source = args[0] if args else "ted"
@@ -2512,6 +2544,47 @@ def cmd_vehicle_get(args):
     }, ensure_ascii=False))
 
 
+# ── Companies + Persons ──────────────────────────────────────────────────────
+
+def cmd_company_list(args):
+    """Lista empresas. Args: [limit]"""
+    limit = int(args[0]) if args and args[0].isdigit() else 20
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT co.id, co.name, co.nif, co.activity, co.status,
+                   COUNT(d.id)                                          AS total_docs,
+                   COUNT(d.id) FILTER (WHERE d.status='expired')       AS docs_expired,
+                   COUNT(d.id) FILTER (WHERE d.status='expiring')      AS docs_expiring,
+                   COUNT(d.id) FILTER (WHERE d.status='valid')         AS docs_valid
+            FROM public.companies co
+            LEFT JOIN public.documents d ON d.owner_type='company' AND d.owner_id=co.id
+            GROUP BY co.id
+            ORDER BY co.name LIMIT :n
+        """), {"n": limit}).mappings().all()
+    print(json.dumps([_row(r) for r in rows], ensure_ascii=False))
+
+
+def cmd_person_list(args):
+    """Lista pessoas. Args: [limit]"""
+    limit = int(args[0]) if args and args[0].isdigit() else 20
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT p.id, p.name, p.nif, p.role, p.status,
+                   co.name AS company_name,
+                   COUNT(d.id)                                          AS total_docs,
+                   COUNT(d.id) FILTER (WHERE d.status='expired')       AS docs_expired,
+                   COUNT(d.id) FILTER (WHERE d.status='expiring')      AS docs_expiring
+            FROM public.persons p
+            LEFT JOIN public.companies co ON co.id = p.company_id
+            LEFT JOIN public.documents d ON d.owner_type='person' AND d.owner_id=p.id
+            GROUP BY p.id, co.name
+            ORDER BY p.name LIMIT :n
+        """), {"n": limit}).mappings().all()
+    print(json.dumps([_row(r) for r in rows], ensure_ascii=False))
+
+
 CMDS = {
     "telemetry_history": cmd_telemetry_history,
     "telemetry_live":    cmd_telemetry_live,
@@ -2599,6 +2672,11 @@ CMDS = {
     # Vehicles
     "vehicle_list":                cmd_vehicle_list,
     "vehicle_get":                 cmd_vehicle_get,
+    "company_list":                cmd_company_list,
+    "person_list":                 cmd_person_list,
+    # Council
+    "council_analyze":             cmd_council_analyze,
+    "council_list":                cmd_council_list,
 }
 
 if __name__ == "__main__":

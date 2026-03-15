@@ -118,13 +118,31 @@ def load_state(conn) -> dict[str, Any]:
         LIMIT 20
     """)
 
+    docs_critical = fetch_all(conn, """
+        SELECT id, title, doc_type, owner_type, owner_id, expiry_date, status, sensitivity
+        FROM public.documents
+        WHERE status IN ('expired', 'expiring')
+        ORDER BY expiry_date ASC NULLS LAST
+        LIMIT 10
+    """)
+
+    doc_requests_open = fetch_all(conn, """
+        SELECT id, doc_type, owner_type, owner_id, status, due_date, process_type
+        FROM public.document_requests
+        WHERE status NOT IN ('done', 'failed')
+        ORDER BY due_date ASC NULLS LAST
+        LIMIT 10
+    """)
+
     return {
-        "decisions":   decisions,
-        "ideas":       ideas,
-        "tasks":       tasks,
-        "obligations": obligations,
-        "payouts":     payouts,
-        "tenders":     tenders,
+        "decisions":         decisions,
+        "ideas":             ideas,
+        "tasks":             tasks,
+        "obligations":       obligations,
+        "payouts":           payouts,
+        "tenders":           tenders,
+        "docs_critical":     docs_critical,
+        "doc_requests_open": doc_requests_open,
     }
 
 
@@ -219,6 +237,49 @@ def detect_urgencies(state: dict) -> list[dict]:
                     })
             except Exception:
                 pass
+
+    # Expired / expiring documents
+    for doc in state.get("docs_critical", []):
+        exp = doc.get("expiry_date")
+        days_left = None
+        if exp is not None:
+            exp_d = exp if isinstance(exp, dt.date) else dt.date.fromisoformat(str(exp)[:10])
+            days_left = (exp_d - now).days
+        label = f"{doc['doc_type']} ({doc['owner_type']}#{doc['owner_id']})"
+        if doc["status"] == "expired":
+            alerts.append({
+                "kind":     "doc_expired",
+                "title":    f"Doc expirado: {label}",
+                "details":  f"doc_id={doc['id']} expiry={exp}",
+                "ref_kind": "document",
+                "ref_id":   str(doc["id"]),
+                "score":    9,
+            })
+        elif doc["status"] == "expiring" and days_left is not None and days_left <= 7:
+            alerts.append({
+                "kind":     "doc_expiring",
+                "title":    f"Doc expira em {days_left}d: {label}",
+                "details":  f"doc_id={doc['id']} expiry={exp}",
+                "ref_kind": "document",
+                "ref_id":   str(doc["id"]),
+                "score":    7,
+            })
+
+    # Open doc requests due ≤ 3 days
+    for req in state.get("doc_requests_open", []):
+        due = req.get("due_date")
+        if due:
+            due_d = due if isinstance(due, dt.date) else dt.date.fromisoformat(str(due)[:10])
+            days_left = (due_d - now).days
+            if days_left <= 3:
+                alerts.append({
+                    "kind":     "doc_request_due",
+                    "title":    f"Pedido doc urgente: {req['doc_type']} vence em {days_left}d",
+                    "details":  f"req_id={req['id']} process={req.get('process_type')}",
+                    "ref_kind": "doc_request",
+                    "ref_id":   str(req["id"]),
+                    "score":    8,
+                })
 
     return sorted(alerts, key=lambda x: -x["score"])
 

@@ -639,6 +639,16 @@ app.get('/api/vehicles/:id', requireRole('viewer'), (req, res) => {
   res.json(nocExec(`vehicle_get ${id}`));
 });
 
+app.get('/api/companies', requireRole('viewer'), (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 20;
+  res.json(nocExec(`company_list ${limit}`));
+});
+
+app.get('/api/persons', requireRole('viewer'), (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 20;
+  res.json(nocExec(`person_list ${limit}`));
+});
+
 // Twin Batch — guia pública via client_token (portal cliente)
 // Rota: GET /api/twin/batch/by-token/:token/doc/guia
 app.get('/api/twin/batch/by-token/:token/doc/guia', (req, res) => {
@@ -1265,6 +1275,7 @@ app.get('/api/control/overview', (req, res) => {
     const clusterJobs    = nocExec('worker_jobs 15');
     const clusterMetrics = nocExec('cluster_metrics 6');
     const agentStatus    = nocExec('agent_status');
+    const docSummary     = nocExec('doc_summary');
 
     const arr = v => Array.isArray(v) ? v : [];
     res.json({
@@ -1284,6 +1295,7 @@ app.get('/api/control/overview', (req, res) => {
       cluster_jobs:    arr(clusterJobs),
       cluster_metrics: arr(clusterMetrics),
       agent_status:    arr(agentStatus),
+      doc_summary:     docSummary,
       generated_at:  new Date().toISOString(),
     });
   } catch(e) {
@@ -1341,6 +1353,74 @@ app.get('/api/model-router/state', (req, res) => {
   } catch(e) {
     res.json({ ok: false, error: String(e) });
   }
+});
+
+// ── Council (AI Council) ──────────────────────────────────────────────────────
+app.get('/api/council', requireRole('viewer'), (req, res) => {
+  try {
+    const kind = req.query.kind ? ` ${req.query.kind}` : '';
+    const out  = execSync(`python3 /home/jdl/ai-os/bin/council.py list${kind} --limit 10`, { timeout: 15000, encoding: 'utf8' });
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.post('/api/council/analyze', requireRole('operator'), (req, res) => {
+  try {
+    const { topic, kind } = req.body || {};
+    if (!topic) return res.status(400).json({ ok: false, error: 'topic required' });
+    const safeTopic = String(topic).replace(/'/g, "'\\''").slice(0, 500);
+    const safeKind  = ['idea','decision','project','architecture','problem','general'].includes(kind) ? kind : 'general';
+    const out = execSync(
+      `python3 /home/jdl/ai-os/bin/council.py analyze '${safeTopic}' --kind ${safeKind}`,
+      { timeout: 120000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+// ── Knowledge (Qdrant) ────────────────────────────────────────────────────────
+app.get('/api/knowledge/stats', requireRole('viewer'), (req, res) => {
+  try {
+    const out = execSync('python3 /home/jdl/ai-os/bin/knowledge.py stats', { timeout: 10000, encoding: 'utf8' });
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.get('/api/knowledge', requireRole('viewer'), (req, res) => {
+  try {
+    const kind = req.query.kind ? ` ${req.query.kind}` : '';
+    const out  = execSync(`python3 /home/jdl/ai-os/bin/knowledge.py list${kind}`, { timeout: 15000, encoding: 'utf8' });
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.get('/api/knowledge/search', requireRole('viewer'), (req, res) => {
+  try {
+    const q    = String(req.query.q || '').replace(/'/g, "'\\''");
+    const kind = req.query.kind ? ` --kind ${req.query.kind}` : '';
+    const out  = execSync(`python3 /home/jdl/ai-os/bin/knowledge.py search '${q}'${kind}`, { timeout: 20000, encoding: 'utf8' });
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.post('/api/knowledge', requireRole('operator'), (req, res) => {
+  try {
+    const { kind, text, meta } = req.body || {};
+    if (!kind || !text) return res.status(400).json({ ok: false, error: 'kind and text required' });
+    const safeText = String(text).replace(/'/g, "'\\''");
+    const safeMeta = JSON.stringify(meta || {}).replace(/'/g, "'\\''");
+    const out = execSync(`python3 /home/jdl/ai-os/bin/knowledge.py add ${kind} '${safeText}' --meta '${safeMeta}'`,
+                         { timeout: 20000, encoding: 'utf8' });
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.delete('/api/knowledge/:id', requireRole('operator'), (req, res) => {
+  try {
+    const out = execSync(`python3 /home/jdl/ai-os/bin/knowledge.py delete ${req.params.id}`,
+                         { timeout: 10000, encoding: 'utf8' });
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
 });
 
 // Forçar modelo (requer admin)

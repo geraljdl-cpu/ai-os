@@ -860,6 +860,34 @@ def handle_command(text: str):
     if t.startswith("/docs"):
         send(handle_docs(t.split()[1:]))
         return
+    if t.startswith("/council"):
+        topic = t[len("/council"):].strip()
+        if not topic:
+            send("Uso: /council <tópico para análise>\nEx: /council Lançar app de gestão de frota")
+            return
+        send("⚙️ A consultar o Conselho IA... (30-60s)")
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["python3", "/home/jdl/ai-os/bin/council.py", "analyze", topic],
+                capture_output=True, text=True, timeout=120,
+                env={**os.environ, "DATABASE_URL": "postgresql://aios_user:jdl@127.0.0.1:5432/aios"},
+            )
+            if result.returncode != 0:
+                send(f"Erro no Council: {result.stderr[:200]}")
+                return
+            data = json.loads(result.stdout)
+            lines = [f"🧠 *Conselho IA — {data.get('kind','').upper()}*", ""]
+            lines.append(f"Tópico: {data['topic'][:80]}")
+            lines.append(f"Score médio: *{data.get('avg_score','?')}* | {data.get('consensus','?')}")
+            lines.append(f"Decisão: *{data.get('decision','?').upper()}*")
+            lines.append("")
+            for a in data.get("agents", []):
+                lines.append(f"• {a['agent'].upper()}: {a.get('score','?')} — {a.get('recommendation','?')}")
+            send("\n".join(lines))
+        except Exception as e:
+            send(f"Erro: {e}")
+        return
     if t.startswith("/control"):
         send(
             f"📺 *Control Room*\n{UI_BASE}/control\n\n"
@@ -879,6 +907,7 @@ def handle_command(text: str):
             "/finance — obrigações e pagamentos RH\n"
             "/case list|ver <id> — gestão de casos\n"
             "/docs — Document Vault (expirados|viaturas|empresa)\n"
+            "/council <texto> — análise multi-agente de qualquer tópico\n"
             "/control — link para o control room\n"
             "/status — estado da infra\n"
             "/approvals — aprovações da fábrica\n"

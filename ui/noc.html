@@ -154,6 +154,16 @@
     <div class="card-title"><span class="dot" style="background:var(--purple)"></span>AGENT TEAM — 24/7</div>
     <div class="card-body" id="blk-agents" style="display:flex;gap:6px;align-items:stretch"></div>
   </div>
+  <!-- Block 8: Documents -->
+  <div class="card" id="card-docs">
+    <div class="card-title"><span class="dot" style="background:var(--yellow)"></span>DOCUMENTOS <span id="hdr-docs" style="margin-left:6px;font-size:11px"></span></div>
+    <div class="card-body scroll" id="blk-docs"></div>
+  </div>
+
+  <div class="card" id="card-resources" style="grid-column:1/-1">
+    <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>CLUSTER RESOURCES <span id="hdr-resources" style="margin-left:6px;font-size:11px;color:var(--muted)"></span></div>
+    <div class="card-body scroll" id="blk-resources"></div>
+  </div>
 </div>
 
 <script>
@@ -355,6 +365,71 @@ function renderIdeas(ideas) {
   }).join('');
 }
 
+/* ── Block 8: Documents ─── */
+function renderDocs(summary) {
+  if (!summary || summary.error) {
+    document.getElementById('blk-docs').innerHTML = '<div style="color:var(--muted);padding:8px">Sem dados</div>';
+    return;
+  }
+  const counts = summary.doc_counts  || {};
+  const reqs   = summary.req_counts  || {};
+  const crit   = summary.critical_docs || [];
+  const expired  = counts.expired  || 0;
+  const expiring = counts.expiring || 0;
+  const pending  = (reqs.open || 0) + (reqs.drafted || 0);
+
+  const hdrColor = expired > 0 ? 'var(--red)' : expiring > 0 ? 'var(--yellow)' : 'var(--green)';
+  document.getElementById('hdr-docs').innerHTML =
+    `<span style="color:${hdrColor}">${expired} exp · ${expiring} soon · ${pending} req</span>`;
+
+  if (!crit.length) {
+    document.getElementById('blk-docs').innerHTML = '<div style="color:var(--green);padding:8px;font-size:13px">✓ Todos os documentos válidos</div>';
+    return;
+  }
+  const rows = crit.map(d => {
+    const color = d.status === 'expired' ? 'var(--red)' : 'var(--yellow)';
+    const exp   = d.expiry_date ? d.expiry_date.slice(0,10) : '—';
+    return `<tr>
+      <td style="color:${color};font-weight:700;font-size:10px">${d.status.toUpperCase()}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(d.title||'')}">${esc((d.title||'—').slice(0,40))}</td>
+      <td style="color:var(--muted);font-size:11px">${esc(d.owner_type||'')}#${d.owner_id}</td>
+      <td style="color:var(--muted);font-size:11px">${exp}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('blk-docs').innerHTML =
+    `<table class="tbl"><thead><tr><th>Estado</th><th>Documento</th><th>Dono</th><th>Expira</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+/* ── Block 9: Cluster Resources ─── */
+function renderResources(metrics) {
+  const m = (metrics||[]);
+  if (!m.length) {
+    document.getElementById('blk-resources').innerHTML = '<div style="color:var(--muted);padding:8px">Sem métricas de cluster</div>';
+    return;
+  }
+  const totalJ = m.reduce((s,x)=>s+(x.jobs_24h||0),0);
+  const totalF = m.reduce((s,x)=>s+(x.failures_24h||0),0);
+  document.getElementById('hdr-resources').textContent = `${m.length} nodes · ${totalJ} jobs/24h · ${totalF} falhas`;
+  const rows = m.map(n => {
+    const cpu = n.cpu_pct ?? '—';
+    const ramPct = n.ram_total_mb ? Math.round(100*n.ram_used_mb/n.ram_total_mb) : null;
+    const cpuCl = typeof cpu==='number' ? (cpu>80?'var(--red)':cpu>50?'var(--yellow)':'var(--green)') : 'var(--muted)';
+    const ramCl = ramPct!==null ? (ramPct>85?'var(--red)':ramPct>60?'var(--yellow)':'var(--green)') : 'var(--muted)';
+    const stCl  = n.worker_state==='working'?'var(--yellow)':n.worker_state==='idle'?'var(--green)':'var(--muted)';
+    return `<tr>
+      <td style="font-weight:700">${esc(n.node)}</td>
+      <td style="color:${cpuCl}">${cpu}%</td>
+      <td style="color:${ramCl}">${ramPct!==null?ramPct+'%':'—'} <small style="color:var(--muted)">${n.ram_used_mb||0}/${n.ram_total_mb||0}MB</small></td>
+      <td>${n.jobs_24h||0}</td>
+      <td style="color:${(n.failures_24h||0)>0?'var(--red)':'var(--muted)'}">${n.failures_24h||0}</td>
+      <td style="color:var(--muted);font-size:10px">${esc((n.node_role||'').slice(0,30))}</td>
+      <td style="color:${stCl}">${esc(n.worker_state||'—')}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('blk-resources').innerHTML =
+    `<table class="tbl"><thead><tr><th>Node</th><th>CPU</th><th>RAM</th><th>Jobs/24h</th><th>Falhas</th><th>Role</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 /* ── Block 7: Agent Team ─── */
 function renderAgents(agents) {
   const el = document.getElementById('blk-agents');
@@ -395,6 +470,8 @@ async function refresh() {
     renderIncidents(d.incidents);
     renderIdeas(d.ideas);
     renderAgents(d.agent_status);
+    renderDocs(d.doc_summary);
+    renderResources(d.cluster_metrics);
     document.getElementById('hdr-time').textContent = new Date().toLocaleTimeString('pt-PT');
   } catch(e) {
     document.getElementById('hdr-time').textContent = 'ERRO: ' + e.message;
