@@ -405,6 +405,7 @@ function nocExec(cmd, timeout = 8000) {
 }
 
 // Serve ops.html
+app.get('/noc',     (req, res) => res.sendFile(__dirname + '/noc.html'));
 app.get('/ops',     (req, res) => res.sendFile(__dirname + '/ops.html'));
 app.get('/factory', (req, res) => res.sendFile(__dirname + '/factory.html'));
 app.get('/tenders', (req, res) => res.sendFile(__dirname + '/tenders.html'));
@@ -1218,9 +1219,10 @@ app.get('/api/control/overview', (req, res) => {
     const health     = nocExec('syshealth');
     const finStats   = nocExec('finance_stats');
     const cases      = nocExec('twin_cases 8');
-    const ideas      = nocExec('idea_list open 5');
+    const ideas      = nocExec('idea_list _ 8');
     const incidents  = nocExec('incident_list 20');
     const bankTxs    = nocExec('bank_transactions 5 unmatched');
+    const clusterJobs = nocExec('worker_jobs 15');
 
     const arr = v => Array.isArray(v) ? v : [];
     res.json({
@@ -1237,6 +1239,7 @@ app.get('/api/control/overview', (req, res) => {
       ideas:         ideas.ideas       || arr(ideas),
       incidents:     incidents.incidents || [],
       bank_unmatched: bankTxs.summary?.unmatched || 0,
+      cluster_jobs:  arr(clusterJobs),
       generated_at:  new Date().toISOString(),
     });
   } catch(e) {

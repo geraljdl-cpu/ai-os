@@ -1838,6 +1838,12 @@ def cmd_idea_create(args):
             "msg":  f"Ideia capturada: {title}",
             "data": json.dumps({"thread_id": tid, "title": title})
         })
+        if message:
+            # auto-enqueue cluster analysis when idea has a message
+            c.execute(text(
+                "INSERT INTO public.worker_jobs (ts_created, status, kind, payload) "
+                "VALUES (NOW(), 'queued', 'ai_analysis', :payload)"
+            ), {"payload": json.dumps({"thread_id": tid})})
     print(json.dumps({"ok": True, "id": tid, "title": title,
                       "status": row["status"], "created_at": row["created_at"].isoformat()}))
 
@@ -2194,6 +2200,57 @@ def cmd_incident_create(args):
     print(json.dumps({"ok": True, "id": row["id"]}))
 
 
+# ── Pipeline helpers ───────────────────────────────────────────────────────────
+
+def cmd_pipeline_idea_analyze(args):
+    """Enfileira análise de ideia no cluster. Args: <thread_id>"""
+    if not args:
+        raise ValueError("usage: pipeline_idea_analyze <thread_id>")
+    thread_id = int(args[0])
+    engine, text = _conn()
+    with engine.connect() as c:
+        row = c.execute(text(
+            "SELECT id FROM public.idea_threads WHERE id=:id"
+        ), {"id": thread_id}).mappings().first()
+    if not row:
+        raise ValueError(f"Thread {thread_id} não existe")
+    with engine.begin() as c:
+        row = c.execute(text(
+            "INSERT INTO public.worker_jobs (ts_created, status, kind, payload) "
+            "VALUES (NOW(), 'queued', 'ai_analysis', :payload) RETURNING id"
+        ), {"payload": json.dumps({"thread_id": thread_id})})
+        job_id = row.scalar()
+    print(json.dumps({"ok": True, "job_id": job_id, "thread_id": thread_id}))
+
+
+def cmd_pipeline_radar_score(args):
+    """Enfileira scoring de radar no cluster. Args: [source=ted]"""
+    source = args[0] if args else "ted"
+    if source not in ("ted", "base", "dr"):
+        raise ValueError("source deve ser ted, base ou dr")
+    engine, text = _conn()
+    with engine.begin() as c:
+        row = c.execute(text(
+            "INSERT INTO public.worker_jobs (ts_created, status, kind, payload) "
+            "VALUES (NOW(), 'queued', 'radar', :payload) RETURNING id"
+        ), {"payload": json.dumps({"script": "radar_score", "args": ["--source", source]})})
+        job_id = row.scalar()
+    print(json.dumps({"ok": True, "job_id": job_id, "source": source}))
+
+
+def cmd_pipeline_incidents(args):
+    """Enfileira verificação de incidentes no cluster."""
+    root = os.environ.get("AIOS_CLUSTER_ROOT", "/cluster/d1/ai-os")
+    engine, text = _conn()
+    with engine.begin() as c:
+        row = c.execute(text(
+            "INSERT INTO public.worker_jobs (ts_created, status, kind, payload) "
+            "VALUES (NOW(), 'queued', 'automation', :payload) RETURNING id"
+        ), {"payload": json.dumps({"cmd": f"python3 {root}/bin/incidents_tick.py"})})
+        job_id = row.scalar()
+    print(json.dumps({"ok": True, "job_id": job_id}))
+
+
 CMDS = {
     "telemetry_history": cmd_telemetry_history,
     "telemetry_live":    cmd_telemetry_live,
@@ -2268,6 +2325,9 @@ CMDS = {
     "incident_list":               cmd_incident_list,
     "incident_resolve":            cmd_incident_resolve,
     "incident_create":             cmd_incident_create,
+    "pipeline_idea_analyze":       cmd_pipeline_idea_analyze,
+    "pipeline_radar_score":        cmd_pipeline_radar_score,
+    "pipeline_incidents":          cmd_pipeline_incidents,
 }
 
 if __name__ == "__main__":

@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI-OS NOC</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0a0e14;--card:#111827;--border:#1e2d45;--text:#e2e8f0;--muted:#64748b;
+    --green:#22c55e;--yellow:#eab308;--red:#ef4444;--blue:#3b82f6;--purple:#a855f7;
+    --cyan:#06b6d4;--orange:#f97316;
+  }
+  html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace,sans-serif}
+  #header{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:8px 20px;background:#0d1320;border-bottom:1px solid var(--border);
+    height:48px;flex-shrink:0;
+  }
+  #header h1{font-size:16px;font-weight:700;letter-spacing:2px;color:var(--cyan);text-transform:uppercase}
+  #header .meta{font-size:11px;color:var(--muted);text-align:right;line-height:1.5}
+  #header .meta span{margin-left:16px}
+  #grid{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    grid-template-rows:1fr 1fr;
+    gap:8px;padding:8px;
+    height:calc(100vh - 48px);
+  }
+  .card{
+    background:var(--card);border:1px solid var(--border);border-radius:8px;
+    padding:12px;overflow:hidden;display:flex;flex-direction:column;min-height:0;
+  }
+  .card-title{
+    font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
+    color:var(--muted);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border);
+    display:flex;align-items:center;gap:6px;flex-shrink:0;
+  }
+  .card-title .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .card-body{flex:1;overflow:hidden;font-size:12px;line-height:1.5}
+  /* Badge */
+  .badge{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}
+  .badge-green{background:#14532d;color:var(--green)}
+  .badge-yellow{background:#713f12;color:var(--yellow)}
+  .badge-red{background:#7f1d1d;color:var(--red)}
+  .badge-blue{background:#1e3a5f;color:var(--blue)}
+  .badge-gray{background:#1e2d45;color:var(--muted)}
+  /* Cluster grid */
+  .node-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;height:100%}
+  .node-card{
+    background:#0d1320;border:1px solid var(--border);border-radius:6px;
+    padding:8px;display:flex;flex-direction:column;gap:3px;
+  }
+  .node-card.active{border-color:var(--green)}
+  .node-card.working{border-color:var(--yellow);animation:pulse 1.5s infinite}
+  .node-card.offline{border-color:var(--red);opacity:.6}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.7}}
+  .node-name{font-size:13px;font-weight:700;color:var(--cyan)}
+  .node-role{font-size:10px;color:var(--muted)}
+  .node-status{font-size:10px}
+  .node-job{font-size:10px;color:var(--yellow);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* Table */
+  .tbl{width:100%;border-collapse:collapse;font-size:11px}
+  .tbl th{color:var(--muted);font-weight:600;padding:3px 6px;text-align:left;border-bottom:1px solid var(--border)}
+  .tbl td{padding:3px 6px;border-bottom:1px solid #0d1320;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
+  /* Metric row */
+  .metric-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+  .metric{background:#0d1320;border:1px solid var(--border);border-radius:6px;padding:8px 12px;flex:1;min-width:80px}
+  .metric-val{font-size:20px;font-weight:700;line-height:1}
+  .metric-lbl{font-size:10px;color:var(--muted);margin-top:2px}
+  /* Incident */
+  .incident-item{padding:4px 8px;margin-bottom:4px;border-radius:4px;border-left:3px solid var(--muted)}
+  .incident-item.crit{border-left-color:var(--red);background:#1a0a0a}
+  .incident-item.warn{border-left-color:var(--yellow);background:#1a1400}
+  .incident-item.info{border-left-color:var(--blue);background:#0a1020}
+  .incident-title{font-size:11px;font-weight:600}
+  .incident-meta{font-size:10px;color:var(--muted)}
+  /* Idea */
+  .idea-item{padding:5px 8px;margin-bottom:4px;background:#0d1320;border-radius:4px;border-left:3px solid var(--purple)}
+  .idea-title{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .idea-meta{font-size:10px;color:var(--muted);display:flex;gap:8px}
+  /* Score bar */
+  .score-bar{display:inline-flex;align-items:center;gap:4px;font-size:10px}
+  .score-fill{height:4px;border-radius:2px;background:var(--purple)}
+  /* Crit badge blink */
+  .blink{animation:blink 1s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+  /* Scroll inside cards */
+  .scroll{overflow-y:auto;flex:1;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+  /* Status dots */
+  .dot-green{background:var(--green)} .dot-yellow{background:var(--yellow)}
+  .dot-red{background:var(--red)} .dot-blue{background:var(--blue)} .dot-gray{background:var(--muted)}
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>&#9670; AI-OS NOC</h1>
+  <div class="meta">
+    <span id="hdr-incidents"></span>
+    <span id="hdr-nodes"></span>
+    <span id="hdr-time"></span>
+  </div>
+</div>
+<div id="grid">
+  <!-- Block 1: Cluster -->
+  <div class="card" id="card-cluster">
+    <div class="card-title"><span class="dot dot-green dot"></span>CLUSTER — Nodes 2-7</div>
+    <div class="card-body" id="blk-cluster">
+      <div class="node-grid" id="node-grid"></div>
+    </div>
+  </div>
+  <!-- Block 2: Factory -->
+  <div class="card" id="card-factory">
+    <div class="card-title"><span class="dot dot-blue dot"></span>FACTORY / PRODUÇÃO</div>
+    <div class="card-body" id="blk-factory">
+      <div id="factory-metrics" class="metric-row"></div>
+      <div class="scroll" id="factory-batches"></div>
+    </div>
+  </div>
+  <!-- Block 3: Finance -->
+  <div class="card" id="card-finance">
+    <div class="card-title"><span class="dot dot-yellow dot"></span>FINANCE</div>
+    <div class="card-body" id="blk-finance">
+      <div id="finance-metrics" class="metric-row"></div>
+      <div class="scroll" id="finance-obls"></div>
+    </div>
+  </div>
+  <!-- Block 4: Radar -->
+  <div class="card" id="card-radar">
+    <div class="card-title"><span class="dot dot-cyan dot" style="background:var(--cyan)"></span>RADAR TED</div>
+    <div class="card-body scroll" id="blk-radar"></div>
+  </div>
+  <!-- Block 5: Incidents -->
+  <div class="card" id="card-incidents">
+    <div class="card-title"><span class="dot dot-red dot"></span>INCIDENTES</div>
+    <div class="card-body scroll" id="blk-incidents"></div>
+  </div>
+  <!-- Block 6: Ideas / Joao -->
+  <div class="card" id="card-ideas">
+    <div class="card-title"><span class="dot dot-gray dot" style="background:var(--purple)"></span>IDEIAS / CONSELHO IA</div>
+    <div class="card-body scroll" id="blk-ideas"></div>
+  </div>
+</div>
+
+<script>
+const REFRESH_MS = 5000;
+let lastData = null;
+
+function fmt(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  return d.toLocaleTimeString('pt-PT', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+function ago(ts) {
+  if (!ts) return '-';
+  const s = Math.floor((Date.now() - new Date(ts)) / 1000);
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s/60) + 'm';
+  return Math.floor(s/3600) + 'h';
+}
+function esc(s) {
+  return String(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function badge(label, cls) {
+  return `<span class="badge badge-${cls}">${esc(label)}</span>`;
+}
+function euro(v) {
+  if (!v) return '—';
+  return '€' + Number(v).toLocaleString('pt-PT', {minimumFractionDigits:0, maximumFractionDigits:0});
+}
+
+/* ── Block 1: Cluster ─── */
+function renderCluster(workers, jobs) {
+  // Build node map from workers
+  const nodeMap = {};
+  const clusterNodes = ['node2','node3','node4','node5','node6','node7'];
+  clusterNodes.forEach(n => nodeMap[n] = {id:n, status:'offline', role:'', job:null, age:999});
+  (workers||[]).forEach(w => {
+    if (clusterNodes.includes(w.id)) {
+      nodeMap[w.id] = {...w, job:null};
+    }
+  });
+  // Find running jobs per node
+  (jobs||[]).forEach(j => {
+    if (j.status === 'running' && j.assigned_worker_id && nodeMap[j.assigned_worker_id]) {
+      nodeMap[j.assigned_worker_id].job = j;
+    }
+  });
+  const html = clusterNodes.map(nid => {
+    const n = nodeMap[nid];
+    const isWorking = n.job !== null;
+    const ageOk = n.age_secs !== undefined && n.age_secs < 90;
+    const cls = isWorking ? 'working' : (ageOk ? 'active' : 'offline');
+    const statusColor = isWorking ? 'yellow' : (ageOk ? 'green' : 'red');
+    const jobHtml = isWorking
+      ? `<div class="node-job">&#9654; ${esc(n.job.kind)}</div>`
+      : '';
+    const lastErr = (jobs||[]).filter(j => j.assigned_worker_id===nid && j.status==='failed').slice(0,1);
+    const errHtml = lastErr.length ? `<div style="font-size:10px;color:var(--red)">&#9888; err</div>` : '';
+    return `<div class="node-card ${cls}">
+      <div class="node-name">${nid}</div>
+      <div class="node-role">${esc(n.role||'-')}</div>
+      <div class="node-status">${badge(n.status||'offline', statusColor==='green'?'green':statusColor==='yellow'?'yellow':'red')}</div>
+      ${jobHtml}${errHtml}
+      <div style="font-size:9px;color:var(--muted)">${n.age_secs!==undefined?ago(Date.now()-n.age_secs*1000+Date.now()):'—'}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('node-grid').innerHTML = html;
+  // Cluster jobs table below nodes
+  const recentJobs = (jobs||[]).slice(0,6);
+  // Already rendered in node cards — skip extra table for space
+  const onlineCount = clusterNodes.filter(n => nodeMap[n].age_secs !== undefined && nodeMap[n].age_secs < 90).length;
+  document.getElementById('hdr-nodes').textContent = `CLUSTER ${onlineCount}/6`;
+}
+
+/* ── Block 2: Factory ─── */
+function renderFactory(cases, finStats) {
+  const active = (cases||[]).filter(c => c.workflow_key === 'cable_batch' && c.status === 'open');
+  const today = active.reduce((s,c) => s + (parseFloat(c.kg)||0), 0);
+  const rev = active.reduce((s,c) => s + (parseFloat(c.valor_fatura)||0), 0);
+  document.getElementById('factory-metrics').innerHTML =
+    `<div class="metric"><div class="metric-val" style="color:var(--blue)">${active.length}</div><div class="metric-lbl">Lotes ativos</div></div>
+     <div class="metric"><div class="metric-val" style="color:var(--green)">${today.toFixed(0)}kg</div><div class="metric-lbl">Em processamento</div></div>
+     <div class="metric"><div class="metric-val" style="color:var(--yellow)">${euro(rev)}</div><div class="metric-lbl">Valor ativo</div></div>`;
+  const rows = active.slice(0,6).map(c => {
+    const estado = c.estado || c.status || '-';
+    const cl = estado.includes('conclu') || estado.includes('pronto') ? 'green' : estado === 'em_processamento' ? 'yellow' : 'blue';
+    return `<tr>
+      <td>${esc(c.entity_name||c.entity_id||'-').slice(0,24)}</td>
+      <td>${esc(c.kg||'-')}kg</td>
+      <td>${badge(estado, cl)}</td>
+      <td style="color:var(--muted)">${ago(c.updated_at)}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('factory-batches').innerHTML =
+    `<table class="tbl"><thead><tr><th>Lote</th><th>kg</th><th>Estado</th><th>Ago</th></tr></thead><tbody>${rows||'<tr><td colspan="4" style="color:var(--muted)">Sem lotes</td></tr>'}</tbody></table>`;
+}
+
+/* ── Block 3: Finance ─── */
+function renderFinance(finStats, obligations) {
+  const fs = finStats || {};
+  document.getElementById('finance-metrics').innerHTML =
+    `<div class="metric"><div class="metric-val" style="color:var(--yellow)">${euro(fs.pending_total)}</div><div class="metric-lbl">Pendente</div></div>
+     <div class="metric"><div class="metric-val" style="color:var(--red)">${euro(fs.overdue_total)}</div><div class="metric-lbl">Vencido</div></div>
+     <div class="metric"><div class="metric-val" style="color:var(--green)">${euro(fs.paid_30d)}</div><div class="metric-lbl">Pago 30d</div></div>`;
+  const obls = (obligations||[]).filter(o => o.status === 'pending').slice(0,6);
+  const rows = obls.map(o => {
+    const due = o.due_date ? new Date(o.due_date) : null;
+    const days = due ? Math.floor((due - Date.now())/86400000) : null;
+    const cls = days !== null ? (days < 0 ? 'red' : days <= 5 ? 'yellow' : 'blue') : 'gray';
+    return `<tr>
+      <td>${esc(o.label||'-').slice(0,24)}</td>
+      <td style="color:var(--${cls})">${o.due_date ? o.due_date.slice(0,10) : '-'}</td>
+      <td>${euro(o.amount)}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('finance-obls').innerHTML =
+    `<table class="tbl"><thead><tr><th>Obrigação</th><th>Data</th><th>Valor</th></tr></thead><tbody>${rows||'<tr><td colspan="3" style="color:var(--muted)">Sem obrigações</td></tr>'}</tbody></table>`;
+}
+
+/* ── Block 4: Radar ─── */
+function renderRadar(jobs) {
+  const radarJobs = (jobs||[]).filter(j => j.kind === 'radar').slice(0,6);
+  if (!radarJobs.length) {
+    document.getElementById('blk-radar').innerHTML = '<div style="color:var(--muted);padding:12px">Sem jobs de radar recentes</div>';
+    return;
+  }
+  const html = radarJobs.map(j => {
+    const res = j.result || {};
+    const cls = j.status === 'done' ? 'green' : j.status === 'running' ? 'yellow' : 'red';
+    const scored = res.scored !== undefined ? `${res.scored} scored, ${res.below_threshold||0} abaixo` : '';
+    const out = res.output ? res.output.slice(0,80) : scored;
+    return `<tr>
+      <td>${badge(j.status,cls)}</td>
+      <td>${esc(j.payload?.script||j.payload?.args?.[1]||'-')}</td>
+      <td style="color:var(--muted)">${esc(out).slice(0,60)}</td>
+      <td style="color:var(--muted)">${ago(j.ts_done||j.ts_assigned)}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('blk-radar').innerHTML =
+    `<table class="tbl"><thead><tr><th>Status</th><th>Script</th><th>Resultado</th><th>Ago</th></tr></thead><tbody>${html}</tbody></table>`;
+}
+
+/* ── Block 5: Incidents ─── */
+function renderIncidents(incidents) {
+  const open = (incidents||[]).filter(i => i.status === 'open').slice(0,8);
+  const critCount = open.filter(i => i.severity === 'crit').length;
+  if (critCount > 0) {
+    document.getElementById('hdr-incidents').innerHTML = `<span style="color:var(--red)" class="blink">&#9632; ${critCount} CRIT</span>`;
+  } else {
+    document.getElementById('hdr-incidents').textContent = open.length ? `${open.length} INCID` : 'OK';
+  }
+  if (!open.length) {
+    document.getElementById('blk-incidents').innerHTML = `<div style="padding:16px;text-align:center;color:var(--green);font-size:20px">&#10003; OK</div>`;
+    return;
+  }
+  document.getElementById('blk-incidents').innerHTML = open.map(i =>
+    `<div class="incident-item ${i.severity}">
+      <div class="incident-title">${badge(i.severity,i.severity==='crit'?'red':i.severity==='warn'?'yellow':'blue')} ${esc(i.title)}</div>
+      <div class="incident-meta">${esc(i.source)} · ${ago(i.created_at)}</div>
+    </div>`
+  ).join('');
+}
+
+/* ── Block 6: Ideas ─── */
+function renderIdeas(ideas) {
+  const list = (ideas||[]).slice(0,6);
+  if (!list.length) {
+    document.getElementById('blk-ideas').innerHTML = '<div style="color:var(--muted);padding:12px">Sem ideias recentes</div>';
+    return;
+  }
+  document.getElementById('blk-ideas').innerHTML = list.map(i => {
+    const revCount = i.review_count || 0;
+    const statusCl = i.status === 'analyzed' ? 'green' : i.status === 'project' ? 'blue' : 'gray';
+    return `<div class="idea-item">
+      <div class="idea-title">${esc(i.title)}</div>
+      <div class="idea-meta">
+        ${badge(i.status||'open',statusCl)}
+        <span>${revCount > 0 ? revCount + ' reviews' : 'aguarda análise'}</span>
+        <span style="color:var(--muted)">${ago(i.created_at)}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ── Main refresh ─── */
+async function refresh() {
+  try {
+    const r = await fetch('/api/control/overview');
+    const d = await r.json();
+    if (!d.ok) return;
+    lastData = d;
+    renderCluster(d.workers, d.cluster_jobs);
+    renderFactory(d.cases, d.finance_stats);
+    renderFinance(d.finance_stats, d.obligations);
+    renderRadar(d.cluster_jobs);
+    renderIncidents(d.incidents);
+    renderIdeas(d.ideas);
+    document.getElementById('hdr-time').textContent = new Date().toLocaleTimeString('pt-PT');
+  } catch(e) {
+    document.getElementById('hdr-time').textContent = 'ERRO: ' + e.message;
+  }
+}
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>

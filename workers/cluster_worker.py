@@ -59,6 +59,15 @@ OLLAMA_URL  = _CFG.get("ollama_url", "http://192.168.1.101:11434")
 POLL_SEC    = float(os.environ.get("AIOS_POLL_SEC", str(_CFG.get("poll_sec", 5))))
 JOB_TIMEOUT = int(_CFG.get("job_timeout_secs", 300))
 
+# ── Secrets (NFS .secrets file → os.environ) ─────────────────────────────────
+_SECRETS = os.path.join(_ROOT, "config", ".secrets")
+if os.path.isfile(_SECRETS):
+    for _ln in open(_SECRETS):
+        _ln = _ln.strip()
+        if _ln and not _ln.startswith("#") and "=" in _ln:
+            _k, _v = _ln.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip())
+
 log.info(f"node={NODE_NAME}  roles={ROLES}  db={_db.get('host')}:{_db.get('port')}")
 
 # ── DB ───────────────────────────────────────────────────────────────────────
@@ -172,12 +181,22 @@ def handle_shell(p):
     return _run_shell(cmd)
 
 def handle_ai_analysis(p):
+    # Case 1: idea thread analysis → runs idea_router.py (Claude API)
+    thread_id = p.get("thread_id")
+    if thread_id is not None:
+        log.info(f"IDEA ANALYSIS: thread_id={thread_id}")
+        agents = p.get("agents", "")
+        cmd = f"python3 {_ROOT}/bin/idea_router.py {int(thread_id)}"
+        if agents:
+            cmd += " " + " ".join(agents if isinstance(agents, list) else agents.split())
+        return _run_shell(cmd, timeout=360)
+
+    # Case 2: direct prompt via local Ollama
     prompt = p.get("prompt", "")
-    # Fallback: se não há prompt mas há cmd, delegar para shell
     if not prompt:
         if p.get("cmd") or p.get("command"):
             return handle_shell(p)
-        raise ValueError("payload.prompt ou payload.cmd em falta")
+        raise ValueError("payload.thread_id, payload.prompt ou payload.cmd em falta")
     model = p.get("model", "qwen2.5:14b")
     log.info(f"AI: model={model} prompt[:60]={prompt[:60]}")
     body = json.dumps({"model": model, "prompt": prompt,
@@ -189,14 +208,13 @@ def handle_ai_analysis(p):
     return {"response": data.get("response", ""), "model": model}
 
 def handle_radar(p):
-    # Scripts de radar importam-se entre si — precisam do bin/ no PYTHONPATH
+    # pylib in PYTHONPATH (inherited from service env) → do NOT add bin/ (shadows stdlib secrets)
     script = p.get("script", "")
     if script:
-        cmd = f"PYTHONPATH={_ROOT}/bin python3 {_ROOT}/bin/{script}.py"
+        cmd = f"python3 {_ROOT}/bin/{script}.py"
         if p.get("args"):
             cmd += " " + " ".join(str(a) for a in p["args"])
         return _run_shell(cmd)
-    # Sem script explícito: executar cmd directamente
     return handle_shell(p)
 
 def handle_preprocess(p):

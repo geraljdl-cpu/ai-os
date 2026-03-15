@@ -51,6 +51,7 @@ runtime/caddy_access.log
 
 # secrets / tokens (NEVER COMMIT)
 .env*
+config/.secrets
 .toc_token.json
 .toc_token_expiry
 runtime/*
