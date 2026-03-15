@@ -6,6 +6,7 @@
 set -euo pipefail
 
 AIOS_ROOT="/home/jdl/ai-os"
+export PYTHONPATH="$AIOS_ROOT/bin:${PYTHONPATH:-}"
 LOG_DIR="$AIOS_ROOT/runtime/radar/logs"
 mkdir -p "$LOG_DIR"
 
