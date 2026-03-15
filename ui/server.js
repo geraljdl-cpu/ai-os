@@ -1222,18 +1222,19 @@ app.get('/api/control/overview', (req, res) => {
     const incidents  = nocExec('incident_list 20');
     const bankTxs    = nocExec('bank_transactions 5 unmatched');
 
+    const arr = v => Array.isArray(v) ? v : [];
     res.json({
       ok: true,
-      tenders:       tenders.tenders  || [],
-      workers:       workers.workers  || [],
-      tasks:         tasks.tasks      || [],
-      obligations:   obls.obligations || [],
-      payouts:       payouts.payouts  || [],
+      tenders:       tenders.tenders   || arr(tenders),
+      workers:       workers.workers   || arr(workers),
+      tasks:         tasks.tasks       || arr(tasks),
+      obligations:   obls.obligations  || [],
+      payouts:       payouts.payouts   || [],
       alerts:        alerts.suggestions || [],
       health:        health,
       finance_stats: finStats,
-      cases:         cases.cases   || [],
-      ideas:         ideas.ideas   || [],
+      cases:         cases.cases       || arr(cases),
+      ideas:         ideas.ideas       || arr(ideas),
       incidents:     incidents.incidents || [],
       bank_unmatched: bankTxs.summary?.unmatched || 0,
       generated_at:  new Date().toISOString(),

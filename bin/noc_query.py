@@ -217,8 +217,12 @@ def cmd_backlog_recent(args):
     engine, text = _conn()
     with engine.connect() as c:
         rows = c.execute(text("""
-            SELECT id, title, goal, status, priority, task_type,
-                   attempts, last_error, created_at, updated_at
+            SELECT id, goal AS title, goal, status,
+                   meta->>'priority'  AS priority,
+                   meta->>'task_type' AS task_type,
+                   (meta->>'attempts')::int AS attempts,
+                   meta->>'last_error' AS last_error,
+                   created_at, updated_at
             FROM public.jobs
             ORDER BY created_at DESC LIMIT :n
         """), {"n": limit}).mappings().all()
