@@ -181,6 +181,68 @@ def check_api(conn, text):
     # Se None (UI não responde) — não cria incidente (pode ser arranque)
 
 
+def check_documents(conn, text):
+    """
+    Documentos expirados ou a expirar ≤30 dias.
+    - Actualiza documents.status automaticamente (valid/expiring/expired).
+    - Cria incidente por documento (kind=doc_expired_{id} / doc_expiring_{id}) — idempotente.
+    - Auto-resolve quando documento é renovado.
+    """
+    # 1. Actualizar status na tabela (batch update)
+    conn.execute(text("""
+        UPDATE public.documents SET status='expired',  updated_at=NOW()
+        WHERE expiry_date IS NOT NULL AND expiry_date < CURRENT_DATE    AND status != 'expired'
+    """))
+    conn.execute(text("""
+        UPDATE public.documents SET status='expiring', updated_at=NOW()
+        WHERE expiry_date IS NOT NULL
+          AND expiry_date >= CURRENT_DATE
+          AND expiry_date <= CURRENT_DATE + INTERVAL '30 days'
+          AND status NOT IN ('expiring','expired')
+    """))
+    conn.execute(text("""
+        UPDATE public.documents SET status='valid',    updated_at=NOW()
+        WHERE expiry_date IS NOT NULL
+          AND expiry_date > CURRENT_DATE + INTERVAL '30 days'
+          AND status IN ('expiring','expired')
+    """))
+
+    # 2. Criar/resolver incidentes por documento
+    expired = conn.execute(text("""
+        SELECT id, title, doc_type, owner_type, owner_id,
+               expiry_date, CURRENT_DATE - expiry_date AS days_ago
+        FROM public.documents
+        WHERE status = 'expired'
+    """)).mappings().all()
+
+    for d in expired:
+        kind = f"doc_expired_{d['id']}"
+        _ensure_incident(conn, text, "documents", kind, "warn",
+                         f"Documento expirado: {d['title']}",
+                         f"{d['owner_type']}#{d['owner_id']} · {d['doc_type']} · venceu há {d['days_ago']}d")
+
+    expiring = conn.execute(text("""
+        SELECT id, title, doc_type, owner_type, owner_id,
+               expiry_date, expiry_date - CURRENT_DATE AS days_left
+        FROM public.documents
+        WHERE status = 'expiring'
+    """)).mappings().all()
+
+    for d in expiring:
+        kind = f"doc_expiring_{d['id']}"
+        _ensure_incident(conn, text, "documents", kind, "info",
+                         f"Documento a expirar em {d['days_left']}d: {d['title']}",
+                         f"{d['owner_type']}#{d['owner_id']} · {d['doc_type']} · expira {str(d['expiry_date'])[:10]}")
+
+    # Auto-resolver incidentes de docs renovados (agora válidos)
+    valid_ids = conn.execute(text("""
+        SELECT id FROM public.documents WHERE status = 'valid'
+    """)).mappings().all()
+    for d in valid_ids:
+        _auto_resolve(conn, text, "documents", f"doc_expired_{d['id']}")
+        _auto_resolve(conn, text, "documents", f"doc_expiring_{d['id']}")
+
+
 def check_bank(conn, text):
     """Movimentos bancários sem match há mais de 72h → info."""
     rows = conn.execute(text("""
@@ -199,7 +261,7 @@ def check_bank(conn, text):
 
 def run():
     engine, text = _conn()
-    for fn in [check_workers, check_tasks, check_obligations, check_tenders, check_bank]:
+    for fn in [check_workers, check_tasks, check_obligations, check_tenders, check_bank, check_documents]:
         try:
             with engine.begin() as conn:
                 fn(conn, text)
