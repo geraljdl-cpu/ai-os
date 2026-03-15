@@ -36,5 +36,12 @@ INSERT INTO public.finance_obligations (type, entity, label, due_date, status, s
 -- IRS entrega (rendimentos 2025)
   ('irs',       'AT',               'IRS Entrega 2025',    '2026-04-30', 'pending', 'auto'),
 -- IRC pagamento especial por conta (para ENI/Lda se aplicável)
-  ('irc',       'AT',               'IRC PEC 2026',        '2026-03-31', 'pending', 'auto')
+  ('irc',       'AT',               'IRC PEC 2026',        '2026-03-31', 'pending', 'auto'),
+-- SS empresa: Jul–Dez 2026
+  ('ss_empresa','Segurança Social', 'SS Empresa Jul 2026', '2026-08-20', 'pending', 'auto'),
+  ('ss_empresa','Segurança Social', 'SS Empresa Ago 2026', '2026-09-20', 'pending', 'auto'),
+  ('ss_empresa','Segurança Social', 'SS Empresa Set 2026', '2026-10-20', 'pending', 'auto'),
+  ('ss_empresa','Segurança Social', 'SS Empresa Out 2026', '2026-11-20', 'pending', 'auto'),
+  ('ss_empresa','Segurança Social', 'SS Empresa Nov 2026', '2026-12-20', 'pending', 'auto'),
+  ('ss_empresa','Segurança Social', 'SS Empresa Dez 2026', '2027-01-20', 'pending', 'auto')
 ON CONFLICT DO NOTHING;
