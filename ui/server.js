@@ -89,6 +89,7 @@ app.use('/api', (req, res, next) => {
   if (req.path.startsWith('/twin/batch'))  return next();  // auth própria em cada endpoint
   if (req.path.startsWith('/twin/client')) return next(); // client portal — token validado no noc_query
   if (req.path.match(/^\/client\/[a-zA-Z0-9]+\/(timesheets|timesheet)/)) return next(); // client timesheet portal
+  if (req.path.match(/^\/service\/validate\/[a-zA-Z0-9\-]+$/)) return next(); // service validation (public token)
   // OPS token bypasses JWT entirely (system/bot calls)
   const opsTokGlobal = String(req.headers['x-aios-ops-token'] || '').trim();
   if (OPS_TOKEN && opsTokGlobal === OPS_TOKEN) return next();
@@ -1276,6 +1277,8 @@ app.get('/api/control/overview', (req, res) => {
     const clusterMetrics = nocExec('cluster_metrics 6');
     const agentStatus    = nocExec('agent_status');
     const docSummary     = nocExec('doc_summary');
+    const svcStats       = nocExec('service_stats');
+    const systemAutonomy = nocExec('system_autonomy');
 
     const arr = v => Array.isArray(v) ? v : [];
     res.json({
@@ -1296,6 +1299,8 @@ app.get('/api/control/overview', (req, res) => {
       cluster_metrics: arr(clusterMetrics),
       agent_status:    arr(agentStatus),
       doc_summary:     docSummary,
+      service_stats:   svcStats,
+      system_autonomy: systemAutonomy,
       generated_at:  new Date().toISOString(),
     });
   } catch(e) {
@@ -1355,9 +1360,116 @@ app.get('/api/model-router/state', (req, res) => {
   }
 });
 
+// ── Service Billing ───────────────────────────────────────────────────────────
+// Public validation page (no auth)
+app.get('/validar/:token', (req, res) => {
+  res.sendFile(path.join(__dirname, 'validar.html'));
+});
+
+// Public API: get service log by token
+app.get('/api/service/validate/:token', (req, res) => {
+  try {
+    const token = req.params.token.replace(/[^a-zA-Z0-9\-]/g, '');
+    const out   = execSync(`python3 /home/jdl/ai-os/bin/service_billing.py get ${token}`,
+                           { timeout: 10000, encoding: 'utf8' });
+    const d     = JSON.parse(out);
+    if (!d || !d.id) return res.status(404).json({ error: 'not found' });
+    res.json(d);
+  } catch(e) { res.status(500).json({ error: String(e) }); }
+});
+
+// Public API: validate (approve/reject)
+app.post('/api/service/validate/:token', express.json(), (req, res) => {
+  try {
+    const token    = req.params.token.replace(/[^a-zA-Z0-9\-]/g, '');
+    const approved = req.body?.approved ? true : false;
+    const note     = String(req.body?.note || '').slice(0, 500).replace(/'/g, "'\\''");
+    const flag     = approved ? '--approve' : '--reject';
+    const out      = execSync(
+      `python3 /home/jdl/ai-os/bin/service_billing.py validate ${token} ${flag} --note '${note}'`,
+      { timeout: 20000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+// Authenticated: list logs + stats
+app.get('/api/service/logs', requireRole('viewer'), (req, res) => {
+  try {
+    const status = req.query.status || '';
+    const limit  = parseInt(req.query.limit) || 20;
+    const args   = status ? `--status ${status} --limit ${limit}` : `--limit ${limit}`;
+    const out    = execSync(`python3 /home/jdl/ai-os/bin/service_billing.py list ${args}`,
+                            { timeout: 15000, encoding: 'utf8' });
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.get('/api/service/stats', requireRole('viewer'), (req, res) => {
+  res.json(nocExec('service_stats'));
+});
+
+app.get('/api/system/autonomy', requireRole('viewer'), (req, res) => res.json(nocExec('system_autonomy')));
+app.get('/api/jobs/by-role', requireRole('viewer'), (req, res) => res.json(nocExec('jobs_by_role')));
+app.get('/api/council/reviews', requireRole('viewer'), (req, res) => {
+  const limit = parseInt(req.query.limit || '10');
+  res.json(nocExec(`council_list ${limit}`));
+});
+
+app.post('/api/service/submit', requireRole('operator'), express.json(), (req, res) => {
+  try {
+    const { person_id, log_date, hours, location, car_used } = req.body || {};
+    if (!person_id || !log_date || !hours || !location)
+      return res.status(400).json({ ok: false, error: 'person_id, log_date, hours, location required' });
+    const safeLoc = String(location).replace(/'/g, "'\\''").slice(0, 200);
+    const carFlag = car_used ? ' --car' : '';
+    const out     = execSync(
+      `python3 /home/jdl/ai-os/bin/service_billing.py submit ${person_id} ${log_date} ${hours} '${safeLoc}'${carFlag}`,
+      { timeout: 15000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
 // ── Inbox (Aprovações unificadas) ────────────────────────────────────────────
 app.get('/api/inbox/pending', requireRole('viewer'), (req, res) => {
   res.json(nocExec('inbox_pending'));
+});
+
+// ── Agent Inbox ───────────────────────────────────────────────────────────────
+app.get('/api/agent-inbox', requireRole('viewer'), (req, res) => {
+  const status = req.query.status || 'pending';
+  const limit  = parseInt(req.query.limit) || 50;
+  res.json(nocExec(`agent_inbox_list ${status} ${limit}`));
+});
+
+app.post('/api/agent-inbox', requireRole('operator'), express.json(), (req, res) => {
+  try {
+    const { body, target = 'claude', source = 'ui', sender = '' } = req.body || {};
+    if (!body) return res.status(400).json({ ok: false, error: 'body required' });
+    const safeBody   = String(body).slice(0, 2000).replace(/"/g, '\\"');
+    const safeTarget = String(target).replace(/[^a-z]/g, '');
+    const safeSrc    = String(source).replace(/[^a-z_]/g, '');
+    const safeSender = String(sender).slice(0, 80).replace(/"/g, '');
+    const out = execSync(
+      `python3 /home/jdl/ai-os/bin/noc_query.py agent_inbox_add "${safeBody}" "${safeTarget}" "${safeSrc}" "${safeSender}"`,
+      { timeout: 10000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.patch('/api/agent-inbox/:id', requireRole('operator'), express.json(), (req, res) => {
+  try {
+    const id     = parseInt(req.params.id);
+    const status = String(req.body?.status || 'done').replace(/[^a-z]/g, '');
+    const result = String(req.body?.result || '').slice(0, 1000).replace(/"/g, '\\"');
+    const out    = execSync(
+      `python3 /home/jdl/ai-os/bin/noc_query.py agent_inbox_update ${id} ${status} "${result}"`,
+      { timeout: 10000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
 });
 
 // ── Council (AI Council) ──────────────────────────────────────────────────────

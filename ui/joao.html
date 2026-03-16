@@ -193,8 +193,14 @@ header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
     <div class="sidebar-item" data-view="ops" onclick="setView('ops')">
       <span class="icon">⚙️</span> Operação
     </div>
+    <div class="sidebar-item" data-view="servicos" onclick="setView('servicos')">
+      <span class="icon">🔧</span> Serviços <span id="badge-servicos" style="margin-left:auto;background:#f59e0b;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;display:none"></span>
+    </div>
     <div class="sidebar-item" data-view="docs" onclick="setView('docs')">
       <span class="icon">📄</span> Documentos
+    </div>
+    <div class="sidebar-item" data-view="agent-inbox" onclick="setView('agent-inbox')">
+      <span class="icon">🤖</span> Inbox Agent <span id="badge-agent-inbox" style="margin-left:auto;background:#8b5cf6;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;display:none"></span>
     </div>
     <div class="sidebar-item" data-view="inbox" onclick="setView('inbox')">
       <span class="icon">📥</span> Inbox <span id="badge-inbox" style="margin-left:auto;background:#ef4444;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;display:none"></span>
@@ -347,6 +353,30 @@ header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
       </div>
     </div>
 
+    <!-- VIEW: Inbox Agent (Prompts /claude) -->
+    <div id="view-agent-inbox" style="display:none">
+      <div class="section-header">
+        <div class="section-title">Inbox Agent</div>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <select id="ai-status-filter" onchange="loadAgentInbox()" style="background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:.3rem .6rem;font-size:.8rem">
+            <option value="pending">Pendentes</option>
+            <option value="sent">Enviados</option>
+            <option value="done">Concluídos</option>
+            <option value="all">Todos</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="loadAgentInbox()">↺</button>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:1rem">
+        <div class="card-title">➕ Novo Prompt</div>
+        <div style="display:flex;gap:.5rem;margin-top:.5rem">
+          <textarea id="ai-new-prompt" placeholder="Esceve um prompt para Claude..." rows="2" style="flex:1;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:.5rem;font-size:.85rem;resize:vertical;font-family:inherit"></textarea>
+          <button class="btn btn-primary btn-sm" style="align-self:flex-end" onclick="submitAgentPrompt()">Enviar</button>
+        </div>
+      </div>
+      <div id="ai-inbox-list"><div class="loading"><span class="spinner"></span></div></div>
+    </div>
+
     <!-- VIEW: Inbox (Aprovações Unificadas) -->
     <div id="view-inbox" style="display:none">
       <div class="section-header">
@@ -387,6 +417,27 @@ header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
           <div class="card-title">🤖 Agentes</div>
           <div id="aut-agents"></div>
         </div>
+      </div>
+    </div>
+
+    <!-- VIEW: Serviços -->
+    <div id="view-servicos" style="display:none">
+      <div class="section-header">
+        <div class="section-title">Serviços RH</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadServicos()">↺ Actualizar</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1rem">
+        <div class="card"><div class="card-title">⏳ Pendentes</div><div id="svc-pending" class="big-num">—</div></div>
+        <div class="card"><div class="card-title">✅ Aprovados (mês)</div><div id="svc-approved" class="big-num">—</div></div>
+        <div class="card"><div class="card-title">💶 Faturado (mês)</div><div id="svc-invoiced" class="big-num">—</div></div>
+      </div>
+      <div class="card" style="margin-bottom:1rem">
+        <div class="card-title">⏳ Por Validar</div>
+        <div id="svc-pending-list"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">📋 Recentes</div>
+        <div id="svc-recent-list"><div class="loading"><span class="spinner"></span></div></div>
       </div>
     </div>
 
@@ -480,8 +531,10 @@ function setView(v) {
   if (v === 'radar')     loadRadar();
   if (v === 'finance')   loadFinance();
   if (v === 'ops')       loadOps();
-  if (v === 'docs')      loadDocs();
-  if (v === 'inbox')     loadInbox();
+  if (v === 'servicos')    loadServicos();
+  if (v === 'agent-inbox') loadAgentInbox();
+  if (v === 'docs')        loadDocs();
+  if (v === 'inbox')       loadInbox();
   if (v === 'autonomia') loadAutonomia();
 }
 
@@ -1218,6 +1271,156 @@ async function loadDocs() {
   }
 }
 
+// ── serviços ──────────────────────────────────────────────────────────────────
+
+async function loadServicos() {
+  try {
+    const [stats, logs] = await Promise.all([
+      api('/api/service/stats'),
+      api('/api/service/logs?limit=20'),
+    ]);
+    const pending = stats.pending_validation || 0;
+    document.getElementById('svc-pending').textContent = pending;
+    document.getElementById('svc-approved').textContent = stats.approved_month || 0;
+    document.getElementById('svc-invoiced').textContent = fmtEur(stats.invoiced_month || 0);
+    const badge = document.getElementById('badge-servicos');
+    if (pending > 0) { badge.textContent = pending; badge.style.display = ''; }
+    else badge.style.display = 'none';
+
+    const pendingLogs = (logs || []).filter(l => l.status === 'submitted');
+    const pendEl = document.getElementById('svc-pending-list');
+    if (!pendingLogs.length) {
+      pendEl.innerHTML = '<p style="color:#64748b;font-size:.85rem;padding:.5rem">Sem registos por validar.</p>';
+    } else {
+      pendEl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.85rem">
+        <thead><tr style="color:#64748b;border-bottom:1px solid #1e293b">
+          <th style="text-align:left;padding:.3rem .5rem">Colaborador</th>
+          <th style="text-align:center;padding:.3rem .5rem">Data</th>
+          <th style="text-align:center;padding:.3rem .5rem">Horas</th>
+          <th style="text-align:center;padding:.3rem .5rem">Total</th>
+          <th style="text-align:center;padding:.3rem .5rem">Link</th>
+        </tr></thead><tbody>` +
+        pendingLogs.map(l => `<tr style="border-top:1px solid #1e293b">
+          <td style="padding:.4rem .5rem;font-weight:600">${esc(l.person_name || l.worker_id || '—')}</td>
+          <td style="text-align:center;padding:.4rem .5rem;color:#94a3b8">${l.log_date ? l.log_date.slice(0,10) : '—'}</td>
+          <td style="text-align:center;padding:.4rem .5rem">${l.hours}h</td>
+          <td style="text-align:center;padding:.4rem .5rem;color:#22c55e">${fmtEur(l.invoice_total)}</td>
+          <td style="text-align:center;padding:.4rem .5rem"><a href="/validar/${l.validation_token}" target="_blank" style="color:#60a5fa;font-size:.8rem">Validar →</a></td>
+        </tr>`).join('') + '</tbody></table>';
+    }
+
+    const recentEl = document.getElementById('svc-recent-list');
+    if (!logs || !logs.length) {
+      recentEl.innerHTML = '<p style="color:#64748b;font-size:.85rem;padding:.5rem">Sem registos.</p>';
+    } else {
+      const statusBadge = s => {
+        if (s === 'approved') return '<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:1px 6px;font-size:.75rem">✅ Aprovado</span>';
+        if (s === 'rejected') return '<span style="background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 6px;font-size:.75rem">❌ Rejeitado</span>';
+        return '<span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 6px;font-size:.75rem">⏳ Pendente</span>';
+      };
+      recentEl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.85rem">
+        <thead><tr style="color:#64748b;border-bottom:1px solid #1e293b">
+          <th style="text-align:left;padding:.3rem .5rem">Colaborador</th>
+          <th style="text-align:center;padding:.3rem .5rem">Data</th>
+          <th style="text-align:center;padding:.3rem .5rem">Horas/Dias</th>
+          <th style="text-align:center;padding:.3rem .5rem">Total</th>
+          <th style="text-align:center;padding:.3rem .5rem">Estado</th>
+        </tr></thead><tbody>` +
+        logs.map(l => `<tr style="border-top:1px solid #1e293b">
+          <td style="padding:.4rem .5rem;font-weight:600">${esc(l.person_name || l.worker_id || '—')}</td>
+          <td style="text-align:center;padding:.4rem .5rem;color:#94a3b8">${l.log_date ? l.log_date.slice(0,10) : '—'}</td>
+          <td style="text-align:center;padding:.4rem .5rem">${l.hours}h → ${l.days_equivalent}d${l.car_used ? ' 🚗' : ''}</td>
+          <td style="text-align:center;padding:.4rem .5rem;color:#22c55e">${fmtEur(l.invoice_total)}</td>
+          <td style="text-align:center;padding:.4rem .5rem">${statusBadge(l.status)}</td>
+        </tr>`).join('') + '</tbody></table>';
+    }
+  } catch(e) {
+    const el = document.getElementById('svc-pending-list');
+    if (el) el.innerHTML = `<p style="color:#f87171">${e.message}</p>`;
+  }
+}
+
+// ── agent inbox ───────────────────────────────────────────────────────────────
+
+async function loadAgentInbox() {
+  const el = document.getElementById('ai-inbox-list');
+  el.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  try {
+    const statusFilter = document.getElementById('ai-status-filter')?.value || 'pending';
+    const items = await api(`/api/agent-inbox?status=${statusFilter}&limit=50`);
+    const pending = Array.isArray(items) ? items.filter(i => i.status === 'pending').length : 0;
+    const badge = document.getElementById('badge-agent-inbox');
+    if (pending > 0) { badge.textContent = pending; badge.style.display = ''; }
+    else badge.style.display = 'none';
+
+    if (!items || !items.length) {
+      el.innerHTML = '<p style="color:#64748b;font-size:.85rem;padding:.5rem">Sem itens.</p>';
+      return;
+    }
+    const statusBadge = s => {
+      if (s === 'done')    return '<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:1px 6px;font-size:.75rem">✅ done</span>';
+      if (s === 'sent')    return '<span style="background:#dbeafe;color:#1e40af;border-radius:4px;padding:1px 6px;font-size:.75rem">📤 sent</span>';
+      if (s === 'error')   return '<span style="background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 6px;font-size:.75rem">❌ error</span>';
+      return '<span style="background:#ede9fe;color:#5b21b6;border-radius:4px;padding:1px 6px;font-size:.75rem">⏳ pending</span>';
+    };
+    el.innerHTML = items.map(item => `
+      <div style="border:1px solid #1e293b;border-radius:8px;padding:.75rem;margin-bottom:.6rem;background:#0f172a">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;margin-bottom:.4rem">
+          <div style="font-size:.8rem;color:#64748b">#${item.id} · ${item.created_at ? item.created_at.slice(0,16).replace('T',' ') : '—'} · ${esc(item.sender || item.source)}</div>
+          <div style="display:flex;gap:.4rem;align-items:center">
+            ${statusBadge(item.status)}
+            ${item.status === 'pending' ? `<button class="btn btn-ghost btn-sm" style="font-size:.75rem;padding:.15rem .5rem" onclick="markAgentInboxDone(${item.id})">✓ done</button>` : ''}
+            <button class="btn btn-ghost btn-sm" style="font-size:.75rem;padding:.15rem .5rem" onclick="copyToClipboard(${JSON.stringify(item.body)})">📋</button>
+          </div>
+        </div>
+        <div style="font-size:.875rem;color:#e2e8f0;white-space:pre-wrap;word-break:break-word">${esc(item.body)}</div>
+        ${item.result ? `<div style="margin-top:.4rem;font-size:.8rem;color:#94a3b8;border-top:1px solid #1e293b;padding-top:.4rem;white-space:pre-wrap">${esc(item.result)}</div>` : ''}
+      </div>
+    `).join('');
+  } catch(e) {
+    el.innerHTML = `<p style="color:#f87171">${e.message}</p>`;
+  }
+}
+
+async function submitAgentPrompt() {
+  const promptEl = document.getElementById('ai-new-prompt');
+  const body = promptEl?.value?.trim();
+  if (!body) return;
+  try {
+    const r = await api('/api/agent-inbox', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ body, target: 'claude', source: 'ui' }),
+    });
+    if (r.ok) {
+      promptEl.value = '';
+      loadAgentInbox();
+    } else {
+      alert('Erro: ' + (r.error || 'desconhecido'));
+    }
+  } catch(e) { alert(e.message); }
+}
+
+async function markAgentInboxDone(id) {
+  try {
+    await api(`/api/agent-inbox/${id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ status: 'done' }),
+    });
+    loadAgentInbox();
+  } catch(e) { alert(e.message); }
+}
+
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+  });
+}
+
 // ── inbox ─────────────────────────────────────────────────────────────────────
 
 async function loadInbox() {
@@ -1259,55 +1462,72 @@ async function loadInbox() {
 
 async function loadAutonomia() {
   try {
-    const [overview, inbox, docSummary] = await Promise.all([
+    const [overview, inbox, docSummary, autonomy] = await Promise.all([
       api('/api/control/overview'),
       api('/api/inbox/pending'),
       api('/api/docs/summary'),
+      api('/api/system/autonomy').catch(() => ({})),
     ]);
 
     // Timers
     const timers = (overview.health?.timers || []).filter(t => t.last > 0);
-    document.getElementById('aut-timers').innerHTML = timers.length
-      ? timers.slice(0,6).map(t => {
-          const name = t.unit.replace('aios-','').replace('.timer','');
-          return `<div style="font-size:.82rem;padding:.2rem 0;color:#94a3b8">${esc(name)}</div>`;
-        }).join('')
-      : '<div style="color:#64748b">Sem timers</div>';
+    const jobsPending = autonomy.jobs_pending ?? 0;
+    const jobsRunning = autonomy.jobs_running ?? 0;
+    const jobsFailed  = autonomy.jobs_failed_24h ?? 0;
+    document.getElementById('aut-timers').innerHTML =
+      `<div style="display:flex;gap:1rem;margin-bottom:.5rem">
+         <div><div style="font-size:1.2rem;font-weight:700;color:${jobsPending>0?'#fbbf24':'#34d399'}">${jobsPending}</div><div style="font-size:.75rem;color:#94a3b8">pending</div></div>
+         <div><div style="font-size:1.2rem;font-weight:700;color:#60a5fa">${jobsRunning}</div><div style="font-size:.75rem;color:#94a3b8">running</div></div>
+         <div><div style="font-size:1.2rem;font-weight:700;color:${jobsFailed>0?'#f87171':'#34d399'}">${jobsFailed}</div><div style="font-size:.75rem;color:#94a3b8">falhas 24h</div></div>
+       </div>` +
+      (timers.length
+        ? timers.slice(0,4).map(t => {
+            const name = t.unit.replace('aios-','').replace('.timer','');
+            return `<div style="font-size:.75rem;padding:.15rem 0;color:#64748b">${esc(name)}</div>`;
+          }).join('')
+        : '<div style="font-size:.75rem;color:#64748b">Sem timers</div>');
 
     // Incidents
+    const inboxCrit = autonomy.incidents_critical_24h ?? 0;
     const crits = (overview.incidents || []).filter(i => i.status==='open' && i.severity==='crit');
     const warns = (overview.incidents || []).filter(i => i.status==='open' && i.severity==='warn');
     document.getElementById('aut-incidents').innerHTML =
-      `<div style="font-size:1.4rem;font-weight:700;color:${crits.length?'#f87171':'#34d399'}">${crits.length}</div>
+      `<div style="font-size:1.4rem;font-weight:700;color:${(crits.length||inboxCrit)?'#f87171':'#34d399'}">${Math.max(crits.length, inboxCrit)}</div>
        <div style="font-size:.8rem;color:#94a3b8">${crits.length} críticos · ${warns.length} avisos</div>`;
 
     // Approvals
-    const pend = inbox.items || [];
+    const approvPend = autonomy.approvals_pending ?? (inbox.items || []).length;
     document.getElementById('aut-approvals').innerHTML =
-      `<div style="font-size:1.4rem;font-weight:700;color:${pend.length?'#fbbf24':'#34d399'}">${pend.length}</div>
+      `<div style="font-size:1.4rem;font-weight:700;color:${approvPend?'#fbbf24':'#34d399'}">${approvPend}</div>
        <div style="font-size:.8rem;color:#94a3b8">pendentes</div>`;
 
     // Docs
+    const docsExpired  = autonomy.docs_expired ?? 0;
+    const docsExpiring = autonomy.docs_expiring_30d ?? 0;
     const dc = docSummary.doc_counts || {};
     document.getElementById('aut-docs').innerHTML =
       `<div style="display:flex;gap:1rem;margin-bottom:.4rem">
-         <div><div style="font-size:1.2rem;font-weight:700;color:#f87171">${dc.expired||0}</div><div style="font-size:.75rem;color:#94a3b8">expirados</div></div>
-         <div><div style="font-size:1.2rem;font-weight:700;color:#fbbf24">${dc.expiring||0}</div><div style="font-size:.75rem;color:#94a3b8">a expirar</div></div>
+         <div><div style="font-size:1.2rem;font-weight:700;color:#f87171">${docsExpired||dc.expired||0}</div><div style="font-size:.75rem;color:#94a3b8">expirados</div></div>
+         <div><div style="font-size:1.2rem;font-weight:700;color:#fbbf24">${docsExpiring||dc.expiring||0}</div><div style="font-size:.75rem;color:#94a3b8">a expirar</div></div>
          <div><div style="font-size:1.2rem;font-weight:700;color:#34d399">${dc.valid||0}</div><div style="font-size:.75rem;color:#94a3b8">válidos</div></div>
        </div>`;
 
     // Radar
+    const radarOpps = autonomy.radar_opportunities ?? 0;
     const tenders = (overview.tenders || []).filter(t => t.status === 'active');
     document.getElementById('aut-radar').innerHTML =
-      `<div style="font-size:1.4rem;font-weight:700;color:#60a5fa">${tenders.length}</div>
-       <div style="font-size:.8rem;color:#94a3b8">concursos activos</div>`;
+      `<div style="font-size:1.4rem;font-weight:700;color:#60a5fa">${radarOpps||tenders.length}</div>
+       <div style="font-size:.8rem;color:#94a3b8">oportunidades score≥70</div>
+       <div style="font-size:.75rem;color:#64748b">${tenders.length} concursos activos</div>`;
 
     // Agents
+    const agentInbox = autonomy.agent_inbox_pending ?? 0;
     const agents = (overview.agent_status || []);
     const onlineA = agents.filter(a => a.status !== 'offline').length;
     document.getElementById('aut-agents').innerHTML =
       `<div style="font-size:1.4rem;font-weight:700;color:${onlineA>0?'#34d399':'#f87171'}">${onlineA}/${agents.length}</div>
-       <div style="font-size:.8rem;color:#94a3b8">online</div>`;
+       <div style="font-size:.8rem;color:#94a3b8">online</div>
+       <div style="font-size:.75rem;color:${agentInbox?'#fbbf24':'#64748b'}">inbox: ${agentInbox} pendentes</div>`;
 
   } catch(e) {
     document.getElementById('aut-timers').innerHTML = `<div style="color:#f87171">Erro: ${e.message}</div>`;

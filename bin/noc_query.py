@@ -2432,6 +2432,97 @@ def cmd_council_list(args):
     print(result.stdout.strip())
 
 
+# ── Service Billing ────────────────────────────────────────────────────────────
+
+def cmd_service_stats(args):
+    """Service billing stats for current month."""
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, os.path.join(os.path.dirname(__file__), "service_billing.py"), "stats"],
+        capture_output=True, text=True, timeout=15,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[:200])
+    print(result.stdout.strip())
+
+
+def cmd_service_logs(args):
+    """List service logs. Args: [status] [limit=20]"""
+    import subprocess
+    status = args[0] if args else None
+    limit  = args[1] if len(args) > 1 else "20"
+    cmd = [sys.executable, os.path.join(os.path.dirname(__file__), "service_billing.py"), "list",
+           "--limit", str(limit)]
+    if status:
+        cmd += ["--status", status]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[:200])
+    print(result.stdout.strip())
+
+
+def cmd_agent_inbox_list(args):
+    """List agent inbox items. Args: [status=pending|sent|done|all] [limit=20]"""
+    status_filter = args[0] if args else "pending"
+    limit = int(args[1]) if len(args) > 1 else 20
+    engine, text = _conn()
+    with engine.connect() as c:
+        if status_filter == "all":
+            rows = c.execute(text("""
+                SELECT id, source, target, title, body, status, sender, result,
+                       created_at, updated_at
+                FROM public.agent_inbox
+                ORDER BY created_at DESC LIMIT :limit
+            """), {"limit": limit}).mappings().all()
+        else:
+            rows = c.execute(text("""
+                SELECT id, source, target, title, body, status, sender, result,
+                       created_at, updated_at
+                FROM public.agent_inbox
+                WHERE status = :status
+                ORDER BY created_at DESC LIMIT :limit
+            """), {"status": status_filter, "limit": limit}).mappings().all()
+    print(json.dumps([_row(r) for r in rows]))
+
+
+def cmd_agent_inbox_add(args):
+    """Add item to agent inbox. Args: <body> [target] [source] [sender]"""
+    if not args:
+        raise ValueError("body required")
+    body   = args[0]
+    target = args[1] if len(args) > 1 else "claude"
+    source = args[2] if len(args) > 2 else "api"
+    sender = args[3] if len(args) > 3 else None
+    title  = body[:80] + ("..." if len(body) > 80 else "")
+    engine, text = _conn()
+    with engine.begin() as c:
+        row = c.execute(text("""
+            INSERT INTO public.agent_inbox (source, target, title, body, status, sender)
+            VALUES (:source, :target, :title, :body, 'pending', :sender)
+            RETURNING id
+        """), {"source": source, "target": target, "title": title,
+               "body": body, "sender": sender})
+        inbox_id = row.scalar()
+    print(json.dumps({"ok": True, "id": inbox_id}))
+
+
+def cmd_agent_inbox_update(args):
+    """Update agent inbox item. Args: <id> <status> [result]"""
+    if len(args) < 2:
+        raise ValueError("id and status required")
+    inbox_id = int(args[0])
+    status   = args[1]
+    result_v = args[2] if len(args) > 2 else None
+    engine, text = _conn()
+    with engine.begin() as c:
+        c.execute(text("""
+            UPDATE public.agent_inbox
+            SET status=:status, result=:result, updated_at=NOW()
+            WHERE id=:id
+        """), {"status": status, "result": result_v, "id": inbox_id})
+    print(json.dumps({"ok": True, "id": inbox_id, "status": status}))
+
+
 def cmd_pipeline_radar_score(args):
     """Enfileira scoring de radar no cluster. Args: [source=ted]"""
     source = args[0] if args else "ted"
@@ -2653,6 +2744,70 @@ def cmd_person_list(args):
     print(json.dumps([_row(r) for r in rows], ensure_ascii=False))
 
 
+def cmd_jobs_by_role(args):
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT role,
+                   COUNT(*) FILTER (WHERE status='pending') AS pending,
+                   COUNT(*) FILTER (WHERE status='running') AS running,
+                   COUNT(*) FILTER (WHERE status IN ('done','completed')) AS done_24h,
+                   COUNT(*) FILTER (WHERE status='failed') AS failed
+            FROM public.worker_jobs
+            WHERE created_at >= NOW() - INTERVAL '24 hours'
+            GROUP BY role ORDER BY pending DESC
+        """)).mappings().all()
+    print(json.dumps([_row(r) for r in rows]))
+
+
+def cmd_system_autonomy(args):
+    engine, text = _conn()
+    with engine.connect() as c:
+        # Active jobs
+        jobs = c.execute(text("""
+            SELECT COUNT(*) FILTER (WHERE status='pending') AS pending,
+                   COUNT(*) FILTER (WHERE status='running') AS running,
+                   COUNT(*) FILTER (WHERE status='failed' AND created_at > NOW()-INTERVAL '24h') AS failed_24h
+            FROM public.worker_jobs
+        """)).mappings().one()
+        # Critical incidents
+        incidents = c.execute(text("""
+            SELECT COUNT(*) AS cnt FROM public.events
+            WHERE level IN ('error','critical') AND ts > NOW()-INTERVAL '24h'
+        """)).mappings().one()
+        # Expired docs
+        docs = c.execute(text("""
+            SELECT COUNT(*) FILTER (WHERE status='expired' OR (expiry_date IS NOT NULL AND expiry_date < CURRENT_DATE)) AS expired,
+                   COUNT(*) FILTER (WHERE expiry_date IS NOT NULL AND expiry_date BETWEEN CURRENT_DATE AND CURRENT_DATE+30) AS expiring_30d
+            FROM public.documents
+        """)).mappings().one()
+        # Pending approvals
+        approvals = c.execute(text("""
+            SELECT COUNT(*) AS cnt FROM public.twin_approvals WHERE status='pending'
+        """)).mappings().one()
+        # Radar opportunities
+        radar = c.execute(text("""
+            SELECT COUNT(*) AS cnt FROM public.radar_scores
+            WHERE score >= 70 AND created_at > NOW()-INTERVAL '7d'
+        """)).mappings().one()
+        # Agent inbox pending
+        inbox = c.execute(text("""
+            SELECT COUNT(*) AS cnt FROM public.agent_inbox WHERE status='pending'
+        """)).mappings().one()
+    result = {
+        "jobs_pending": int(jobs["pending"] or 0),
+        "jobs_running": int(jobs["running"] or 0),
+        "jobs_failed_24h": int(jobs["failed_24h"] or 0),
+        "incidents_critical_24h": int(incidents["cnt"] or 0),
+        "docs_expired": int(docs["expired"] or 0),
+        "docs_expiring_30d": int(docs["expiring_30d"] or 0),
+        "approvals_pending": int(approvals["cnt"] or 0),
+        "radar_opportunities": int(radar["cnt"] or 0),
+        "agent_inbox_pending": int(inbox["cnt"] or 0),
+    }
+    print(json.dumps(result))
+
+
 CMDS = {
     "telemetry_history": cmd_telemetry_history,
     "telemetry_live":    cmd_telemetry_live,
@@ -2747,6 +2902,16 @@ CMDS = {
     "council_list":                cmd_council_list,
     # Inbox
     "inbox_pending":               cmd_inbox_pending,
+    # Service Billing
+    "service_stats":               cmd_service_stats,
+    "service_logs":                cmd_service_logs,
+    # Agent Inbox
+    "agent_inbox_list":            cmd_agent_inbox_list,
+    "agent_inbox_add":             cmd_agent_inbox_add,
+    "agent_inbox_update":          cmd_agent_inbox_update,
+    # System autonomy + jobs by role
+    "jobs_by_role":                cmd_jobs_by_role,
+    "system_autonomy":             cmd_system_autonomy,
 }
 
 if __name__ == "__main__":

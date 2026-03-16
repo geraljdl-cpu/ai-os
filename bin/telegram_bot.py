@@ -401,6 +401,53 @@ def _get_ops_token() -> str:
     return ""
 
 
+def handle_projeto(args: list) -> str:
+    """Cria projeto a partir de ideia: /projeto <idea_id>"""
+    if not args:
+        return "Uso: /projeto <idea_id>\nEx: /projeto 3"
+    try:
+        idea_id = int(args[0])
+    except ValueError:
+        return f"ID inválido: {args[0]}"
+    try:
+        # Get idea details
+        r = requests.get(
+            f"{UI_BASE}/api/ideas/{idea_id}",
+            headers={"Authorization": f"Bearer {_get_ops_token()}"},
+            timeout=10,
+        )
+        d = r.json()
+        if not d.get("id"):
+            return f"Ideia #{idea_id} não encontrada."
+        title = d.get("title", f"Projeto #{idea_id}")
+        # Create a twin_case for this idea
+        import psycopg2 as _pg2
+        _DSN = os.environ.get("DATABASE_URL", "dbname=aios user=aios_user password=jdl host=127.0.0.1")
+        conn = _pg2.connect(_DSN)
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO public.twin_cases (workflow_key, status, data, created_at, updated_at)
+                VALUES ('projeto', 'aberto', %s::jsonb, NOW(), NOW())
+                RETURNING id
+            """, (json.dumps({"idea_id": idea_id, "title": title, "source": "telegram"}),))
+            case_id = cur.fetchone()[0]
+            cur.execute("""
+                INSERT INTO public.events (ts, level, source, kind, message, data)
+                VALUES (NOW(), 'info', 'telegram', 'projeto_criado', %s, %s::jsonb)
+            """, (f"Projeto criado a partir de ideia #{idea_id}: {title}",
+                  json.dumps({"case_id": case_id, "idea_id": idea_id})))
+        conn.commit()
+        conn.close()
+        return (
+            f"🚀 *Projeto criado!*\n"
+            f"Case #{case_id} — {title}\n"
+            f"Ideia de origem: #{idea_id}\n\n"
+            f"Ver: {UI_BASE}/joao"
+        )
+    except Exception as e:
+        return f"Erro /projeto: {e}"
+
+
 # ── Case management (/case) ───────────────────────────────────────────────────
 
 def handle_case(args: list) -> str:
@@ -640,6 +687,118 @@ def handle_docs(args: list) -> str:
         return f"Erro /docs: {e}"
 
 
+# ── Service Billing (/registo, /servicos) ─────────────────────────────────────
+
+_current_sender: str = ""
+
+
+def handle_registo(args: list) -> str:
+    """Handle /registo <date> <hours> <local> [carro]"""
+    import subprocess
+    global _current_sender
+    if len(args) < 3:
+        return "Uso: /registo <data> <horas> <local> [carro]\nEx: /registo hoje 8 Lisboa\nEx: /registo 2026-03-15 9.5 Porto carro"
+    import datetime as _dt
+    raw_date = args[0]
+    if raw_date.lower() in ("hoje", "today"):
+        log_date = _dt.date.today().isoformat()
+    else:
+        log_date = raw_date
+    try:
+        hours = float(args[1])
+    except ValueError:
+        return f"Horas inválidas: {args[1]}"
+    car_used = args[-1].lower() in ("carro", "car", "true")
+    location_parts = args[2:-1] if car_used else args[2:]
+    location = " ".join(location_parts) if location_parts else args[2]
+
+    # Lookup person by sender name in DB
+    _DB_DSN = os.environ.get("DATABASE_URL", "dbname=aios user=aios_user password=jdl host=127.0.0.1")
+    try:
+        import psycopg2 as _pg2
+        conn = _pg2.connect(_DB_DSN)
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name FROM public.persons WHERE name ILIKE %s LIMIT 1",
+                        (f"%{_current_sender}%",))
+            row = cur.fetchone()
+        conn.close()
+        person_id = row[0] if row else 1
+        person_name = row[1] if row else "Pessoa #1"
+    except Exception:
+        person_id = 1
+        person_name = "Pessoa #1"
+
+    try:
+        result = subprocess.run(
+            ["python3", "/home/jdl/ai-os/bin/service_billing.py", "submit",
+             str(person_id), log_date, str(hours), location]
+            + (["--car"] if car_used else []),
+            capture_output=True, text=True, timeout=20,
+            env={**os.environ, "DATABASE_URL": os.environ.get("DATABASE_URL", "dbname=aios user=aios_user password=jdl host=127.0.0.1"), "UI_BASE": UI_BASE},
+        )
+        if result.returncode != 0:
+            return f"Erro: {result.stderr[:200]}"
+        data = json.loads(result.stdout)
+        days = data.get("days", 1)
+        payout = data.get("worker_pay", 0)
+        invoice = data.get("invoice_total", 0)
+        token = data.get("token", "")
+        val_url = f"{UI_BASE}/validar/{token}"
+        # Notify manager
+        mgr_msg = (
+            f"📋 *Novo serviço registado*\n"
+            f"👤 {data.get('person', person_name)} · 📅 {log_date}\n"
+            f"⏱ {hours}h → {days}d{' 🚗' if car_used else ''} · 📍 {location}\n"
+            f"💶 Fatura: {invoice:.2f}€ | Pagar: {payout:.2f}€\n\n"
+            f"Reencaminhe ao cliente para validar:\n{val_url}"
+        )
+        if TG_CHAT:
+            send(mgr_msg)
+        return (
+            f"✅ Registo submetido!\n"
+            f"Dias: {days} · Payout: {payout:.2f}€\n"
+            f"Fatura: {invoice:.2f}€ (incl. IVA)\n"
+            f"Validação pendente."
+        )
+    except Exception as e:
+        return f"Erro: {e}"
+
+
+def handle_servicos(args: list) -> str:
+    """Handle /servicos [lista|pendentes|stats]"""
+    try:
+        sub = args[0].lower() if args else "stats"
+        if sub == "lista":
+            logs = _noc_json("/service/logs?limit=10")
+            if not logs:
+                return "Sem registos."
+            lines = ["📋 *Últimos serviços*", ""]
+            for l in logs:
+                st = {"approved": "✅", "rejected": "❌", "submitted": "⏳"}.get(l.get("status", ""), "?")
+                lines.append(f"{st} {l.get('person_name','?')} · {str(l.get('log_date',''))[:10]} · {l.get('hours')}h · {l.get('invoice_total')}€")
+            return "\n".join(lines)
+        elif sub == "pendentes":
+            logs = _noc_json("/service/logs?status=submitted&limit=10")
+            if not logs:
+                return "✓ Sem serviços por validar."
+            lines = ["⏳ *Por validar*", ""]
+            for l in logs:
+                lines.append(f"• {l.get('person_name','?')} · {str(l.get('log_date',''))[:10]} · {l.get('hours')}h → {UI_BASE}/validar/{l.get('validation_token','')}")
+            return "\n".join(lines)
+        else:
+            stats = _noc_json("/service/stats")
+            return (
+                f"🔧 *Serviços RH*\n"
+                f"⏳ Por validar: {stats.get('pending_validation',0)}\n"
+                f"✅ Aprovados (mês): {stats.get('approved_month',0)}\n"
+                f"💶 Faturado (mês): {stats.get('invoiced_month',0):.2f}€\n"
+                f"💰 Pagar workers (mês): {stats.get('payout_month',0):.2f}€\n"
+                f"❌ Rejeitados (total): {stats.get('rejected_total',0)}"
+            )
+    except Exception as e:
+        return f"Erro /servicos: {e}"
+
+
 # ── Cluster agents (/cluster) ─────────────────────────────────────────────────
 
 def handle_cluster(_args) -> str:
@@ -848,6 +1007,9 @@ def handle_command(text: str):
     if t.startswith("/case"):
         send(handle_case(t.split()[1:]))
         return
+    if t.startswith("/projeto"):
+        send(handle_projeto(t.split()[1:]))
+        return
     if t.startswith("/finance"):
         send(handle_finance(t.split()[1:]))
         return
@@ -859,6 +1021,12 @@ def handle_command(text: str):
         return
     if t.startswith("/docs"):
         send(handle_docs(t.split()[1:]))
+        return
+    if t.startswith("/registo"):
+        send(handle_registo(t.split()[1:]))
+        return
+    if t.startswith("/servicos"):
+        send(handle_servicos(t.split()[1:]))
         return
     if t.startswith("/pendentes"):
         try:
@@ -874,6 +1042,31 @@ def handle_command(text: str):
                 if it.get("summary"):
                     lines.append(f"   _{it['summary']}_")
             send("\n".join(lines))
+        except Exception as e:
+            send(f"Erro: {e}")
+        return
+    if t.startswith("/claude"):
+        prompt = t[len("/claude"):].strip()
+        if not prompt:
+            send("Uso: /claude <texto>\nEx: /claude Quais são os contratos a renovar este mês?")
+            return
+        try:
+            import subprocess as _sp
+            r = _sp.run(
+                ["python3", "/home/jdl/ai-os/bin/noc_query.py", "agent_inbox_add",
+                 prompt, "claude", "telegram", _current_sender or "telegram"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if r.returncode != 0:
+                send(f"Erro ao guardar: {r.stderr[:100]}")
+                return
+            data    = json.loads(r.stdout)
+            item_id = data.get("id", "?")
+            send(
+                f"📥 Prompt enviado para inbox do Claude\n"
+                f"ID: #{item_id}\n"
+                f"📎 {UI_BASE}/joao → Inbox Agent"
+            )
         except Exception as e:
             send(f"Erro: {e}")
         return
@@ -923,8 +1116,12 @@ def handle_command(text: str):
             "/alertas — incidentes abertos\n"
             "/finance — obrigações e pagamentos RH\n"
             "/case list|ver <id> — gestão de casos\n"
+            "/projeto <id> — criar projeto a partir de ideia\n"
             "/docs — Document Vault (expirados|viaturas|empresa)\n"
+            "/registo <data> <horas> <local> [carro] — registar serviço\n"
+            "/servicos [lista|pendentes|stats] — serviços RH\n"
             "/pendentes — inbox aprovações/sugestões unificado\n"
+            "/claude <texto> — envia prompt para inbox do agente Claude\n"
             "/council <texto> — análise multi-agente de qualquer tópico\n"
             "/control — link para o control room\n"
             "/status — estado da infra\n"
@@ -1073,6 +1270,9 @@ def main():
                     chat_id = str(upd["message"]["chat"]["id"])
                     if TG_CHAT and str(TG_CHAT) != chat_id:
                         continue
+                    global _current_sender
+                    _from = upd["message"].get("from", {})
+                    _current_sender = _from.get("first_name", "") or _from.get("username", "")
                     handle_command(upd["message"]["text"])
                 elif "callback_query" in upd:
                     cb = upd["callback_query"]

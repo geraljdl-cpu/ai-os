@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Validação de Serviço — AI-OS</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem}
+.card{background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.1);max-width:480px;width:100%;padding:2rem}
+.logo{font-size:.8rem;color:#94a3b8;margin-bottom:1.5rem;text-transform:uppercase;letter-spacing:.05em}
+h1{font-size:1.25rem;font-weight:700;color:#0f172a;margin-bottom:.25rem}
+.subtitle{font-size:.875rem;color:#64748b;margin-bottom:1.5rem}
+.field{display:flex;justify-content:space-between;align-items:center;padding:.6rem 0;border-bottom:1px solid #f1f5f9}
+.field:last-of-type{border-bottom:none}
+.field-label{font-size:.8rem;color:#64748b;text-transform:uppercase;letter-spacing:.04em}
+.field-value{font-size:.9rem;font-weight:600;color:#1e293b}
+.divider{border:none;border-top:2px solid #e2e8f0;margin:1.25rem 0}
+.billing{background:#f0fdf4;border-radius:8px;padding:1rem;margin-bottom:1.5rem}
+.billing-row{display:flex;justify-content:space-between;font-size:.875rem;padding:.2rem 0}
+.billing-total{font-weight:700;color:#16a34a;font-size:1rem;border-top:1px solid #bbf7d0;margin-top:.5rem;padding-top:.5rem}
+.billing-label{color:#166534}
+textarea{width:100%;border:1px solid #e2e8f0;border-radius:8px;padding:.75rem;font-size:.875rem;resize:vertical;min-height:60px;margin-bottom:1rem;font-family:inherit}
+textarea:focus{outline:none;border-color:#3b82f6}
+.btn{width:100%;padding:.875rem;border-radius:8px;font-size:.95rem;font-weight:600;border:none;cursor:pointer;transition:all .15s}
+.btn-approve{background:#22c55e;color:#fff;margin-bottom:.75rem}
+.btn-approve:hover{background:#16a34a}
+.btn-reject{background:#fff;color:#ef4444;border:2px solid #ef4444}
+.btn-reject:hover{background:#fef2f2}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.status-ok{text-align:center;padding:2rem 0}
+.status-ok .icon{font-size:3rem;margin-bottom:.75rem}
+.status-ok h2{color:#16a34a;margin-bottom:.5rem}
+.status-err{text-align:center;padding:2rem 0}
+.status-err .icon{font-size:3rem;margin-bottom:.75rem}
+.status-err h2{color:#dc2626;margin-bottom:.5rem}
+.loading{text-align:center;padding:2rem;color:#94a3b8}
+.badge{display:inline-block;padding:.2rem .6rem;border-radius:20px;font-size:.75rem;font-weight:600}
+.badge-pending{background:#fef3c7;color:#92400e}
+.badge-approved{background:#dcfce7;color:#166534}
+.badge-rejected{background:#fee2e2;color:#991b1b}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="loading">A carregar...</div>
+</div>
+
+<script>
+const token = location.pathname.split('/validar/')[1] || '';
+let tsData = null;
+
+async function load() {
+  const card = document.getElementById('card');
+  try {
+    const r = await fetch(`/api/service/validate/${token}`);
+    const d = await r.json();
+    if (!d || d.error || !d.id) {
+      card.innerHTML = `<div class="status-err"><div class="icon">❌</div><h2>Link inválido</h2><p style="color:#64748b;font-size:.875rem">Este link de validação não existe ou já expirou.</p></div>`;
+      return;
+    }
+    tsData = d;
+    renderForm(d);
+  } catch(e) {
+    card.innerHTML = `<div class="status-err"><div class="icon">⚠️</div><h2>Erro</h2><p style="color:#64748b">${e.message}</p></div>`;
+  }
+}
+
+function fmt_date(s) {
+  if (!s) return '—';
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  return d.toLocaleDateString('pt-PT');
+}
+
+function days_label(d) {
+  return d == 2 ? '2 dias' : d == 1.5 ? '1,5 dias' : '1 dia';
+}
+
+function renderForm(d) {
+  const status = d.status;
+  if (status === 'approved') {
+    document.getElementById('card').innerHTML = `
+      <div class="logo">AI-OS · Serviços</div>
+      <div class="status-ok"><div class="icon">✅</div><h2>Já validado</h2>
+      <p style="color:#64748b;font-size:.875rem">Este registo foi aprovado anteriormente.</p></div>`;
+    return;
+  }
+  if (status === 'rejected') {
+    document.getElementById('card').innerHTML = `
+      <div class="logo">AI-OS · Serviços</div>
+      <div class="status-err"><div class="icon">❌</div><h2>Já rejeitado</h2>
+      <p style="color:#64748b;font-size:.875rem">Este registo foi rejeitado anteriormente.</p></div>`;
+    return;
+  }
+
+  const days  = parseFloat(d.days_equivalent || 1);
+  const car   = d.car_used ? ' + 🚗 carro' : '';
+  const log_date = d.log_date ? fmt_date(d.log_date + 'T12:00:00') : '—';
+
+  document.getElementById('card').innerHTML = `
+    <div class="logo">AI-OS · Validação de Serviço</div>
+    <h1>Pedido de Validação</h1>
+    <p class="subtitle">Por favor confirme o trabalho realizado.</p>
+
+    <div class="field"><span class="field-label">Colaborador</span><span class="field-value">${esc(d.person_name || d.worker_id || '—')}</span></div>
+    <div class="field"><span class="field-label">Data</span><span class="field-value">${log_date}</span></div>
+    <div class="field"><span class="field-label">Horas trabalhadas</span><span class="field-value">${d.hours}h → ${days_label(days)}${car}</span></div>
+    <div class="field"><span class="field-label">Local</span><span class="field-value">${esc(d.location || '—')}</span></div>
+
+    <hr class="divider">
+    <div class="billing">
+      <div class="billing-row"><span class="billing-label">Valor base (${days_label(days)} × 100€)</span><span>${fmt_eur(d.invoice_net)}</span></div>
+      <div class="billing-row"><span class="billing-label">IVA 23%</span><span>${fmt_eur(d.invoice_vat)}</span></div>
+      <div class="billing-row billing-total"><span>Total a pagar</span><span>${fmt_eur(d.invoice_total)}</span></div>
+    </div>
+
+    <textarea id="note" placeholder="Nota opcional (visível no registo)..."></textarea>
+    <button class="btn btn-approve" id="btn-approve" onclick="validate(true)">✅ Validar e Confirmar</button>
+    <button class="btn btn-reject" id="btn-reject" onclick="validate(false)">❌ Rejeitar</button>
+  `;
+}
+
+function fmt_eur(v) { return parseFloat(v || 0).toFixed(2) + ' €'; }
+function esc(s) { return String(s).replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+async function validate(approved) {
+  const note = document.getElementById('note')?.value || '';
+  document.getElementById('btn-approve').disabled = true;
+  document.getElementById('btn-reject').disabled  = true;
+
+  try {
+    const r = await fetch(`/api/service/validate/${token}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({approved, note}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      if (approved) {
+        document.getElementById('card').innerHTML = `
+          <div class="status-ok">
+            <div class="icon">✅</div>
+            <h2>Obrigado pela confirmação!</h2>
+            <p style="color:#64748b;font-size:.875rem">O registo foi validado. A fatura draft foi gerada automaticamente.</p>
+          </div>`;
+      } else {
+        document.getElementById('card').innerHTML = `
+          <div class="status-err">
+            <div class="icon">📝</div>
+            <h2>Rejeição registada</h2>
+            <p style="color:#64748b;font-size:.875rem">O registo foi rejeitado. A nossa equipa será notificada.</p>
+          </div>`;
+      }
+    } else {
+      alert('Erro: ' + (d.error || 'Tente novamente'));
+      document.getElementById('btn-approve').disabled = false;
+      document.getElementById('btn-reject').disabled  = false;
+    }
+  } catch(e) {
+    alert('Erro de rede: ' + e.message);
+    document.getElementById('btn-approve').disabled = false;
+    document.getElementById('btn-reject').disabled  = false;
+  }
+}
+
+load();
+</script>
+</body>
+</html>

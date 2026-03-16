@@ -192,11 +192,25 @@ def cmd_analyze(topic: str, kind: str = "general", ref_id: str | None = None) ->
 
         synthesis = _synthesize(topic, agent_results)
 
+        # Extract next_steps as bullet points from agent recommendations
+        next_steps = []
+        for r in agent_results:
+            rec = (r.get("recommendation") or "").strip()
+            opp = (r.get("opportunity") or "").strip()
+            if rec:
+                next_steps.append(f"[{r['agent'].upper()}] {rec}: {opp[:120]}" if opp else f"[{r['agent'].upper()}] {rec}")
+        suggested_tasks = [
+            {"agent": r["agent"], "action": (r.get("recommendation") or "").split()[0], "detail": (r.get("analysis") or "")[:200]}
+            for r in agent_results
+        ]
+
         # Store synthesis as 'system' agent row
         c.execute(text("""
             INSERT INTO public.council_reviews
-              (topic, topic_kind, ref_id, agent, analysis, risks, opportunity, score, recommendation, raw)
-            VALUES (:topic, :kind, :ref_id, 'system', :analysis, '', '', :score, :recommendation, :raw)
+              (topic, topic_kind, ref_id, agent, analysis, risks, opportunity, score, recommendation, raw,
+               synthesis, next_steps, suggested_tasks, status)
+            VALUES (:topic, :kind, :ref_id, 'system', :analysis, '', '', :score, :recommendation, :raw,
+                    :synthesis, CAST(:next_steps AS jsonb), CAST(:suggested_tasks AS jsonb), 'done')
         """), {
             "topic":          topic[:500],
             "kind":           kind,
@@ -205,6 +219,9 @@ def cmd_analyze(topic: str, kind: str = "general", ref_id: str | None = None) ->
             "score":          synthesis["avg_score"],
             "recommendation": synthesis["decision"],
             "raw":            json.dumps(synthesis),
+            "synthesis":      synthesis["synthesis"][:2000],
+            "next_steps":     json.dumps(next_steps),
+            "suggested_tasks": json.dumps(suggested_tasks),
         })
 
         # Event

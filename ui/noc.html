@@ -128,7 +128,7 @@
   </div>
   <!-- Block 3: Finance -->
   <div class="card" id="card-finance">
-    <div class="card-title"><span class="dot dot-yellow dot"></span>FINANCE</div>
+    <div class="card-title"><span class="dot dot-yellow dot"></span>FINANCE <span id="hdr-finance" style="font-weight:400"></span></div>
     <div class="card-body" id="blk-finance">
       <div id="finance-metrics" class="metric-row"></div>
       <div class="scroll" id="finance-obls"></div>
@@ -272,8 +272,14 @@ function renderFactory(cases, finStats) {
 }
 
 /* ── Block 3: Finance ─── */
-function renderFinance(finStats, obligations) {
+function renderFinance(finStats, obligations, svcStats) {
   const fs = finStats || {};
+  const ss = svcStats || {};
+  const svcPending = ss.pending_validation || 0;
+  const svcTag = svcPending > 0
+    ? `<span style="color:var(--yellow);font-size:.75rem;margin-left:.5rem">· Serviços: ${svcPending} pend · ${euro(ss.invoiced_month||0)} fat.</span>`
+    : `<span style="color:var(--muted);font-size:.75rem;margin-left:.5rem">· Serviços: ${euro(ss.invoiced_month||0)} fat.</span>`;
+  document.getElementById('hdr-finance').innerHTML = svcTag;
   document.getElementById('finance-metrics').innerHTML =
     `<div class="metric"><div class="metric-val" style="color:var(--yellow)">${euro(fs.pending_total)}</div><div class="metric-lbl">Pendente</div></div>
      <div class="metric"><div class="metric-val" style="color:var(--red)">${euro(fs.overdue_total)}</div><div class="metric-lbl">Vencido</div></div>
@@ -465,7 +471,7 @@ async function refresh() {
     lastData = d;
     renderCluster(d.workers, d.cluster_jobs, d.cluster_metrics);
     renderFactory(d.cases, d.finance_stats);
-    renderFinance(d.finance_stats, d.obligations);
+    renderFinance(d.finance_stats, d.obligations, d.service_stats);
     renderRadar(d.tenders);
     renderIncidents(d.incidents);
     renderIdeas(d.ideas);

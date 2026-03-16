@@ -1,0 +1,19 @@
+{
+  "_comment": "Configuração arquitectura IA local no cluster — preparação FASE 6",
+  "nodes": {
+    "node2": {"role": "llm_inference", "model": "llama3:8b", "backend": "ollama", "vram_gb": 8},
+    "node3": {"role": "embeddings", "model": "nomic-embed-text", "backend": "ollama", "vram_gb": 4},
+    "node4": {"role": "radar_llm", "model": "llama3:8b", "backend": "ollama", "vram_gb": 8},
+    "node5": {"role": "embeddings_secondary", "model": "nomic-embed-text", "backend": "ollama", "vram_gb": 4},
+    "node6": {"role": "automations", "model": null, "backend": null, "vram_gb": 0},
+    "node7": {"role": "watchdog_fallback", "model": "phi3:mini", "backend": "ollama", "vram_gb": 2}
+  },
+  "routing": {
+    "default": "claude_api",
+    "local_threshold_tokens": 2000,
+    "local_roles": ["summarize", "classify", "embed"],
+    "cloud_roles": ["analyze", "council", "generate"]
+  },
+  "ollama_base_url": "http://{node_ip}:11434",
+  "ready": false
+}
