@@ -2767,7 +2767,7 @@ def cmd_system_autonomy(args):
         jobs = c.execute(text("""
             SELECT COUNT(*) FILTER (WHERE status='pending') AS pending,
                    COUNT(*) FILTER (WHERE status='running') AS running,
-                   COUNT(*) FILTER (WHERE status='failed' AND created_at > NOW()-INTERVAL '24h') AS failed_24h
+                   COUNT(*) FILTER (WHERE status='failed' AND ts_created > NOW()-INTERVAL '24h') AS failed_24h
             FROM public.worker_jobs
         """)).mappings().one()
         # Critical incidents
