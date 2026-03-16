@@ -76,6 +76,45 @@ header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
 
 .agent-reviews{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:1rem}
 @media(max-width:900px){.agent-reviews{grid-template-columns:1fr}}
+
+/* ── Mobile responsive ── */
+@media(max-width:768px){
+  header{padding:.75rem 1rem}
+  header h1{font-size:1rem}
+  .header-nav{display:none}
+  .layout{grid-template-columns:1fr;min-height:calc(100vh - 48px - 60px)}
+  .sidebar{display:none}
+  .main{padding:1rem;padding-bottom:72px}
+  .metrics{grid-template-columns:repeat(2,1fr)}
+  div[style*="grid-template-columns:1fr 1fr"]{display:block!important}
+  div[style*="grid-template-columns:1fr 1fr"] > *{margin-bottom:1rem}
+  .section-title{font-size:1rem}
+
+  /* Bottom nav */
+  .bottom-nav{display:flex!important}
+}
+.bottom-nav{
+  display:none;
+  position:fixed;bottom:0;left:0;right:0;
+  background:#0a1628;border-top:1px solid #1e293b;
+  height:60px;z-index:100;
+  justify-content:space-around;align-items:center;
+  padding:0 .25rem;
+}
+.bn-item{
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+  cursor:pointer;padding:.4rem .5rem;border-radius:.5rem;
+  color:#64748b;font-size:.6rem;font-weight:600;text-transform:uppercase;
+  letter-spacing:.03em;min-width:48px;position:relative;transition:color .15s;
+  -webkit-tap-highlight-color:transparent;
+}
+.bn-item.active{color:#60a5fa}
+.bn-item .bn-icon{font-size:1.3rem;line-height:1}
+.bn-badge{
+  position:absolute;top:2px;right:4px;
+  background:#ef4444;color:#fff;border-radius:99px;
+  font-size:.55rem;font-weight:700;padding:0 4px;min-width:14px;text-align:center;
+}
 .agent-card{background:#0f172a;border:1px solid #1e293b;border-radius:.6rem;padding:1rem}
 .agent-name{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin-bottom:.5rem}
 .agent-name.strategist{color:#f59e0b}
@@ -522,6 +561,9 @@ function setView(v) {
   document.querySelectorAll('.sidebar-item').forEach(el => {
     el.classList.toggle('active', el.dataset.view === v);
   });
+  document.querySelectorAll('.bn-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.view === v);
+  });
   document.querySelectorAll('[id^="view-"]').forEach(el => {
     el.style.display = el.id === 'view-' + v ? '' : 'none';
   });
@@ -713,6 +755,11 @@ function updateBadges(ideas, decisions, alerts) {
   sbI.style.display = ideas > 0 ? '' : 'none'; sbI.textContent = ideas;
   sbD.style.display = decisions > 0 ? '' : 'none'; sbD.textContent = decisions;
   if (sbA) { sbA.style.display = (alerts||0) > 0 ? '' : 'none'; sbA.textContent = alerts||0; }
+  // Sync bottom nav badges
+  const bnI = document.getElementById('bn-ideas');
+  const bnA = document.getElementById('bn-alerts');
+  if (bnI) { bnI.style.display = ideas > 0 ? '' : 'none'; bnI.textContent = ideas; }
+  if (bnA) { bnA.style.display = (alerts||0) > 0 ? '' : 'none'; bnA.textContent = alerts||0; }
 }
 
 function quickDecision() {
@@ -1286,6 +1333,8 @@ async function loadServicos() {
     const badge = document.getElementById('badge-servicos');
     if (pending > 0) { badge.textContent = pending; badge.style.display = ''; }
     else badge.style.display = 'none';
+    const bnS = document.getElementById('bn-servicos');
+    if (bnS) { bnS.textContent = pending; bnS.style.display = pending > 0 ? '' : 'none'; }
 
     const pendingLogs = (logs || []).filter(l => l.status === 'submitted');
     const pendEl = document.getElementById('svc-pending-list');
@@ -1433,6 +1482,8 @@ async function loadInbox() {
     const badge = document.getElementById('badge-inbox');
     if (items.length > 0) { badge.style.display=''; badge.textContent=items.length; }
     else badge.style.display='none';
+    const bnIn = document.getElementById('bn-inbox');
+    if (bnIn) { bnIn.textContent = items.length; bnIn.style.display = items.length > 0 ? '' : 'none'; }
 
     if (!items.length) {
       el.innerHTML = '<div style="color:#34d399;padding:1.5rem;text-align:center;font-size:1rem">✓ Sem pendentes</div>';
@@ -1534,5 +1585,32 @@ async function loadAutonomia() {
   }
 }
 </script>
+
+<!-- Bottom navigation (mobile only) -->
+<nav class="bottom-nav">
+  <div class="bn-item active" data-view="overview" onclick="setView('overview')">
+    <span class="bn-icon">📋</span>Hoje
+    <span class="bn-badge" id="bn-alerts" style="display:none">0</span>
+  </div>
+  <div class="bn-item" data-view="ideas" onclick="setView('ideas')">
+    <span class="bn-icon">💡</span>Ideias
+    <span class="bn-badge" id="bn-ideas" style="display:none">0</span>
+  </div>
+  <div class="bn-item" data-view="inbox" onclick="setView('inbox')">
+    <span class="bn-icon">📥</span>Inbox
+    <span class="bn-badge" id="bn-inbox" style="display:none">0</span>
+  </div>
+  <div class="bn-item" data-view="servicos" onclick="setView('servicos')">
+    <span class="bn-icon">🔧</span>Serviços
+    <span class="bn-badge" id="bn-servicos" style="display:none">0</span>
+  </div>
+  <div class="bn-item" data-view="docs" onclick="setView('docs')">
+    <span class="bn-icon">📄</span>Docs
+    <span class="bn-badge" id="bn-docs" style="display:none">0</span>
+  </div>
+  <div class="bn-item" data-view="autonomia" onclick="setView('autonomia')">
+    <span class="bn-icon">🤖</span>Sistema
+  </div>
+</nav>
 </body>
 </html>
