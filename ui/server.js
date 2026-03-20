@@ -785,8 +785,9 @@ app.post('/api/workers/register', (req, res) => {
 
 // Worker jobs
 app.get('/api/worker_jobs', (req, res) => {
-  const limit = parseInt(req.query.limit || '30', 10);
-  res.json(nocExec(`worker_jobs ${limit}`));
+  const limit  = parseInt(req.query.limit || '30', 10);
+  const status = String(req.query.status || '').replace(/[^a-z_]/g, '');
+  res.json(nocExec(status ? `worker_jobs ${limit} ${status}` : `worker_jobs ${limit}`));
 });
 
 app.get('/api/worker_jobs/lease', requireWorkerAuth, (req, res) => {

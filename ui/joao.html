@@ -4107,17 +4107,19 @@ function _autAge(isoStr) {
 async function loadAutonomia() {
   clearTimeout(window._autRefreshTimer);
   try {
-    const [overview, inbox, docSummary, autonomy, workers, allJobs, blocked] = await Promise.all([
+    const [overview, inbox, docSummary, autonomy, workers, allJobs, failedJobs, blocked] = await Promise.all([
       api('/api/control/overview'),
       api('/api/inbox/pending'),
       api('/api/docs/summary'),
       api('/api/system/autonomy').catch(() => ({})),
       api('/api/workers').catch(() => []),
       api('/api/worker_jobs?limit=50').catch(() => []),
+      api('/api/worker_jobs?limit=25&status=failed').catch(() => []),
       api('/api/autonomia/blocked').catch(() => []),
     ]);
 
-    const jobs = Array.isArray(allJobs) ? allJobs : (allJobs.jobs || []);
+    const jobs       = Array.isArray(allJobs)    ? allJobs    : [];
+    const failedList = Array.isArray(failedJobs) ? failedJobs : [];
 
     // ── KPI: Timers ──
     const timers = (overview.health?.timers || []).filter(t => t.last > 0);
@@ -4207,8 +4209,8 @@ async function loadAutonomia() {
 
     // ── Falhas 24h ──
     const cutoff24h = Date.now() - 86400000;
-    const failedJobs = jobs.filter(j => j.status === 'failed' && j.ts_done && new Date(j.ts_done) > cutoff24h).slice(0, 10);
-    document.getElementById('aut-failures').innerHTML = failedJobs.length
+    const recentFailed = failedList.filter(j => !j.ts_done || new Date(j.ts_done) > cutoff24h).slice(0, 10);
+    document.getElementById('aut-failures').innerHTML = recentFailed.length
       ? `<table style="width:100%;font-size:.75rem;border-collapse:collapse">
            <thead><tr style="color:#64748b">
              <th style="text-align:left;padding:.2rem .4rem">#</th>
@@ -4216,7 +4218,7 @@ async function loadAutonomia() {
              <th style="text-align:left;padding:.2rem .4rem">erro</th>
              <th style="text-align:left;padding:.2rem .4rem">retry</th>
            </tr></thead>
-           <tbody>${failedJobs.map(j => {
+           <tbody>${recentFailed.map(j => {
              let errSnippet = '?';
              try { const r = typeof j.result === 'string' ? JSON.parse(j.result) : (j.result||{}); errSnippet = r.error || JSON.stringify(r).slice(0,40); } catch {}
              const retry = `${j.retry_count||0}/${j.max_retries||0}`;
@@ -4285,7 +4287,10 @@ async function loadAutonomia() {
       : '<div style="font-size:.8rem;color:#64748b">Sem jobs bloqueados</div>';
 
     // ── Worker Heartbeat ──
-    const wList = Array.isArray(workers) ? workers : (workers.workers || []);
+    const wList = Array.isArray(workers) ? workers : [];
+    if (!Array.isArray(workers) && workers && workers.error) {
+      document.getElementById('aut-heartbeat').innerHTML = `<div style="color:#f87171;font-size:.8rem">Erro: ${esc(workers.error)}</div>`;
+    } else {
     document.getElementById('aut-heartbeat').innerHTML = wList.length
       ? `<table style="width:100%;font-size:.75rem;border-collapse:collapse">
            <thead><tr style="color:#64748b">
@@ -4309,6 +4314,7 @@ async function loadAutonomia() {
            }).join('')}</tbody>
          </table>`
       : '<div style="font-size:.8rem;color:#64748b">Sem workers registados</div>';
+    } // end else
 
   } catch(e) {
     document.getElementById('aut-timers').innerHTML = `<div style="color:#f87171">Erro: ${e.message}</div>`;

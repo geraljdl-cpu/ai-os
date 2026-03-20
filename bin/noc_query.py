@@ -136,16 +136,31 @@ def cmd_worker_register(args):
 # ── worker_jobs ───────────────────────────────────────────────────────────────
 
 def cmd_worker_jobs(args):
-    limit = int(args[0]) if args else 30
+    """Lista jobs. Args: [limit] [status]  (ex: 20 failed)"""
+    limit  = 30
+    status = None
+    for a in args:
+        try: limit = int(a)
+        except: status = a
     engine, text = _conn()
     with engine.connect() as c:
-        rows = c.execute(text("""
-            SELECT id, ts_created, ts_assigned, ts_done, status,
-                   target_worker_id, assigned_worker_id, kind,
-                   payload, result
-            FROM public.worker_jobs
-            ORDER BY ts_created DESC LIMIT :n
-        """), {"n": limit}).mappings().all()
+        if status:
+            rows = c.execute(text("""
+                SELECT id, ts_created, ts_assigned, ts_done, status,
+                       target_worker_id, assigned_worker_id, kind,
+                       payload, result, retry_count, max_retries
+                FROM public.worker_jobs
+                WHERE status = :s
+                ORDER BY ts_created DESC LIMIT :n
+            """), {"n": limit, "s": status}).mappings().all()
+        else:
+            rows = c.execute(text("""
+                SELECT id, ts_created, ts_assigned, ts_done, status,
+                       target_worker_id, assigned_worker_id, kind,
+                       payload, result, retry_count, max_retries
+                FROM public.worker_jobs
+                ORDER BY ts_created DESC LIMIT :n
+            """), {"n": limit}).mappings().all()
     print(json.dumps([_row(r) for r in rows], ensure_ascii=False))
 
 
