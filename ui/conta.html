@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel do Cliente — JDL</title>
+<style>
+:root{
+  --bg:#f1f5f9;--panel:#ffffff;--border:#e2e8f0;
+  --blue:#3b82f6;--green:#16a34a;--yellow:#d97706;--red:#dc2626;--gray:#94a3b8;
+  --ink:#1e293b;--ink2:#64748b;--ink3:#94a3b8;
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --radius:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);min-height:100vh}
+
+header{
+  background:#1e3a5f;color:#fff;padding:0 24px;height:56px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+header .logo{font-size:16px;font-weight:700;letter-spacing:1px}
+header .sub{font-size:12px;opacity:.7;margin-top:1px}
+header .user-info{font-size:13px;opacity:.8;text-align:right}
+header .logout{
+  margin-left:16px;font-size:12px;color:rgba(255,255,255,.6);cursor:pointer;
+  background:none;border:1px solid rgba(255,255,255,.2);padding:4px 10px;border-radius:4px;
+}
+header .logout:hover{background:rgba(255,255,255,.1)}
+
+main{max-width:1100px;margin:0 auto;padding:24px 20px}
+
+.section-title{
+  font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink3);margin:24px 0 10px;
+}
+.section-title:first-child{margin-top:0}
+
+/* KPI grid */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:4px}
+.kpi{
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:16px 18px;
+}
+.kpi .label{font-size:11px;color:var(--ink2);margin-bottom:6px}
+.kpi .value{font-size:24px;font-weight:700;color:var(--ink);line-height:1}
+.kpi .unit{font-size:13px;font-weight:400;color:var(--ink2);margin-left:2px}
+.kpi.green .value{color:var(--green)}
+.kpi.yellow .value{color:var(--yellow)}
+.kpi.blue .value{color:var(--blue)}
+
+/* Tables */
+.card{
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  overflow:hidden;margin-bottom:20px;
+}
+.card-header{
+  padding:12px 16px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+}
+.card-header h3{font-size:13px;font-weight:600}
+.card-header .count{font-size:12px;color:var(--ink3);background:var(--bg);
+  padding:2px 8px;border-radius:12px;border:1px solid var(--border)}
+
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{
+  padding:8px 12px;text-align:left;font-size:11px;font-weight:600;
+  color:var(--ink3);text-transform:uppercase;letter-spacing:.04em;
+  border-bottom:1px solid var(--border);background:#f8fafc;
+}
+td{padding:10px 12px;border-bottom:1px solid var(--border)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#f8fafc}
+
+.badge{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px;
+}
+.badge-submitted {background:#dbeafe;color:#1d4ed8}
+.badge-approved_client,.badge-adjusted_client,.badge-validated,.badge-invoiced_mock{background:#dcfce7;color:#15803d}
+.badge-rejected_client,.badge-rejected{background:#fee2e2;color:#dc2626}
+.badge-pending_client_review{background:#fef3c7;color:#92400e}
+.badge-reimbursed_mbway{background:#d1fae5;color:#065f46}
+
+.amount{font-weight:600;color:var(--green)}
+.amount-neutral{color:var(--ink2)}
+.text-muted{color:var(--ink3);font-size:12px}
+
+/* Monthly chart bars */
+.month-bar{
+  display:flex;align-items:center;gap:10px;padding:8px 12px;
+  border-bottom:1px solid var(--border);
+}
+.month-bar:last-child{border-bottom:none}
+.month-label{width:64px;font-size:12px;color:var(--ink2);flex-shrink:0}
+.bar-track{flex:1;background:var(--border);border-radius:4px;height:8px;overflow:hidden}
+.bar-fill{background:var(--blue);height:100%;border-radius:4px;transition:width .3s}
+.month-total{width:80px;text-align:right;font-size:13px;font-weight:600;color:var(--blue)}
+
+/* Empty state */
+.empty{padding:32px;text-align:center;color:var(--ink3);font-size:13px}
+
+/* Tabs */
+.tabs{display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:0}
+.tab{
+  padding:10px 18px;font-size:13px;cursor:pointer;color:var(--ink2);
+  border-bottom:2px solid transparent;margin-bottom:-2px;
+}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
+.tab:hover:not(.active){color:var(--ink)}
+
+.tab-content{display:none}
+.tab-content.active{display:block}
+
+/* Spinner */
+.spinner{
+  display:inline-block;width:16px;height:16px;border:2px solid var(--border);
+  border-top-color:var(--blue);border-radius:50%;animation:spin .6s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Photo link */
+.photo-link{color:var(--blue);text-decoration:none;font-size:12px}
+.photo-link:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <div class="logo">JDL · Painel do Cliente</div>
+    <div class="sub" id="client-subtitle">A carregar...</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div class="user-info" id="user-info"></div>
+    <button class="logout" onclick="logout()">Sair</button>
+  </div>
+</header>
+
+<main>
+  <!-- KPIs -->
+  <div class="section-title">Resumo</div>
+  <div class="kpi-grid" id="kpis">
+    <div class="kpi"><div class="label">A carregar</div><div class="value">…</div></div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="card" style="margin-top:20px">
+    <div class="tabs" id="tabs">
+      <div class="tab active" data-tab="services" onclick="switchTab('services')">Serviços</div>
+      <div class="tab" data-tab="expenses" onclick="switchTab('expenses')">Despesas</div>
+      <div class="tab" data-tab="invoices" onclick="switchTab('invoices')">Faturas</div>
+      <div class="tab" data-tab="monthly" onclick="switchTab('monthly')">Mensal</div>
+    </div>
+
+    <!-- Services tab -->
+    <div class="tab-content active" id="tab-services">
+      <div class="card-header">
+        <h3>Serviços</h3>
+        <select id="svc-filter" onchange="loadServices()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg)">
+          <option value="">Todos</option>
+          <option value="submitted">Pendentes validação</option>
+          <option value="approved_client">Aprovados</option>
+          <option value="adjusted_client">Ajustados</option>
+          <option value="rejected_client">Rejeitados</option>
+        </select>
+      </div>
+      <div id="svc-loading" class="empty"><span class="spinner"></span></div>
+      <div id="svc-table" style="overflow-x:auto;display:none">
+        <table>
+          <thead>
+            <tr>
+              <th>Data</th><th>Colaborador</th><th>Local</th>
+              <th>Horas</th><th>Valor (c/ IVA)</th><th>Estado</th><th>Notas</th>
+            </tr>
+          </thead>
+          <tbody id="svc-body"></tbody>
+        </table>
+      </div>
+      <div id="svc-empty" class="empty" style="display:none">Sem registos.</div>
+    </div>
+
+    <!-- Expenses tab -->
+    <div class="tab-content" id="tab-expenses">
+      <div class="card-header"><h3>Despesas para reembolso</h3></div>
+      <div id="exp-loading" class="empty"><span class="spinner"></span></div>
+      <div id="exp-table" style="overflow-x:auto;display:none">
+        <table>
+          <thead>
+            <tr>
+              <th>Data</th><th>Colaborador</th><th>Tipo</th><th>Recibo em nome de</th>
+              <th>Valor</th><th>Estado</th><th>Comprovativo</th>
+            </tr>
+          </thead>
+          <tbody id="exp-body"></tbody>
+        </table>
+      </div>
+      <div id="exp-empty" class="empty" style="display:none">Sem despesas registadas.</div>
+    </div>
+
+    <!-- Invoices tab -->
+    <div class="tab-content" id="tab-invoices">
+      <div class="card-header"><h3>Faturas / drafts</h3></div>
+      <div id="inv-loading" class="empty"><span class="spinner"></span></div>
+      <div id="inv-table" style="overflow-x:auto;display:none">
+        <table>
+          <thead>
+            <tr>
+              <th>Nº</th><th>Data serviço</th><th>Colaborador</th>
+              <th>Total</th><th>Estado</th><th>Detalhe</th>
+            </tr>
+          </thead>
+          <tbody id="inv-body"></tbody>
+        </table>
+      </div>
+      <div id="inv-empty" class="empty" style="display:none">Sem faturas.</div>
+    </div>
+
+    <!-- Monthly tab -->
+    <div class="tab-content" id="tab-monthly">
+      <div class="card-header"><h3>Totais mensais</h3></div>
+      <div id="mon-loading" class="empty"><span class="spinner"></span></div>
+      <div id="mon-bars" style="display:none;padding:8px 0"></div>
+      <div id="mon-empty" class="empty" style="display:none">Sem dados mensais.</div>
+    </div>
+  </div>
+</main>
+
+<script>
+const TOKEN = localStorage.getItem('aios_jwt');
+const USER  = (() => { try { return JSON.parse(localStorage.getItem('aios_user')||'{}'); } catch(e){return{};} })();
+
+if (!TOKEN) { window.location = '/login?next=/conta'; }
+
+// Show user info
+document.getElementById('user-info').textContent = USER.username || '';
+
+const CLIENT_ROLES = ['client_accounting','client_manager'];
+if (!CLIENT_ROLES.includes(USER.role) && USER.role !== 'admin' && USER.role !== 'supervisor') {
+  // Not a client role — redirect to joao
+  if (USER.role) window.location = '/joao';
+}
+
+function logout() {
+  localStorage.removeItem('aios_jwt');
+  localStorage.removeItem('aios_user');
+  window.location = '/login';
+}
+
+async function api(path, opts={}) {
+  const r = await fetch('/api' + path, {
+    headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (r.status === 401) {
+    localStorage.removeItem('aios_jwt');
+    window.location = '/login?next=/conta';
+    return {};
+  }
+  return r.json();
+}
+
+function fmt(n, decimals=2) {
+  return parseFloat(n||0).toFixed(decimals).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+}
+function fmtDate(s) {
+  if (!s) return '—';
+  return String(s).slice(0,10).split('-').reverse().join('/');
+}
+function statusBadge(s) {
+  const labels = {
+    submitted: 'Pendente',
+    approved_client: 'Aprovado',
+    adjusted_client: 'Ajustado',
+    rejected_client: 'Rejeitado',
+    validated: 'Validado',
+    invoiced_mock: 'Faturado',
+    pending_client_review: 'Pendente',
+    reimbursed_mbway: 'Reembolsado',
+  };
+  return `<span class="badge badge-${s}">${labels[s]||s}</span>`;
+}
+
+// ── Overview ──────────────────────────────────────────────────────────────────
+async function loadOverview() {
+  const d = await api('/client/overview');
+  if (!d.ok) return;
+
+  document.getElementById('kpis').innerHTML = `
+    <div class="kpi blue">
+      <div class="label">Ativos hoje</div>
+      <div class="value">${d.active_today}</div>
+    </div>
+    <div class="kpi yellow">
+      <div class="label">Pendentes validação</div>
+      <div class="value">${d.pending_validation}</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Serviços concluídos</div>
+      <div class="value">${d.completed}</div>
+    </div>
+    <div class="kpi green">
+      <div class="label">Total faturado</div>
+      <div class="value">${fmt(d.invoiced_total)}<span class="unit">€</span></div>
+    </div>
+    <div class="kpi yellow">
+      <div class="label">Despesas pendentes</div>
+      <div class="value">${d.expenses_pending}</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Despesas aprovadas</div>
+      <div class="value">${fmt(d.expenses_approved_amount)}<span class="unit">€</span></div>
+    </div>
+    <div class="kpi blue">
+      <div class="label">Total este mês</div>
+      <div class="value">${fmt(d.monthly_total)}<span class="unit">€</span></div>
+    </div>
+  `;
+}
+
+// ── Services ──────────────────────────────────────────────────────────────────
+async function loadServices() {
+  const status = document.getElementById('svc-filter').value;
+  document.getElementById('svc-loading').style.display = 'block';
+  document.getElementById('svc-table').style.display = 'none';
+  document.getElementById('svc-empty').style.display = 'none';
+
+  const d = await api('/client/timesheets' + (status ? '?status='+status : ''));
+  document.getElementById('svc-loading').style.display = 'none';
+  if (!d.ok || !d.timesheets?.length) {
+    document.getElementById('svc-empty').style.display = 'block';
+    return;
+  }
+  const tbody = document.getElementById('svc-body');
+  tbody.innerHTML = d.timesheets.map(ts => {
+    const total = parseFloat(ts.effective_total || ts.invoice_total || 0);
+    const note = ts.notes ? `<span title="${ts.notes}" style="cursor:help">📝</span>` : '';
+    return `<tr>
+      <td>${fmtDate(ts.log_date)}</td>
+      <td>${ts.worker_id||'—'}</td>
+      <td>${ts.location||'—'}</td>
+      <td>${parseFloat(ts.hours||0).toFixed(1)}h</td>
+      <td class="amount">${fmt(total)} €</td>
+      <td>${statusBadge(ts.status)}</td>
+      <td>${note}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('svc-table').style.display = 'block';
+}
+
+// ── Expenses ──────────────────────────────────────────────────────────────────
+async function loadExpenses() {
+  document.getElementById('exp-loading').style.display = 'block';
+  document.getElementById('exp-table').style.display = 'none';
+  document.getElementById('exp-empty').style.display = 'none';
+
+  const d = await api('/client/expenses');
+  document.getElementById('exp-loading').style.display = 'none';
+  if (!d.ok || !d.expenses?.length) {
+    document.getElementById('exp-empty').style.display = 'block';
+    return;
+  }
+  const typeLabel = {meal:'Refeição',material:'Material',transport:'Transporte',other:'Outro'};
+  const tbody = document.getElementById('exp-body');
+  tbody.innerHTML = d.expenses.map(e => {
+    const photo = e.receipt_image_url
+      ? `<a class="photo-link" href="#" onclick="viewPhoto(event,'${e.receipt_image_url}')">Ver</a>`
+      : '—';
+    return `<tr>
+      <td>${fmtDate(e.log_date)}</td>
+      <td>${e.worker_name||'—'}</td>
+      <td>${typeLabel[e.expense_type]||e.expense_type}</td>
+      <td>${e.receipt_nif_name||e.receipt_name||'—'}</td>
+      <td class="amount">${fmt(e.amount)} €</td>
+      <td>${statusBadge(e.status)}</td>
+      <td>${photo}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('exp-table').style.display = 'block';
+}
+
+function viewPhoto(ev, url) {
+  ev.preventDefault();
+  // Open photo via token-auth endpoint
+  // (photo served at /api/service/validate/:token/expense/:eid/photo — not available here)
+  // For now just open the URL in a new tab (admin only scenario)
+  window.open('/runtime/expenses/' + url, '_blank');
+}
+
+// ── Invoices ──────────────────────────────────────────────────────────────────
+async function loadInvoices() {
+  document.getElementById('inv-loading').style.display = 'block';
+  document.getElementById('inv-table').style.display = 'none';
+  document.getElementById('inv-empty').style.display = 'none';
+
+  const d = await api('/client/invoices');
+  document.getElementById('inv-loading').style.display = 'none';
+  if (!d.ok || !d.invoices?.length) {
+    document.getElementById('inv-empty').style.display = 'block';
+    return;
+  }
+  const invStatusLabel = {draft:'Rascunho',sent:'Enviada',paid:'Paga'};
+  const tbody = document.getElementById('inv-body');
+  tbody.innerHTML = d.invoices.map(inv => {
+    const lines = inv.lines || [];
+    const detail = lines.length > 1
+      ? `<span title="${lines.map(l=>l.description+': '+fmt(l.total)+'€').join('\n')}" style="cursor:help;font-size:12px;color:var(--blue)">${lines.length} linhas</span>`
+      : (lines[0]?.description || '—');
+    return `<tr>
+      <td><b>${inv.number}</b></td>
+      <td>${fmtDate(inv.log_date)}</td>
+      <td>${inv.client||'—'}</td>
+      <td class="amount">${fmt(inv.amount)} €</td>
+      <td><span class="badge badge-${inv.status}">${invStatusLabel[inv.status]||inv.status}</span></td>
+      <td>${detail}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('inv-table').style.display = 'block';
+}
+
+// ── Monthly ───────────────────────────────────────────────────────────────────
+async function loadMonthly() {
+  document.getElementById('mon-loading').style.display = 'block';
+  document.getElementById('mon-bars').style.display = 'none';
+  document.getElementById('mon-empty').style.display = 'none';
+
+  const d = await api('/client/monthly');
+  document.getElementById('mon-loading').style.display = 'none';
+  if (!d.ok || !d.monthly?.length) {
+    document.getElementById('mon-empty').style.display = 'block';
+    return;
+  }
+  const max = Math.max(...d.monthly.map(m => parseFloat(m.invoice_total||0)), 1);
+  const bars = document.getElementById('mon-bars');
+  bars.innerHTML = d.monthly.map(m => {
+    const pct = Math.round(parseFloat(m.invoice_total||0)/max*100);
+    const [year,month] = m.month.split('-');
+    const months = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    const label = `${months[parseInt(month)-1]} ${year}`;
+    return `<div class="month-bar">
+      <div class="month-label">${label}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+      <div class="month-total">${fmt(m.invoice_total)} €</div>
+    </div>`;
+  }).join('');
+  bars.style.display = 'block';
+}
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+const _loaded = {};
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===name));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id==='tab-'+name));
+  if (!_loaded[name]) {
+    _loaded[name] = true;
+    if (name==='services') loadServices();
+    if (name==='expenses') loadExpenses();
+    if (name==='invoices') loadInvoices();
+    if (name==='monthly')  loadMonthly();
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadOverview();
+_loaded['services'] = true;
+loadServices();
+</script>
+</body>
+</html>

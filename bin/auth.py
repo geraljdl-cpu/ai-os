@@ -23,7 +23,8 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "aios-jwt-secret-2026-change-in-prod")
 ALGORITHM  = "HS256"
 TOKEN_TTL  = int(os.environ.get("JWT_TTL_HOURS", "24"))
 
-ROLES = ["admin", "supervisor", "operator", "factory", "finance", "viewer", "worker", "show", "cliente"]
+ROLES = ["admin", "supervisor", "operator", "factory", "finance", "viewer", "worker", "show", "cliente",
+         "client_manager", "client_accounting"]
 
 
 # ── Deps ─────────────────────────────────────────────────────────────────────
@@ -59,13 +60,15 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_ctx.verify(plain, hashed)
 
 
-def create_token(user_id: int, username: str, role: str) -> str:
+def create_token(user_id: int, username: str, role: str, client_id: int = None) -> str:
     payload = {
-        "sub":      str(user_id),
-        "username": username,
-        "role":     role,
-        "exp":      datetime.datetime.utcnow() + datetime.timedelta(hours=TOKEN_TTL),
+        "sub":       str(user_id),
+        "username":  username,
+        "role":      role,
+        "exp":       datetime.datetime.utcnow() + datetime.timedelta(hours=TOKEN_TTL),
     }
+    if client_id is not None:
+        payload["client_id"] = client_id
     return _jose_jwt.encode(payload, JWT_SECRET, algorithm=ALGORITHM)
 
 
@@ -85,14 +88,24 @@ def login(username: str, password: str) -> dict:
         )
         if not user or not verify_password(password, user.hashed_pw):
             return {"ok": False, "error": "credenciais inválidas"}
-        role  = user.role.name if user.role else "viewer"
-        token = create_token(user.id, username, role)
+        role = user.role.name if user.role else "viewer"
+        # Get client_id (column added via migration; may not be in ORM model)
+        client_id = None
+        try:
+            from sqlalchemy import text as _text
+            row = db.execute(_text("SELECT client_id FROM users WHERE id=:uid"), {"uid": user.id}).fetchone()
+            if row and row[0] is not None:
+                client_id = int(row[0])
+        except Exception:
+            pass
+        token = create_token(user.id, username, role, client_id=client_id)
         # audit
         try:
             db_mod.audit(db, "login", user_id=user.id, resource=username)
         except Exception:
             pass
-        return {"ok": True, "token": token, "role": role, "username": username}
+        return {"ok": True, "token": token, "role": role, "username": username,
+                "client_id": client_id}
     except Exception as e:
         return {"ok": False, "error": str(e)}
     finally:
@@ -100,20 +113,24 @@ def login(username: str, password: str) -> dict:
 
 
 def verify_token(token: str) -> dict:
-    """Valida JWT. Devolve {ok, user_id, username, role} ou {ok:False, error}."""
+    """Valida JWT. Devolve {ok, user_id, username, role, client_id?} ou {ok:False, error}."""
     try:
         payload = decode_token(token)
-        return {
+        result = {
             "ok":       True,
             "user_id":  int(payload["sub"]),
             "username": payload["username"],
             "role":     payload["role"],
         }
+        if "client_id" in payload and payload["client_id"] is not None:
+            result["client_id"] = payload["client_id"]
+        return result
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
 
-def create_user(username: str, password: str, role: str = "operator") -> dict:
+def create_user(username: str, password: str, role: str = "operator",
+                client_id: int = None) -> dict:
     """Cria novo utilizador."""
     if role not in ROLES:
         return {"ok": False, "error": f"role inválido. Disponíveis: {ROLES}"}
@@ -135,11 +152,18 @@ def create_user(username: str, password: str, role: str = "operator") -> dict:
         db.add(user)
         db.commit()
         db.refresh(user)
+        # Set client_id if provided (via raw SQL — column added via migration)
+        if client_id is not None:
+            from sqlalchemy import text as _text
+            db.execute(_text("UPDATE users SET client_id=:cid WHERE id=:uid"),
+                       {"cid": client_id, "uid": user.id})
+            db.commit()
         try:
             db_mod.audit(db, "create_user", resource=username)
         except Exception:
             pass
-        return {"ok": True, "id": user.id, "username": username, "role": role}
+        return {"ok": True, "id": user.id, "username": username, "role": role,
+                "client_id": client_id}
     except Exception as e:
         return {"ok": False, "error": str(e)}
     finally:
@@ -199,8 +223,9 @@ if __name__ == "__main__":
     elif cmd == "users":
         print(json.dumps(list_users()))
     elif cmd == "create" and len(sys.argv) >= 4:
-        role = sys.argv[4] if len(sys.argv) >= 5 else "operator"
-        print(json.dumps(create_user(sys.argv[2], sys.argv[3], role)))
+        role      = sys.argv[4] if len(sys.argv) >= 5 else "operator"
+        client_id = int(sys.argv[6]) if len(sys.argv) >= 7 and sys.argv[5] == "--client-id" else None
+        print(json.dumps(create_user(sys.argv[2], sys.argv[3], role, client_id=client_id)))
     elif cmd == "deactivate" and len(sys.argv) >= 3:
         print(json.dumps(deactivate_user(sys.argv[2])))
     else:

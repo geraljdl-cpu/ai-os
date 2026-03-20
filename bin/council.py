@@ -1,295 +1,279 @@
 #!/usr/bin/env python3
-"""
-council.py — AI Council Router
-Generic multi-agent analysis for any topic: idea, decision, project, architecture, problem.
-
-Usage:
-  python3 bin/council.py analyze "<topic text>" [--kind idea|decision|project|architecture|problem|general] [--ref-id X]
-  python3 bin/council.py get <council_id>       — get full analysis
-  python3 bin/council.py list [--kind K] [--limit N]
-
-Each agent returns structured analysis; synthesis generates a final recommendation.
-Results stored in council_reviews table.
-"""
+# Remover bin/ do sys.path para evitar shadowing do stdlib
 import sys as _sys, os as _os
 _bin_dir = _os.path.dirname(_os.path.abspath(__file__))
 if _bin_dir in _sys.path:
     _sys.path.remove(_bin_dir)
 
+"""
+council.py — AI Council: 3 agentes paralelos (engineer, architect, reviewer)
+
+Usage:
+  python3 bin/council.py analyze "<topic>" [--kind idea|decision|project|general] [--ref-id X] [--context "..."]
+  python3 bin/council.py get <id>
+  python3 bin/council.py list [--kind K] [--limit N]
+"""
+
 import argparse, json, os, re, sys
+from decimal import Decimal
+
+_env_file = "/etc/aios.env"
+_env_vals: dict = {}
+if os.path.exists(_env_file):
+    for _l in open(_env_file):
+        _l = _l.strip()
+        if _l and not _l.startswith("#") and "=" in _l:
+            _k, _, _v = _l.partition("=")
+            _env_vals[_k.strip()] = _v.strip()
+            os.environ.setdefault(_k.strip(), _v.strip())
 
 import anthropic
 import sqlalchemy as sa
 
-DATABASE_URL  = os.environ.get("DATABASE_URL", "postgresql://aios_user:jdl@127.0.0.1:5432/aios")
-ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-MODEL         = "claude-haiku-4-5-20251001"   # fast + cheap for council calls
+DATABASE_URL  = _env_vals.get("DATABASE_URL") or os.environ.get("DATABASE_URL", "postgresql://aios_user:jdl@127.0.0.1:5432/aios")
+# Read ANTHROPIC_API_KEY directly from file — shell env may have a masked value
+ANTHROPIC_KEY = _env_vals.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+MODEL         = "claude-haiku-4-5-20251001"
 
-AGENTS = ["strategist", "engineering", "operations", "finance"]
+# ── Agentes ───────────────────────────────────────────────────────────────────
 
-AGENT_PROMPTS = {
-    "strategist": """\
-És o AI Strategist do AI-OS Council.
-Analisa qualquer tópico do ponto de vista estratégico: visão, posicionamento, riscos, timing.
+AGENTS = {
+    "engineer": """\
+És o AI Engineer do Council.
+Analisa viabilidade técnica, complexidade de implementação, stack necessária, riscos técnicos e esforço estimado.
 
-Responde em JSON exacto:
-{"analysis":"...","risks":"...","opportunity":"...","score":0,"recommendation":"..."}
-
-- analysis: 2-3 frases sobre o tópico e potencial estratégico
-- risks: principais riscos estratégicos (1 parágrafo)
-- opportunity: oportunidade ou vantagem principal
-- score: 0-100 (potencial estratégico)
-- recommendation: explorar | executar | rejeitar | investigar + 1 frase""",
-
-    "engineering": """\
-És o AI Engineering do AI-OS Council.
-Analisa qualquer tópico do ponto de vista técnico: viabilidade, stack, complexidade, esforço.
-
-Responde em JSON exacto:
-{"analysis":"...","risks":"...","opportunity":"...","score":0,"recommendation":"..."}
+Responde APENAS em JSON válido:
+{"analysis":"...","risks":"...","recommendation":"executar|explorar|investigar|rejeitar","next_steps":["...","..."],"score":75}
 
 - analysis: 2-3 frases sobre viabilidade técnica
-- risks: riscos técnicos principais
-- opportunity: vantagem ou abordagem técnica recomendada
-- score: 0-100 (viabilidade técnica)
-- recommendation: explorar | executar | rejeitar | investigar + 1 frase""",
+- risks: principais riscos técnicos (1-2 frases)
+- recommendation: uma palavra: executar | explorar | investigar | rejeitar
+- next_steps: lista de 2-3 passos técnicos concretos
+- score: 0-100 (viabilidade técnica)""",
 
-    "operations": """\
-És o AI Operations do AI-OS Council.
-Analisa qualquer tópico do ponto de vista operacional: execução, recursos, timeline, dependências.
+    "architect": """\
+És o AI Architect do Council.
+Analisa arquitectura, padrões de design, escalabilidade, alinhamento com sistema existente e maintainability.
 
-Responde em JSON exacto:
-{"analysis":"...","risks":"...","opportunity":"...","score":0,"recommendation":"..."}
+Responde APENAS em JSON válido:
+{"analysis":"...","risks":"...","recommendation":"executar|explorar|investigar|rejeitar","next_steps":["...","..."],"score":75}
 
-- analysis: 2-3 frases sobre como executar
-- risks: riscos operacionais principais
-- opportunity: como simplificar ou acelerar execução
-- score: 0-100 (exequibilidade)
-- recommendation: explorar | executar | rejeitar | investigar + 1 frase""",
+- analysis: 2-3 frases sobre a arquitectura recomendada
+- risks: riscos de design ou dívida técnica (1-2 frases)
+- recommendation: uma palavra: executar | explorar | investigar | rejeitar
+- next_steps: lista de 2-3 decisões arquitecturais concretas
+- score: 0-100 (qualidade arquitectural)""",
 
-    "finance": """\
-És o AI Finance do AI-OS Council.
-Analisa qualquer tópico do ponto de vista financeiro: custos, ROI, cash-flow, viabilidade económica.
+    "reviewer": """\
+És o AI Reviewer do Council. Tens acesso às análises dos outros agentes.
+Faz review crítico, identifica inconsistências, valida as recomendações e dá veredicto final.
 
-Responde em JSON exacto:
-{"analysis":"...","risks":"...","opportunity":"...","score":0,"recommendation":"..."}
+Responde APENAS em JSON válido:
+{"analysis":"...","risks":"...","recommendation":"executar|explorar|investigar|rejeitar","next_steps":["...","..."],"suggested_tasks":["...","..."],"score":75}
 
-- analysis: 2-3 frases sobre impacto financeiro
-- risks: riscos financeiros principais
-- opportunity: potencial de retorno ou poupança
-- score: 0-100 (viabilidade financeira)
-- recommendation: explorar | executar | rejeitar | investigar + 1 frase""",
+- analysis: síntese crítica com veredicto final (3-4 frases)
+- risks: riscos mais críticos identificados
+- recommendation: veredicto final: executar | explorar | investigar | rejeitar
+- next_steps: 3-5 próximos passos prioritários
+- suggested_tasks: 2-4 tarefas concretas a criar no sistema
+- score: 0-100 (score final consolidado)""",
 }
 
+# ── DB ────────────────────────────────────────────────────────────────────────
 
 def _conn():
     engine = sa.create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
     return engine, sa.text
 
 
-def _call_claude(system: str, user: str) -> str:
-    if not ANTHROPIC_KEY:
-        raise RuntimeError("ANTHROPIC_API_KEY não definida")
+def _row(r) -> dict:
+    import datetime as _dt
+    d = dict(r._mapping) if hasattr(r, '_mapping') else dict(r)
+    for k, v in list(d.items()):
+        if isinstance(v, (_dt.datetime, _dt.date)):
+            d[k] = v.isoformat()
+        elif isinstance(v, Decimal):
+            d[k] = float(v)
+    return d
+
+
+# ── Claude call ───────────────────────────────────────────────────────────────
+
+def _call_agent(agent_name: str, prompt: str, topic: str, context: str = "",
+                max_tokens: int = 700) -> dict:
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-    msg = client.messages.create(
-        model=MODEL, max_tokens=512,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    return msg.content[0].text
-
-
-def _parse_agent_response(raw: str) -> dict:
-    """Extract JSON from agent response, with fallback."""
+    user_msg = f"Tópico para análise:\n\n{topic}"
+    if context:
+        user_msg += f"\n\nContexto adicional:\n{context}"
+    print(f"[council] {agent_name}...", file=sys.stderr)
     try:
-        m = re.search(r'\{[\s\S]*\}', raw)
-        if m:
-            return json.loads(m.group(0))
-    except Exception:
-        pass
-    return {"analysis": raw[:300], "risks": "", "opportunity": "", "score": None, "recommendation": "investigar"}
+        msg = client.messages.create(
+            model=MODEL, max_tokens=max_tokens,
+            system=prompt,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        raw = msg.content[0].text
+        # Try to extract JSON — handles plain JSON, ```json blocks, and mixed text
+        parsed = None
+        # First try: direct parse
+        try:
+            parsed = json.loads(raw.strip())
+        except Exception:
+            pass
+        if not parsed:
+            # Extract JSON between first { and last } — handles ```json blocks
+            start = raw.find('{')
+            end = raw.rfind('}')
+            if start != -1 and end != -1 and end > start:
+                try:
+                    parsed = json.loads(raw[start:end+1])
+                except Exception:
+                    pass
+        if not parsed:
+            parsed = {}
+        parsed.setdefault("analysis", raw[:400])
+        parsed.setdefault("risks", "")
+        parsed.setdefault("recommendation", "investigar")
+        parsed.setdefault("next_steps", [])
+        parsed.setdefault("score", None)
+        return parsed
+    except Exception as e:
+        return {"analysis": f"Erro: {e}", "risks": "", "recommendation": "investigar",
+                "next_steps": [], "score": None}
 
 
-def _synthesize(topic: str, agent_results: list) -> dict:
-    scores = [r["score"] for r in agent_results if r.get("score") is not None]
+# ── Council analyze ───────────────────────────────────────────────────────────
+
+def cmd_analyze(topic: str, kind: str = "general", ref_id: str | None = None,
+                context: str = "") -> dict:
+    if not ANTHROPIC_KEY:
+        return {"error": "ANTHROPIC_API_KEY não definida"}
+
+    # Run engineer + architect first, then reviewer with their context
+    eng  = _call_agent("engineer",  AGENTS["engineer"],  topic, context)
+    arch = _call_agent("architect", AGENTS["architect"], topic, context)
+
+    reviewer_context = (
+        f"{context}\n\n" if context else ""
+    ) + (
+        f"ENGINEER: score={eng.get('score')} rec={eng.get('recommendation')}\n"
+        f"{eng.get('analysis','')}\n\n"
+        f"ARCHITECT: score={arch.get('score')} rec={arch.get('recommendation')}\n"
+        f"{arch.get('analysis','')}"
+    )
+    rev = _call_agent("reviewer", AGENTS["reviewer"], topic, reviewer_context, max_tokens=1200)
+
+    agents_json = {
+        "engineer":  {k: eng.get(k)  for k in ("analysis","risks","recommendation","next_steps","score")},
+        "architect": {k: arch.get(k) for k in ("analysis","risks","recommendation","next_steps","score")},
+        "reviewer":  {k: rev.get(k)  for k in ("analysis","risks","recommendation","next_steps","suggested_tasks","score")},
+    }
+
+    # Synthesis
+    scores = [v["score"] for v in agents_json.values() if v.get("score") is not None]
     avg_score = round(sum(scores) / len(scores)) if scores else None
+    final_rec = rev.get("recommendation", "investigar")
 
-    # Determine consensus
-    recs = [r.get("recommendation", "").split()[0].lower() for r in agent_results]
-    rec_counts = {}
-    for r in recs:
-        rec_counts[r] = rec_counts.get(r, 0) + 1
-    top_rec = max(rec_counts, key=rec_counts.get) if rec_counts else "investigar"
-    consensus = "consenso" if rec_counts.get(top_rec, 0) >= 3 else "divergência"
+    synthesis = (
+        f"**Veredicto: {final_rec.upper()}** (score médio: {avg_score}/100)\n\n"
+        f"{rev.get('analysis','')}\n\n"
+        f"Engineer ({eng.get('score','?')}): {eng.get('recommendation','?')} — {eng.get('analysis','')[:120]}\n"
+        f"Architect ({arch.get('score','?')}): {arch.get('recommendation','?')} — {arch.get('analysis','')[:120]}"
+    )
 
-    # Decision mapping
-    decision_map = {
-        "executar": "executar",
-        "explorar": "explorar",
-        "rejeitar": "rejeitar",
-        "investigar": "investigar mais",
-    }
-    decision = decision_map.get(top_rec, "investigar mais")
+    next_steps       = rev.get("next_steps", []) or []
+    suggested_tasks  = rev.get("suggested_tasks", []) or []
 
-    parts = [f"Tópico: {topic}", ""]
-    for r in agent_results:
-        parts.append(f"{r['agent'].upper()}: score {r.get('score','?')} — {r.get('recommendation','?')}")
-        parts.append(f"  {r.get('analysis','')[:120]}")
-
-    synthesis_text = "\n".join(parts)
-
-    return {
-        "avg_score":  avg_score,
-        "consensus":  consensus,
-        "decision":   decision,
-        "top_rec":    top_rec,
-        "synthesis":  synthesis_text,
-        "agents":     agent_results,
-    }
-
-
-def cmd_analyze(topic: str, kind: str = "general", ref_id: str | None = None) -> dict:
-    """Run all 4 agents + synthesis. Returns full result dict."""
     engine, text = _conn()
-
-    agent_results = []
-    session_id = None  # track first insert for grouping
-
     with engine.begin() as c:
-        for agent_name in AGENTS:
-            print(f"[council] {agent_name}...", file=sys.stderr)
-            system = AGENT_PROMPTS[agent_name]
-            try:
-                raw    = _call_claude(system, f"Analisa este tópico:\n\n{topic}")
-                parsed = _parse_agent_response(raw)
-                parsed["raw"] = raw
-            except Exception as e:
-                parsed = {"analysis": f"Erro: {e}", "risks": "", "opportunity": "",
-                          "score": None, "recommendation": "investigar", "raw": str(e)}
-
-            parsed["agent"] = agent_name
-            agent_results.append(parsed)
-
-            row_id = c.execute(text("""
-                INSERT INTO public.council_reviews
-                  (topic, topic_kind, ref_id, agent, analysis, risks, opportunity, score, recommendation, raw)
-                VALUES (:topic, :kind, :ref_id, :agent, :analysis, :risks, :opportunity, :score, :recommendation, :raw)
-                RETURNING id
-            """), {
-                "topic":          topic[:500],
-                "kind":           kind,
-                "ref_id":         ref_id,
-                "agent":          agent_name,
-                "analysis":       parsed.get("analysis", "")[:2000],
-                "risks":          parsed.get("risks", "")[:1000],
-                "opportunity":    parsed.get("opportunity", "")[:1000],
-                "score":          parsed.get("score"),
-                "recommendation": (parsed.get("recommendation") or "")[:200],
-                "raw":            (parsed.get("raw") or "")[:4000],
-            }).scalar()
-            if session_id is None:
-                session_id = row_id
-
-        synthesis = _synthesize(topic, agent_results)
-
-        # Extract next_steps as bullet points from agent recommendations
-        next_steps = []
-        for r in agent_results:
-            rec = (r.get("recommendation") or "").strip()
-            opp = (r.get("opportunity") or "").strip()
-            if rec:
-                next_steps.append(f"[{r['agent'].upper()}] {rec}: {opp[:120]}" if opp else f"[{r['agent'].upper()}] {rec}")
-        suggested_tasks = [
-            {"agent": r["agent"], "action": (r.get("recommendation") or "").split()[0], "detail": (r.get("analysis") or "")[:200]}
-            for r in agent_results
-        ]
-
-        # Store synthesis as 'system' agent row
-        c.execute(text("""
+        row_id = c.execute(text("""
             INSERT INTO public.council_reviews
-              (topic, topic_kind, ref_id, agent, analysis, risks, opportunity, score, recommendation, raw,
-               synthesis, next_steps, suggested_tasks, status)
-            VALUES (:topic, :kind, :ref_id, 'system', :analysis, '', '', :score, :recommendation, :raw,
-                    :synthesis, CAST(:next_steps AS jsonb), CAST(:suggested_tasks AS jsonb), 'done')
+              (topic, context, agents, synthesis, next_steps, suggested_tasks, status)
+            VALUES (:topic, :context, CAST(:agents AS jsonb),
+                    :synthesis,
+                    CAST(:next_steps AS jsonb), CAST(:suggested_tasks AS jsonb),
+                    'done')
+            RETURNING id
         """), {
             "topic":          topic[:500],
-            "kind":           kind,
-            "ref_id":         ref_id,
-            "analysis":       synthesis["synthesis"][:2000],
-            "score":          synthesis["avg_score"],
-            "recommendation": synthesis["decision"],
-            "raw":            json.dumps(synthesis),
-            "synthesis":      synthesis["synthesis"][:2000],
+            "context":        (context or "")[:1000],
+            "agents":         json.dumps(agents_json),
+            "synthesis":      synthesis[:3000],
             "next_steps":     json.dumps(next_steps),
             "suggested_tasks": json.dumps(suggested_tasks),
-        })
+        }).scalar()
 
         # Event
-        c.execute(text("""
-            INSERT INTO public.events (ts, level, source, kind, message, data)
-            VALUES (NOW(), 'info', 'council', 'council_analyzed', :msg, CAST(:data AS jsonb))
-        """), {
-            "msg":  f"Council: {topic[:80]} — {synthesis['decision']} (score {synthesis['avg_score']})",
-            "data": json.dumps({"kind": kind, "decision": synthesis["decision"],
-                                "avg_score": synthesis["avg_score"], "session_id": session_id}),
-        })
+        try:
+            c.execute(text("""
+                INSERT INTO public.events (ts, level, source, kind, message, data)
+                VALUES (NOW(), 'info', 'council', 'council_analyzed', :msg, CAST(:data AS jsonb))
+            """), {
+                "msg":  f"Council: {topic[:80]} — {final_rec} (score {avg_score})",
+                "data": json.dumps({"id": row_id, "kind": kind, "ref_id": ref_id,
+                                    "decision": final_rec, "avg_score": avg_score}),
+            })
+        except Exception:
+            pass
 
     return {
-        "session_id":  session_id,
-        "topic":       topic,
-        "kind":        kind,
-        "avg_score":   synthesis["avg_score"],
-        "consensus":   synthesis["consensus"],
-        "decision":    synthesis["decision"],
-        "agents":      [{"agent": r["agent"], "score": r.get("score"),
-                         "recommendation": r.get("recommendation"),
-                         "analysis": (r.get("analysis") or "")[:200]} for r in agent_results],
+        "ok":             True,
+        "id":             row_id,
+        "topic":          topic,
+        "kind":           kind,
+        "avg_score":      avg_score,
+        "recommendation": final_rec,
+        "synthesis":      synthesis,
+        "next_steps":     next_steps,
+        "suggested_tasks": suggested_tasks,
+        "agents": {
+            name: {"score": d.get("score"), "recommendation": d.get("recommendation"),
+                   "analysis": (d.get("analysis") or "")[:200]}
+            for name, d in agents_json.items()
+        },
     }
+
+
+def cmd_get(review_id: int) -> dict:
+    engine, text = _conn()
+    with engine.connect() as c:
+        row = c.execute(text(
+            "SELECT * FROM public.council_reviews WHERE id = :id"
+        ), {"id": review_id}).mappings().first()
+    return _row(row) if row else {}
 
 
 def cmd_list(kind: str | None = None, limit: int = 10) -> list:
     engine, text = _conn()
-    kind_filter = "AND topic_kind = :kind" if kind else ""
-    with engine.connect() as c:
-        rows = c.execute(text(f"""
-            SELECT DISTINCT ON (topic) topic, topic_kind, score, recommendation, created_at
-            FROM public.council_reviews
-            WHERE agent = 'system' {kind_filter}
-            ORDER BY topic, created_at DESC
-            LIMIT :limit
-        """), {"kind": kind, "limit": limit}).mappings().all()
-    return [dict(r) for r in rows]
-
-
-def cmd_get(session_id: int) -> dict:
-    engine, text = _conn()
     with engine.connect() as c:
         rows = c.execute(text("""
-            SELECT agent, analysis, risks, opportunity, score, recommendation, created_at
+            SELECT id, topic, synthesis, status, created_at
             FROM public.council_reviews
-            WHERE id >= :sid AND topic = (SELECT topic FROM public.council_reviews WHERE id = :sid)
-              AND created_at >= (SELECT created_at FROM public.council_reviews WHERE id = :sid) - interval '1 minute'
-            ORDER BY created_at
-        """), {"sid": session_id}).mappings().all()
-    return [dict(r) for r in rows]
+            ORDER BY created_at DESC
+            LIMIT :limit
+        """), {"limit": limit}).mappings().all()
+    return [_row(r) for r in rows]
 
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     sub    = parser.add_subparsers(dest="cmd")
 
-    p_analyze = sub.add_parser("analyze")
-    p_analyze.add_argument("topic")
-    p_analyze.add_argument("--kind", default="general",
-                           choices=["idea","decision","project","architecture","problem","general"])
-    p_analyze.add_argument("--ref-id", default=None)
+    p_a = sub.add_parser("analyze")
+    p_a.add_argument("topic")
+    p_a.add_argument("--kind", default="general",
+                     choices=["idea","decision","project","architecture","problem","general"])
+    p_a.add_argument("--ref-id", default=None)
+    p_a.add_argument("--context", default="")
 
-    p_list = sub.add_parser("list")
-    p_list.add_argument("--kind", default=None)
-    p_list.add_argument("--limit", type=int, default=10)
+    p_l = sub.add_parser("list")
+    p_l.add_argument("--kind", default=None)
+    p_l.add_argument("--limit", type=int, default=10)
 
-    p_get = sub.add_parser("get")
-    p_get.add_argument("session_id", type=int)
+    p_g = sub.add_parser("get")
+    p_g.add_argument("id", type=int)
 
     args = parser.parse_args()
     if not args.cmd:
@@ -297,13 +281,10 @@ if __name__ == "__main__":
         sys.exit(1)
 
     if args.cmd == "analyze":
-        result = cmd_analyze(args.topic, args.kind, getattr(args, "ref_id", None))
-        print(json.dumps(result, ensure_ascii=False, default=str))
-
+        r = cmd_analyze(args.topic, args.kind,
+                        getattr(args, "ref_id", None), getattr(args, "context", ""))
+        print(json.dumps(r, ensure_ascii=False, default=str))
     elif args.cmd == "list":
-        items = cmd_list(args.kind, args.limit)
-        print(json.dumps(items, ensure_ascii=False, default=str))
-
+        print(json.dumps(cmd_list(args.kind, args.limit), ensure_ascii=False, default=str))
     elif args.cmd == "get":
-        rows = cmd_get(args.session_id)
-        print(json.dumps(rows, ensure_ascii=False, default=str))
+        print(json.dumps(cmd_get(args.id), ensure_ascii=False, default=str))

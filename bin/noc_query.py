@@ -30,7 +30,7 @@ import secrets as _secrets
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -1847,16 +1847,33 @@ def cmd_timesheet_submit(args):
 # ── ideas (Conselho de IA / Painel do João) ───────────────────────────────────
 
 def cmd_idea_create(args):
-    """Cria thread de ideia: title [message]"""
+    """Cria thread de ideia: title [message] [source]"""
     if not args:
         raise ValueError("title obrigatório")
     title   = args[0]
     message = args[1] if len(args) > 1 else None
+    source  = args[2] if len(args) > 2 else "manual"
+    allowed_sources = {"manual", "telegram", "joao_agent", "mobile", "reuniao", "cliente", "email"}
+    if source not in allowed_sources:
+        source = "manual"
     engine, text = _conn()
+    # Deduplication: same normalised title in the last 5 minutes
+    norm = " ".join(title.lower().split())
+    with engine.connect() as c:
+        dup = c.execute(text("""
+            SELECT id FROM public.idea_threads
+            WHERE lower(regexp_replace(title, '\\s+', ' ', 'g')) = :norm
+              AND created_at > NOW() - INTERVAL '5 minutes'
+            LIMIT 1
+        """), {"norm": norm}).mappings().first()
+    if dup:
+        print(json.dumps({"ok": True, "id": dup["id"], "duplicate": True,
+                          "message": "Já registado recentemente ✔"}))
+        return
     with engine.begin() as c:
         row = c.execute(text("""
-            INSERT INTO public.idea_threads (title) VALUES (:t) RETURNING id, title, status, created_at
-        """), {"t": title}).mappings().first()
+            INSERT INTO public.idea_threads (title, source) VALUES (:t, :src) RETURNING id, title, status, created_at
+        """), {"t": title, "src": source}).mappings().first()
         tid = row["id"]
         if message:
             c.execute(text("""
@@ -1869,7 +1886,7 @@ def cmd_idea_create(args):
                     :msg, CAST(:data AS jsonb))
         """), {
             "msg":  f"Ideia capturada: {title}",
-            "data": json.dumps({"thread_id": tid, "title": title})
+            "data": json.dumps({"thread_id": tid, "title": title, "source": source})
         })
         if message:
             # auto-enqueue cluster analysis when idea has a message
@@ -2461,6 +2478,52 @@ def cmd_service_logs(args):
     print(result.stdout.strip())
 
 
+def cmd_whatsapp_active(args):
+    """Active/pending WhatsApp shifts right now."""
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT et.id, et.worker_id, et.worker_phone, et.status,
+                   et.start_time, et.check_out_at, et.location, et.car_used, et.notes,
+                   COALESCE(wc.worker_name, et.worker_id) AS display_name
+            FROM public.event_timesheets et
+            LEFT JOIN public.worker_contacts wc ON wc.whatsapp_phone = et.worker_phone
+            WHERE et.status IN ('active','pending_gps_in','pending_gps_out')
+            ORDER BY et.start_time ASC
+        """)).mappings().all()
+    print(json.dumps([_row(r) for r in rows]))
+
+
+def cmd_worker_calendar(args):
+    """Per-worker calendar: timesheets grouped by week. Args: [worker_name] [months=3]"""
+    worker_filter = None
+    months = 3
+    for a in args:
+        try:
+            months = int(a)
+        except ValueError:
+            worker_filter = a
+    engine, text = _conn()
+    with engine.connect() as c:
+        params = {"since": date.today() - timedelta(days=months*31)}
+        where = "WHERE et.validation_token IS NOT NULL AND et.log_date >= :since"
+        if worker_filter:
+            where += " AND et.worker_id ILIKE :worker"
+            params["worker"] = f"%{worker_filter}%"
+        rows = c.execute(text(f"""
+            SELECT et.worker_id,
+                   DATE_TRUNC('week', et.log_date)::date  AS week_start,
+                   DATE_TRUNC('month', et.log_date)::date AS month_start,
+                   et.log_date, et.hours, et.days_equivalent,
+                   et.notes, et.location, et.status,
+                   et.worker_pay, et.car_used
+            FROM public.event_timesheets et
+            {where}
+            ORDER BY et.worker_id, et.log_date DESC
+        """), params).mappings().all()
+    print(json.dumps([_row(r) for r in rows]))
+
+
 def cmd_agent_inbox_list(args):
     """List agent inbox items. Args: [status=pending|sent|done|all] [limit=20]"""
     status_filter = args[0] if args else "pending"
@@ -2808,6 +2871,277 @@ def cmd_system_autonomy(args):
     print(json.dumps(result))
 
 
+# ── Commercial Module ─────────────────────────────────────────────────────────
+
+def cmd_commercial_requests(args):
+    """Lista pedidos comerciais. Args: [status] [limit]"""
+    status = None
+    limit = 20
+    for a in args:
+        try: limit = int(a)
+        except: status = a
+    engine, text = _conn()
+    with engine.connect() as c:
+        where = "WHERE status = :s" if status else "WHERE TRUE"
+        params = {"n": limit}
+        if status: params["s"] = status
+        rows = c.execute(text(f"""
+            SELECT r.id, r.created_at, r.source, r.customer_name, r.company_name,
+                   r.customer_email, r.event_type, r.event_date, r.status,
+                   r.assigned_to,
+                   COUNT(q.id) AS quote_count,
+                   MAX(q.total) AS quote_total
+            FROM public.commercial_requests r
+            LEFT JOIN public.commercial_quotes q ON q.request_id = r.id
+            {where}
+            GROUP BY r.id
+            ORDER BY r.created_at DESC
+            LIMIT :n
+        """), params).mappings().all()
+    print(json.dumps([_row(r) for r in rows], ensure_ascii=False))
+
+
+def cmd_commercial_request_get(args):
+    """Detalhe de pedido. Args: <request_id>"""
+    if not args: raise ValueError("request_id obrigatorio")
+    rid = int(args[0])
+    engine, text = _conn()
+    with engine.connect() as c:
+        req = c.execute(text("SELECT * FROM public.commercial_requests WHERE id=:id"), {"id": rid}).mappings().first()
+        quotes = c.execute(text("SELECT * FROM public.commercial_quotes WHERE request_id=:id ORDER BY id DESC"), {"id": rid}).mappings().all()
+    if not req: print(json.dumps({"error": f"pedido #{rid} nao encontrado"})); return
+    result = dict(_row(req))
+    result["quotes"] = [_row(q) for q in quotes]
+    print(json.dumps(result, ensure_ascii=False))
+
+
+def cmd_commercial_quote_get(args):
+    """Detalhe de orcamento. Args: <quote_id>"""
+    if not args: raise ValueError("quote_id obrigatorio")
+    engine, text = _conn()
+    with engine.connect() as c:
+        q = c.execute(text("""
+            SELECT cq.*, cr.customer_name, cr.company_name, cr.customer_email,
+                   cr.customer_phone, cr.event_type, cr.location, cr.event_date
+            FROM public.commercial_quotes cq
+            JOIN public.commercial_requests cr ON cr.id = cq.request_id
+            WHERE cq.id = :id
+        """), {"id": int(args[0])}).mappings().first()
+    if not q: print(json.dumps({"error": "nao encontrado"})); return
+    print(json.dumps(_row(q), ensure_ascii=False))
+
+
+def cmd_commercial_stats(_args):
+    """Stats do modulo comercial."""
+    engine, text = _conn()
+    with engine.connect() as c:
+        stats = c.execute(text("""
+            SELECT
+                COUNT(*) FILTER (WHERE status='new') AS new_requests,
+                COUNT(*) FILTER (WHERE status='new_needs_review') AS needs_review,
+                COUNT(*) FILTER (WHERE status='quoted') AS quoted,
+                COUNT(*) FILTER (WHERE status='sent') AS sent,
+                COUNT(*) FILTER (WHERE status='won') AS won,
+                COUNT(*) FILTER (WHERE status='lost') AS lost
+            FROM public.commercial_requests
+        """)).mappings().first()
+        quote_stats = c.execute(text("""
+            SELECT
+                COUNT(*) FILTER (WHERE status='draft') AS drafts,
+                COUNT(*) FILTER (WHERE status='approved') AS approved,
+                COUNT(*) FILTER (WHERE status='sent') AS sent,
+                COALESCE(SUM(total) FILTER (WHERE status='sent'), 0) AS sent_value,
+                COALESCE(SUM(total) FILTER (WHERE status='accepted'), 0) AS won_value
+            FROM public.commercial_quotes
+        """)).mappings().first()
+    print(json.dumps({**_row(stats), **{f"q_{k}": v for k, v in _row(quote_stats).items()}}, ensure_ascii=False))
+
+
+# ── insurance ─────────────────────────────────────────────────────────────────
+
+def cmd_insurance_policies(args):
+    """Lista apólices. Args: [status] [entity_type] [limit]"""
+    status = None
+    entity_type = None
+    limit = 20
+    for a in args:
+        if a.isdigit():
+            limit = int(a)
+        elif a in ("active", "pending", "expired", "cancelled"):
+            status = a
+        elif a in ("vehicle", "company", "person", "property", "equipment", "liability", "workers_comp"):
+            entity_type = a
+    engine, text = _conn()
+    with engine.connect() as c:
+        where = ["1=1"]
+        params: dict = {}
+        if status:
+            where.append("status = :status")
+            params["status"] = status
+        if entity_type:
+            where.append("entity_type = :entity_type")
+            params["entity_type"] = entity_type
+        params["limit"] = limit
+        rows = c.execute(text(f"""
+            SELECT id, insurer_name, entity_type, entity_ref, policy_number,
+                   category, start_date, end_date, renewal_date,
+                   premium_amount, status, auto_renew, created_at,
+                   vehicle_matricula, vehicle_marca, vehicle_modelo
+            FROM public.insurance_policies
+            WHERE {' AND '.join(where)}
+            ORDER BY COALESCE(renewal_date, end_date) ASC NULLS LAST
+            LIMIT :limit
+        """), params).mappings().all()
+    print(json.dumps([_row(r) for r in rows], ensure_ascii=False, default=str))
+
+
+def cmd_insurance_policy_get(args):
+    """Detalhe de apólice. Args: <id>"""
+    if not args: raise ValueError("id obrigatório")
+    engine, text = _conn()
+    with engine.connect() as c:
+        pol = c.execute(text("SELECT * FROM public.insurance_policies WHERE id=:id"), {"id": int(args[0])}).mappings().first()
+        if not pol:
+            print(json.dumps({"error": "não encontrado"})); return
+        result = _row(pol)
+        docs = c.execute(text("SELECT * FROM public.insurance_documents WHERE policy_id=:id ORDER BY created_at DESC"), {"id": int(args[0])}).mappings().all()
+        result["documents"] = [_row(d) for d in docs]
+        alerts = c.execute(text("SELECT * FROM public.insurance_alerts WHERE policy_id=:id ORDER BY trigger_date"), {"id": int(args[0])}).mappings().all()
+        result["alerts"] = [_row(a) for a in alerts]
+    print(json.dumps(result, ensure_ascii=False, default=str))
+
+
+def cmd_insurance_docs(args):
+    """Documentos de uma apólice. Args: <policy_id>"""
+    if not args: raise ValueError("policy_id obrigatório")
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT * FROM public.insurance_documents
+            WHERE policy_id=:id ORDER BY created_at DESC
+        """), {"id": int(args[0])}).mappings().all()
+    print(json.dumps([_row(r) for r in rows], ensure_ascii=False, default=str))
+
+
+def cmd_insurance_doc_path(args):
+    """Devolve o file_path de um documento (para download). Args: <doc_id>"""
+    if not args: raise ValueError("doc_id obrigatório")
+    engine, text = _conn()
+    with engine.connect() as c:
+        r = c.execute(text(
+            "SELECT file_path FROM public.insurance_documents WHERE id=:id"
+        ), {"id": int(args[0])}).mappings().first()
+    print((r["file_path"] or "") if r else "")
+
+
+def cmd_insurance_alerts(args):
+    """Alertas recentes (pending+sent). Args: [limit]"""
+    limit = int(args[0]) if args else 20
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT a.id, a.policy_id, a.alert_type, a.trigger_date, a.status,
+                   a.created_at,
+                   p.insurer_name, p.entity_ref, p.category,
+                   p.end_date, p.renewal_date,
+                   p.vehicle_matricula, p.vehicle_marca, p.vehicle_modelo
+            FROM public.insurance_alerts a
+            JOIN public.insurance_policies p ON p.id = a.policy_id
+            WHERE a.status IN ('pending', 'sent')
+            ORDER BY a.trigger_date ASC
+            LIMIT :limit
+        """), {"limit": limit}).mappings().all()
+    print(json.dumps([_row(r) for r in rows], ensure_ascii=False, default=str))
+
+
+def cmd_clients_list(_args):
+    """Lista todos os clientes."""
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT id, name, nif, contact_email, contact_phone, active, notes, created_at
+            FROM public.clients ORDER BY name
+        """)).fetchall()
+    print(json.dumps([dict(r._mapping) for r in rows], default=str))
+
+
+def cmd_insurance_stats(_args):
+    """Stats gerais de seguros."""
+    import datetime as _dt
+    today = _dt.date.today()
+    in_30 = (today + _dt.timedelta(days=30)).isoformat()
+    engine, text = _conn()
+    with engine.connect() as c:
+        totals = c.execute(text("""
+            SELECT
+              COUNT(*) FILTER (WHERE status='active')    AS active,
+              COUNT(*) FILTER (WHERE status='expired')   AS expired,
+              COUNT(*) FILTER (WHERE status='pending')   AS pending,
+              COUNT(*) FILTER (WHERE status='cancelled') AS cancelled,
+              COALESCE(SUM(premium_amount) FILTER (WHERE status='active'), 0) AS premium_total
+            FROM public.insurance_policies
+        """)).mappings().first()
+        expiring = c.execute(text("""
+            SELECT COUNT(*) AS n FROM public.insurance_policies
+            WHERE status='active'
+              AND COALESCE(renewal_date, end_date) BETWEEN :today AND :in30
+        """), {"today": today.isoformat(), "in30": in_30}).scalar()
+        pending_alerts = c.execute(text(
+            "SELECT COUNT(*) FROM public.insurance_alerts WHERE status='pending'"
+        )).scalar()
+    print(json.dumps({**_row(totals), "expiring_30d": int(expiring), "alerts_pending": int(pending_alerts)},
+                     ensure_ascii=False, default=str))
+
+
+# ── system_config ─────────────────────────────────────────────────────────────
+
+def cmd_sysconfig_list(args):
+    """Lista configurações. Args: [category]"""
+    cat = args[0] if args else None
+    engine, text = _conn()
+    with engine.connect() as c:
+        where = "WHERE category = :cat" if cat else "WHERE TRUE"
+        params = {"cat": cat} if cat else {}
+        rows = c.execute(text(f"""
+            SELECT id, key, value, description, category, sensitive, updated_at, updated_by
+            FROM public.system_config {where} ORDER BY category, key
+        """), params).mappings().all()
+    result = []
+    for r in rows:
+        d = _row(r)
+        if d.get("sensitive"):
+            d["value"] = "••••••••" if d.get("value") else ""
+        result.append(d)
+    print(json.dumps(result, ensure_ascii=False))
+
+
+def cmd_sysconfig_get(args):
+    """Valor de uma config. Args: <key>"""
+    if not args: raise ValueError("key obrigatório")
+    engine, text = _conn()
+    with engine.connect() as c:
+        row = c.execute(text("SELECT * FROM public.system_config WHERE key=:k"), {"k": args[0]}).mappings().first()
+    if not row:
+        print(json.dumps({"error": f"key não encontrada: {args[0]}"}))
+        return
+    print(json.dumps(_row(row), ensure_ascii=False))
+
+
+def cmd_sysconfig_set(args):
+    """Define valor. Args: <key> <value> [updated_by]"""
+    if len(args) < 2: raise ValueError("key e value obrigatórios")
+    key, value = args[0], args[1]
+    by = args[2] if len(args) > 2 else "system"
+    engine, text = _conn()
+    with engine.begin() as c:
+        c.execute(text("""
+            INSERT INTO public.system_config (key, value, updated_by)
+            VALUES (:k, :v, :by)
+            ON CONFLICT (key) DO UPDATE SET value=:v, updated_at=NOW(), updated_by=:by
+        """), {"k": key, "v": value, "by": by})
+    print(json.dumps({"ok": True, "key": key}))
+
+
 CMDS = {
     "telemetry_history": cmd_telemetry_history,
     "telemetry_live":    cmd_telemetry_live,
@@ -2905,6 +3239,8 @@ CMDS = {
     # Service Billing
     "service_stats":               cmd_service_stats,
     "service_logs":                cmd_service_logs,
+    "whatsapp_active":             cmd_whatsapp_active,
+    "worker_calendar":             cmd_worker_calendar,
     # Agent Inbox
     "agent_inbox_list":            cmd_agent_inbox_list,
     "agent_inbox_add":             cmd_agent_inbox_add,
@@ -2912,6 +3248,23 @@ CMDS = {
     # System autonomy + jobs by role
     "jobs_by_role":                cmd_jobs_by_role,
     "system_autonomy":             cmd_system_autonomy,
+    # Commercial Module
+    "commercial_requests":         cmd_commercial_requests,
+    "commercial_request_get":      cmd_commercial_request_get,
+    "commercial_quote_get":        cmd_commercial_quote_get,
+    "commercial_stats":            cmd_commercial_stats,
+    "sysconfig_list":              cmd_sysconfig_list,
+    "sysconfig_get":               cmd_sysconfig_get,
+    "sysconfig_set":               cmd_sysconfig_set,
+    # Clients
+    "clients_list":                cmd_clients_list,
+    # Insurance Module
+    "insurance_policies":          cmd_insurance_policies,
+    "insurance_policy_get":        cmd_insurance_policy_get,
+    "insurance_docs":              cmd_insurance_docs,
+    "insurance_doc_path":          cmd_insurance_doc_path,
+    "insurance_alerts":            cmd_insurance_alerts,
+    "insurance_stats":             cmd_insurance_stats,
 }
 
 if __name__ == "__main__":

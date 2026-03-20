@@ -23,11 +23,12 @@
   #grid{
     display:grid;
     grid-template-columns:1fr 1fr 1fr;
-    grid-template-rows:1fr 1fr 100px;
+    grid-template-rows:1fr 1fr 110px 80px;
     gap:8px;padding:8px;
     height:calc(100vh - 48px);
   }
-  #card-agents{grid-column:1/-1}
+  #card-agents{grid-column:span 2}
+  #card-docs{display:none}
   .agent-card{background:#0d1320;border:1px solid var(--border);border-radius:6px;padding:6px 8px;flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
   .agent-card.busy{border-color:var(--yellow);animation:pulse 1.5s infinite}
   .agent-card.offline{border-color:var(--red);opacity:.6}
@@ -154,6 +155,11 @@
     <div class="card-title"><span class="dot" style="background:var(--purple)"></span>AGENT TEAM — 24/7</div>
     <div class="card-body" id="blk-agents" style="display:flex;gap:6px;align-items:stretch"></div>
   </div>
+  <!-- Block Seguros -->
+  <div class="card" id="card-seguros">
+    <div class="card-title"><span class="dot" style="background:var(--blue)"></span>SEGUROS <span id="hdr-seguros" style="margin-left:6px;font-weight:400;font-size:11px"></span></div>
+    <div class="card-body scroll" id="blk-seguros"></div>
+  </div>
   <!-- Block 8: Documents -->
   <div class="card" id="card-docs">
     <div class="card-title"><span class="dot" style="background:var(--yellow)"></span>DOCUMENTOS <span id="hdr-docs" style="margin-left:6px;font-size:11px"></span></div>
@@ -272,19 +278,26 @@ function renderFactory(cases, finStats) {
 }
 
 /* ── Block 3: Finance ─── */
-function renderFinance(finStats, obligations, svcStats) {
+function renderFinance(finStats, obligations, svcStats, activeShifts) {
   const fs = finStats || {};
   const ss = svcStats || {};
+  const active = (activeShifts || []);
   const svcPending = ss.pending_validation || 0;
+  const activeCount = active.length;
+  const activeNames = active.map(a => a.display_name || a.worker_id || '?').join(', ');
+  const activePart = activeCount > 0
+    ? `<span style="color:var(--green);font-size:.75rem;margin-left:.5rem" title="${activeNames}">🟢 ${activeCount} em serviço</span>`
+    : '';
   const svcTag = svcPending > 0
-    ? `<span style="color:var(--yellow);font-size:.75rem;margin-left:.5rem">· Serviços: ${svcPending} pend · ${euro(ss.invoiced_month||0)} fat.</span>`
-    : `<span style="color:var(--muted);font-size:.75rem;margin-left:.5rem">· Serviços: ${euro(ss.invoiced_month||0)} fat.</span>`;
+    ? `${activePart}<span style="color:var(--yellow);font-size:.75rem;margin-left:.5rem">· ${svcPending} pend · ${euro(ss.invoiced_month||0)} fat.</span>`
+    : `${activePart}<span style="color:var(--muted);font-size:.75rem;margin-left:.5rem">· ${euro(ss.invoiced_month||0)} fat.</span>`;
   document.getElementById('hdr-finance').innerHTML = svcTag;
+  // field names from finance_stats noc_query: total_pendente, total_vencido, total_pago
   document.getElementById('finance-metrics').innerHTML =
-    `<div class="metric"><div class="metric-val" style="color:var(--yellow)">${euro(fs.pending_total)}</div><div class="metric-lbl">Pendente</div></div>
-     <div class="metric"><div class="metric-val" style="color:var(--red)">${euro(fs.overdue_total)}</div><div class="metric-lbl">Vencido</div></div>
-     <div class="metric"><div class="metric-val" style="color:var(--green)">${euro(fs.paid_30d)}</div><div class="metric-lbl">Pago 30d</div></div>`;
-  const obls = (obligations||[]).filter(o => o.status === 'pending').slice(0,6);
+    `<div class="metric"><div class="metric-val" style="color:var(--yellow)">${euro(fs.total_pendente)}</div><div class="metric-lbl">Pendente</div></div>
+     <div class="metric"><div class="metric-val" style="color:var(--red)">${euro(fs.total_vencido)}</div><div class="metric-lbl">Vencido</div></div>
+     <div class="metric"><div class="metric-val" style="color:var(--green)">${euro(fs.total_pago)}</div><div class="metric-lbl">Pago 30d</div></div>`;
+  const obls = (obligations||[]).filter(o => o.status === 'pending').slice(0,4);
   const rows = obls.map(o => {
     const due = o.due_date ? new Date(o.due_date) : null;
     const days = due ? Math.floor((due - Date.now())/86400000) : null;
@@ -297,6 +310,42 @@ function renderFinance(finStats, obligations, svcStats) {
   }).join('');
   document.getElementById('finance-obls').innerHTML =
     `<table class="tbl"><thead><tr><th>Obrigação</th><th>Data</th><th>Valor</th></tr></thead><tbody>${rows||'<tr><td colspan="3" style="color:var(--muted)">Sem obrigações</td></tr>'}</tbody></table>`;
+}
+
+/* ── Block Seguros (inline in Finance card) ─── */
+function renderSeguros(insStats, insAlerts) {
+  const el = document.getElementById('blk-seguros');
+  if (!el) return;
+  const s = insStats || {};
+  const hdr = document.getElementById('hdr-seguros');
+  if (hdr) hdr.innerHTML = s.active != null ? `<span style="color:var(--muted)">${s.active} ativas · ${euro(s.premium_total)}/ano</span>` : '';
+  const alerts = (insAlerts||[]).slice(0,3);
+  const expiring = s.expiring_30d || 0;
+  const premium  = s.premium_total || 0;
+  const alertsN  = s.alerts_pending || 0;
+  const expColor = expiring > 0 ? 'var(--yellow)' : 'var(--green)';
+  const alertColor = alertsN > 0 ? 'var(--red)' : 'var(--green)';
+  let html = `<div style="display:flex;gap:6px;margin-bottom:6px">
+    <div class="metric" style="flex:1"><div class="metric-val" style="color:var(--blue);font-size:16px">${s.active||0}</div><div class="metric-lbl">Ativas</div></div>
+    <div class="metric" style="flex:1"><div class="metric-val" style="color:${expColor};font-size:16px">${expiring}</div><div class="metric-lbl">Expiram 30d</div></div>
+    <div class="metric" style="flex:1"><div class="metric-val" style="color:${alertColor};font-size:16px">${alertsN}</div><div class="metric-lbl">Alertas</div></div>
+    <div class="metric" style="flex:1"><div class="metric-val" style="color:var(--cyan);font-size:14px">${euro(premium)}</div><div class="metric-lbl">Prémio/ano</div></div>
+  </div>`;
+  if (alerts.length) {
+    const today = Date.now();
+    html += '<table class="tbl"><thead><tr><th>Apólice</th><th>Tipo</th><th>Dias</th></tr></thead><tbody>';
+    html += alerts.map(a => {
+      const ref = a.renewal_date || a.end_date;
+      const days = ref ? Math.floor((new Date(ref) - today)/86400000) : null;
+      const dcl  = days !== null ? (days < 0 ? 'var(--red)' : days <= 7 ? 'var(--red)' : days <= 30 ? 'var(--yellow)' : 'var(--green)') : 'var(--muted)';
+      const dstr = days !== null ? (days < 0 ? 'EXPIRADA' : days + 'd') : '—';
+      return `<tr><td>${esc(a.insurer_name||'—')}</td><td>${esc(a.entity_ref||'—')}</td><td style="color:${dcl};font-weight:700">${dstr}</td></tr>`;
+    }).join('');
+    html += '</tbody></table>';
+  } else {
+    html += '<div style="color:var(--green);font-size:11px">✓ Sem alertas pendentes</div>';
+  }
+  el.innerHTML = html;
 }
 
 /* ── Block 4: Radar ─── */
@@ -471,12 +520,12 @@ async function refresh() {
     lastData = d;
     renderCluster(d.workers, d.cluster_jobs, d.cluster_metrics);
     renderFactory(d.cases, d.finance_stats);
-    renderFinance(d.finance_stats, d.obligations, d.service_stats);
+    renderFinance(d.finance_stats, d.obligations, d.service_stats, d.whatsapp_active);
     renderRadar(d.tenders);
     renderIncidents(d.incidents);
     renderIdeas(d.ideas);
     renderAgents(d.agent_status);
-    renderDocs(d.doc_summary);
+    renderSeguros(d.insurance_stats, d.insurance_alerts);
     renderResources(d.cluster_metrics);
     document.getElementById('hdr-time').textContent = new Date().toLocaleTimeString('pt-PT');
   } catch(e) {

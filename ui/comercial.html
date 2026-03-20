@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Módulo Comercial — Grupo JDL</title>
+<style>
+:root {
+  --bg: #0f172a;
+  --card-bg: #1e293b;
+  --border: #334155;
+  --text: #f8fafc;
+  --muted: #64748b;
+  --blue: #3b82f6;
+  --blue-dark: #1e3a5f;
+  --green: #22c55e;
+  --green-dark: #14532d;
+  --red: #ef4444;
+  --red-dark: #7f1d1d;
+  --amber: #f59e0b;
+  --amber-dark: #451a03;
+  --purple: #a78bfa;
+  --purple-dark: #3b0764;
+  --sidebar-w: 220px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+
+/* ── Header ── */
+header {
+  background: linear-gradient(135deg, #1e3a5f, #0f172a);
+  padding: .75rem 1.5rem;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid #1e3a5f; flex-shrink: 0; height: 52px;
+}
+header h1 { font-size: 1rem; font-weight: 700; color: #fff; }
+header .subtitle { font-size: .75rem; color: var(--muted); }
+.header-nav { display: flex; gap: .5rem; align-items: center; }
+.header-nav a { padding: .3rem .75rem; border-radius: .4rem; font-size: .78rem; font-weight: 600; text-decoration: none; background: #1e293b; color: #94a3b8; border: 1px solid var(--border); }
+.header-nav a:hover { background: var(--border); color: var(--text); }
+#user-badge { font-size: .75rem; color: var(--muted); }
+
+/* ── Layout ── */
+.layout { display: flex; flex: 1; overflow: hidden; height: calc(100vh - 52px); }
+
+/* ── Sidebar ── */
+.sidebar {
+  width: var(--sidebar-w); background: #0a1628; border-right: 1px solid #1e293b;
+  display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto;
+}
+.sidebar-section { padding: .75rem 1rem .4rem; font-size: .65rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.stat-row { display: flex; align-items: center; justify-content: space-between;
+  padding: .45rem 1rem; font-size: .8rem; color: #94a3b8; }
+.stat-row .sv { font-weight: 700; color: var(--text); }
+.stat-row.blue .sv { color: #60a5fa; }
+.stat-row.green .sv { color: #34d399; }
+.stat-row.purple .sv { color: var(--purple); }
+.stat-row.amber .sv { color: var(--amber); }
+.stat-row.red .sv { color: var(--red); }
+
+.sidebar-divider { border: none; border-top: 1px solid #1e293b; margin: .5rem 0; }
+
+.filter-btn {
+  display: block; width: 100%; text-align: left; padding: .5rem 1rem;
+  font-size: .82rem; font-weight: 500; color: #94a3b8; background: transparent;
+  border: none; border-left: 3px solid transparent; cursor: pointer; transition: all .12s;
+}
+.filter-btn:hover { background: #1e293b; color: var(--text); }
+.filter-btn.active { background: #1e3a5f; color: #60a5fa; border-left-color: #3b82f6; }
+.filter-dot { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%; margin-right: .5rem; }
+
+/* ── Main content ── */
+.content { flex: 1; display: flex; overflow: hidden; }
+
+/* ── Request list panel ── */
+.list-panel { width: 360px; border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+.panel-header { padding: .75rem 1rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.panel-title { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.list-body { flex: 1; overflow-y: auto; }
+
+/* ── Request card ── */
+.req-card {
+  padding: .85rem 1rem; border-bottom: 1px solid var(--border);
+  cursor: pointer; transition: background .1s; display: flex; flex-direction: column; gap: .3rem;
+}
+.req-card:hover { background: #1e293b; }
+.req-card.selected { background: #1e3a5f; border-left: 3px solid #3b82f6; }
+.req-date { font-size: .68rem; color: var(--muted); }
+.req-name { font-size: .88rem; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.req-company { font-size: .75rem; color: #94a3b8; }
+.req-footer { display: flex; align-items: center; justify-content: space-between; }
+.req-event { font-size: .72rem; color: var(--muted); }
+.req-total { font-size: .82rem; font-weight: 700; color: #34d399; }
+
+/* ── Detail panel ── */
+.detail-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.detail-header { padding: .75rem 1.25rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.detail-body { flex: 1; overflow-y: auto; padding: 1.25rem; }
+
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100%; color: var(--muted); gap: .75rem; }
+.empty-icon { font-size: 2.5rem; opacity: .4; }
+.empty-text { font-size: .9rem; }
+
+/* ── Cards ── */
+.card { background: var(--card-bg); border: 1px solid var(--border); border-radius: .6rem; padding: 1rem; margin-bottom: 1rem; }
+.card-title { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; margin-bottom: .75rem; }
+
+/* ── Fields grid ── */
+.fields { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem .75rem; }
+.field { display: flex; flex-direction: column; gap: .2rem; }
+.field-label { font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.field-value { font-size: .85rem; color: var(--text); }
+
+/* ── Buttons ── */
+.btn { padding: .4rem .9rem; border-radius: .4rem; border: none; cursor: pointer; font-size: .8rem; font-weight: 600; transition: all .12s; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary { background: var(--blue); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: #2563eb; }
+.btn-success { background: #16a34a; color: #fff; }
+.btn-success:hover:not(:disabled) { background: #15803d; }
+.btn-warning { background: #d97706; color: #fff; }
+.btn-warning:hover:not(:disabled) { background: #b45309; }
+.btn-danger { background: #dc2626; color: #fff; }
+.btn-danger:hover:not(:disabled) { background: #b91c1c; }
+.btn-ghost { background: #1e293b; color: #94a3b8; border: 1px solid var(--border); }
+.btn-ghost:hover:not(:disabled) { background: var(--border); color: var(--text); }
+.btn-purple { background: #7c3aed; color: #fff; }
+.btn-purple:hover:not(:disabled) { background: #6d28d9; }
+.btn-sm { padding: .28rem .65rem; font-size: .73rem; }
+.btn-loading::after { content: '…'; }
+
+/* ── Action bar ── */
+.action-bar { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+
+/* ── Status badges ── */
+.badge { display: inline-block; padding: .15rem .55rem; border-radius: 99px; font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+.badge-new         { background: #1e293b; color: #94a3b8; }
+.badge-new_needs_review { background: #451a03; color: var(--amber); }
+.badge-quoted      { background: #1e3a5f; color: #60a5fa; }
+.badge-sent        { background: var(--purple-dark); color: var(--purple); }
+.badge-won         { background: var(--green-dark); color: #34d399; }
+.badge-lost        { background: var(--red-dark); color: #f87171; }
+.badge-draft       { background: #1e293b; color: #94a3b8; }
+.badge-approved    { background: #1e3a5f; color: #60a5fa; }
+.badge-cancelled   { background: var(--red-dark); color: #f87171; }
+
+/* ── Table ── */
+table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+th { text-align: left; color: var(--muted); font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; padding: .5rem .6rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: .5rem .6rem; border-bottom: 1px solid #1e293b; vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+
+/* ── Raw text collapsible ── */
+details { margin-top: .5rem; }
+details summary { cursor: pointer; font-size: .78rem; color: #60a5fa; user-select: none; margin-bottom: .5rem; }
+.raw-text { background: #0f172a; border: 1px solid #1e293b; border-radius: .4rem; padding: .75rem; font-size: .78rem; line-height: 1.6; color: #cbd5e1; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; }
+
+/* ── Input / Textarea ── */
+input, textarea, select {
+  background: #0f172a; border: 1px solid var(--border); border-radius: .4rem;
+  color: var(--text); font-size: .85rem; padding: .45rem .7rem; width: 100%;
+  font-family: inherit;
+}
+input:focus, textarea:focus, select:focus { outline: none; border-color: #3b82f6; }
+textarea { resize: vertical; min-height: 80px; }
+label { font-size: .78rem; color: var(--muted); display: block; margin-bottom: .3rem; }
+.form-group { margin-bottom: .85rem; }
+
+/* ── Quote line items table ── */
+.li-table input { padding: .3rem .5rem; font-size: .78rem; }
+.li-total { font-size: .88rem; font-weight: 700; text-align: right; padding: .5rem .6rem; color: #34d399; }
+.totals-row { display: flex; flex-direction: column; align-items: flex-end; gap: .25rem; margin-top: .5rem; font-size: .82rem; }
+.totals-row .tl { color: var(--muted); }
+.totals-row .tv { font-weight: 600; min-width: 90px; text-align: right; }
+.totals-row .grand { color: #34d399; font-size: 1rem; font-weight: 700; }
+
+/* ── Toast ── */
+#toast {
+  position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999;
+  padding: .65rem 1.2rem; border-radius: .5rem; font-size: .85rem; font-weight: 600;
+  background: #1e293b; color: var(--text); border: 1px solid var(--border);
+  opacity: 0; transform: translateY(10px); transition: all .25s; pointer-events: none;
+}
+#toast.show { opacity: 1; transform: translateY(0); }
+#toast.ok   { background: var(--green-dark); border-color: #22c55e; color: #a7f3d0; }
+#toast.err  { background: var(--red-dark); border-color: var(--red); color: #fca5a5; }
+
+/* ── Modal ── */
+.modal-backdrop {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,.65);
+  z-index: 1000; align-items: center; justify-content: center;
+}
+.modal-backdrop.open { display: flex; }
+.modal {
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: .75rem;
+  padding: 1.5rem; width: 560px; max-width: 95vw; max-height: 90vh; overflow-y: auto;
+}
+.modal-title { font-size: 1rem; font-weight: 700; margin-bottom: 1.25rem; }
+.modal-footer { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1.25rem; }
+
+/* ── Loading spinner ── */
+.spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid #334155; border-top-color: #60a5fa; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-row { text-align: center; padding: 2rem; color: var(--muted); }
+
+/* ── Quotes list (inside detail) ── */
+.quote-item { background: #0f172a; border: 1px solid #1e293b; border-radius: .5rem; padding: .85rem 1rem; margin-bottom: .6rem; cursor: pointer; transition: border-color .12s; }
+.quote-item:hover { border-color: #3b82f6; }
+.quote-item.selected { border-color: #3b82f6; background: #1e3a5f; }
+.quote-num { font-size: .75rem; color: var(--muted); }
+.quote-total { font-size: 1rem; font-weight: 700; color: #34d399; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Módulo Comercial — Grupo JDL</h1>
+    <div class="subtitle">Pedidos e orçamentos de eventos</div>
+  </div>
+  <div class="header-nav">
+    <span id="user-badge"></span>
+    <a href="/joao">Painel</a>
+    <a href="/noc">NOC</a>
+    <a href="#" onclick="logout();return false">Sair</a>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-section">Estatisticas</div>
+    <div class="stat-row blue"><span>Novos</span><span class="sv" id="stat-new">—</span></div>
+    <div class="stat-row amber"><span>A rever</span><span class="sv" id="stat-review">—</span></div>
+    <div class="stat-row blue"><span>Cotados</span><span class="sv" id="stat-quoted">—</span></div>
+    <div class="stat-row purple"><span>Enviados</span><span class="sv" id="stat-sent">—</span></div>
+    <div class="stat-row green"><span>Ganhos</span><span class="sv" id="stat-won">—</span></div>
+    <div class="stat-row red"><span>Perdidos</span><span class="sv" id="stat-lost">—</span></div>
+
+    <hr class="sidebar-divider">
+
+    <div class="sidebar-section">Filtros</div>
+    <button class="filter-btn active" data-filter="" onclick="setFilter(this)">
+      <span class="filter-dot" style="background:#94a3b8"></span>Todos
+    </button>
+    <button class="filter-btn" data-filter="new" onclick="setFilter(this)">
+      <span class="filter-dot" style="background:#94a3b8"></span>Novos
+    </button>
+    <button class="filter-btn" data-filter="new_needs_review" onclick="setFilter(this)">
+      <span class="filter-dot" style="background:#f59e0b"></span>A rever
+    </button>
+    <button class="filter-btn" data-filter="quoted" onclick="setFilter(this)">
+      <span class="filter-dot" style="background:#60a5fa"></span>Cotados
+    </button>
+    <button class="filter-btn" data-filter="sent" onclick="setFilter(this)">
+      <span class="filter-dot" style="background:#a78bfa"></span>Enviados
+    </button>
+    <button class="filter-btn" data-filter="won" onclick="setFilter(this)">
+      <span class="filter-dot" style="background:#34d399"></span>Ganhos
+    </button>
+    <button class="filter-btn" data-filter="lost" onclick="setFilter(this)">
+      <span class="filter-dot" style="background:#f87171"></span>Perdidos
+    </button>
+
+    <hr class="sidebar-divider">
+
+    <button class="filter-btn" onclick="openNewModal()" style="color:#60a5fa;font-weight:700;">
+      + Novo Pedido
+    </button>
+  </aside>
+
+  <!-- Main content -->
+  <div class="content">
+
+    <!-- Request list -->
+    <div class="list-panel">
+      <div class="panel-header">
+        <span class="panel-title" id="list-title">Pedidos</span>
+        <button class="btn btn-primary btn-sm" onclick="openNewModal()">+ Novo</button>
+      </div>
+      <div class="list-body" id="req-list">
+        <div class="loading-row"><div class="spinner"></div></div>
+      </div>
+    </div>
+
+    <!-- Detail panel -->
+    <div class="detail-panel">
+      <div class="detail-header">
+        <span class="panel-title" id="detail-title">Detalhe do pedido</span>
+        <div id="detail-actions-header"></div>
+      </div>
+      <div class="detail-body" id="detail-body">
+        <div class="empty-state">
+          <div class="empty-icon">📋</div>
+          <div class="empty-text">Seleccione um pedido para ver o detalhe</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- New Request Modal -->
+<div class="modal-backdrop" id="new-modal">
+  <div class="modal">
+    <div class="modal-title">Novo Pedido Comercial</div>
+    <div class="form-group">
+      <label>Texto do pedido *</label>
+      <textarea id="nrq-raw" rows="6" placeholder="Cole aqui o email, mensagem WhatsApp ou descrição do evento..."></textarea>
+    </div>
+    <div class="form-group">
+      <label>Fonte</label>
+      <select id="nrq-source">
+        <option value="manual">Manual</option>
+        <option value="email">Email</option>
+        <option value="whatsapp">WhatsApp</option>
+        <option value="form">Formulário</option>
+      </select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeNewModal()">Cancelar</button>
+      <button class="btn btn-primary" id="nrq-submit" onclick="submitNewRequest()">Submeter</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── Auth ─────────────────────────────────────────────────────────────────────
+const TOKEN = localStorage.getItem('aios_jwt');
+if (!TOKEN) location.href = '/login?next=/comercial';
+
+// Decode JWT payload (no verification — server does that)
+function decodeJWT(t) {
+  try { return JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); }
+  catch(e) { return null; }
+}
+const ME = decodeJWT(TOKEN);
+if (ME) {
+  document.getElementById('user-badge').textContent = ME.username + ' (' + ME.role + ')';
+}
+
+function logout() {
+  localStorage.removeItem('aios_jwt');
+  location.href = '/login';
+}
+
+const LEVEL = { admin:100, supervisor:80, operator:60, factory:60, finance:50, viewer:30, worker:25, show:20, cliente:10 };
+function hasRole(min) { return (LEVEL[ME?.role] || 0) >= (LEVEL[min] || 0); }
+const isOperator   = hasRole('operator');
+const isSupervisor = hasRole('supervisor');
+
+// ── API helper ────────────────────────────────────────────────────────────────
+async function api(url, opts={}) {
+  const res = await fetch(url, {
+    headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json', ...(opts.headers||{}) },
+    ...opts
+  });
+  if (res.status === 401) { location.href = '/login?next=/comercial'; throw new Error('unauth'); }
+  if (res.headers.get('content-type')?.includes('application/json')) return res.json();
+  return res;  // for binary (PDF)
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, type='ok') {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'show ' + type;
+  setTimeout(() => t.className = '', 3500);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtDate(s) { return s ? s.slice(0,10) : '—'; }
+function fmtEur(n) { return '€' + Number(n||0).toLocaleString('pt-PT', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+const STATUS_LABELS = {
+  new: 'Novo', new_needs_review: 'Rever', quoted: 'Cotado', sent: 'Enviado',
+  won: 'Ganho', lost: 'Perdido', draft: 'Rascunho', approved: 'Aprovado', cancelled: 'Cancelado'
+};
+function badge(status) {
+  const lbl = STATUS_LABELS[status] || status;
+  return `<span class="badge badge-${esc(status)}">${esc(lbl)}</span>`;
+}
+
+// ── State ────────────────────────────────────────────────────────────────────
+let currentFilter = '';
+let selectedRequestId = null;
+let selectedQuoteId   = null;
+let refreshTimer = null;
+
+// ── Filter ───────────────────────────────────────────────────────────────────
+function setFilter(btn) {
+  document.querySelectorAll('.filter-btn[data-filter]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentFilter = btn.dataset.filter;
+  selectedRequestId = null;
+  selectedQuoteId   = null;
+  document.getElementById('detail-body').innerHTML = `
+    <div class="empty-state">
+      <div class="empty-icon">📋</div>
+      <div class="empty-text">Seleccione um pedido para ver o detalhe</div>
+    </div>`;
+  document.getElementById('detail-title').textContent = 'Detalhe do pedido';
+  document.getElementById('detail-actions-header').innerHTML = '';
+  loadRequests(currentFilter);
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const d = await api('/api/commercial/stats');
+    const s = d.by_status || d || {};
+    document.getElementById('stat-new').textContent    = s.new    || 0;
+    document.getElementById('stat-review').textContent = s.new_needs_review || 0;
+    document.getElementById('stat-quoted').textContent = s.quoted  || 0;
+    document.getElementById('stat-sent').textContent   = s.sent    || 0;
+    document.getElementById('stat-won').textContent    = s.won     || 0;
+    document.getElementById('stat-lost').textContent   = s.lost    || 0;
+  } catch(e) { /* silent */ }
+}
+
+// ── Request list ──────────────────────────────────────────────────────────────
+async function loadRequests(status='') {
+  const listEl = document.getElementById('req-list');
+  listEl.innerHTML = '<div class="loading-row"><div class="spinner"></div></div>';
+  try {
+    const d = await api(`/api/commercial/requests?status=${encodeURIComponent(status)}&limit=50`);
+    const rows = Array.isArray(d) ? d : (d.requests || d.rows || []);
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="loading-row" style="color:var(--muted)">Nenhum pedido encontrado</div>';
+      return;
+    }
+    listEl.innerHTML = rows.map(r => {
+      const name    = esc(r.customer_name || r.contact_name || '—');
+      const company = esc(r.company_name  || r.customer_company || '');
+      const evtype  = esc(r.event_type    || r.parsed_event_type || '');
+      const dateStr = fmtDate(r.created_at || r.received_at);
+      const total   = r.quote_total != null ? fmtEur(r.quote_total) : '';
+      const selected = r.id === selectedRequestId ? ' selected' : '';
+      return `<div class="req-card${selected}" onclick="selectRequest(${r.id})">
+        <div class="req-date">${dateStr} &nbsp; ${badge(r.status)}</div>
+        <div class="req-name">${name || '(sem nome)'}</div>
+        ${company ? `<div class="req-company">${company}</div>` : ''}
+        <div class="req-footer">
+          <span class="req-event">${evtype}</span>
+          ${total ? `<span class="req-total">${total}</span>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    listEl.innerHTML = `<div class="loading-row" style="color:#f87171">Erro: ${esc(String(e))}</div>`;
+  }
+}
+
+// ── Select request → load detail ──────────────────────────────────────────────
+async function selectRequest(id) {
+  selectedRequestId = id;
+  selectedQuoteId   = null;
+  // Highlight card
+  document.querySelectorAll('.req-card').forEach(c => {
+    c.classList.toggle('selected', Number(c.getAttribute('onclick').match(/\d+/)?.[0]) === id);
+  });
+  const detailBody = document.getElementById('detail-body');
+  detailBody.innerHTML = '<div class="loading-row"><div class="spinner"></div></div>';
+  document.getElementById('detail-title').textContent = 'Pedido #' + id;
+  document.getElementById('detail-actions-header').innerHTML = '';
+  try {
+    const d = await api(`/api/commercial/requests/${id}`);
+    const req = d.request || d;
+    renderRequestDetail(req);
+  } catch(e) {
+    detailBody.innerHTML = `<div class="loading-row" style="color:#f87171">Erro ao carregar: ${esc(String(e))}</div>`;
+  }
+}
+
+function renderRequestDetail(req) {
+  const detailBody = document.getElementById('detail-body');
+  const quotes = req.quotes || [];
+
+  const hasQuote = quotes.length > 0;
+  const latestQuote = hasQuote ? quotes[0] : null;
+  const qStatus = latestQuote?.status || '';
+
+  // Action buttons
+  const actionsHdr = document.getElementById('detail-actions-header');
+  actionsHdr.innerHTML = '';
+
+  const fields = `
+    <div class="card">
+      <div class="card-title">Informacao do pedido</div>
+      <div class="fields">
+        <div class="field"><span class="field-label">Estado</span><span class="field-value">${badge(req.status)}</span></div>
+        <div class="field"><span class="field-label">Fonte</span><span class="field-value">${esc(req.source||'—')}</span></div>
+        <div class="field"><span class="field-label">Cliente</span><span class="field-value">${esc(req.customer_name||req.contact_name||'—')}</span></div>
+        <div class="field"><span class="field-label">Empresa</span><span class="field-value">${esc(req.company_name||req.customer_company||'—')}</span></div>
+        <div class="field"><span class="field-label">Email</span><span class="field-value">${esc(req.customer_email||'—')}</span></div>
+        <div class="field"><span class="field-label">Telefone</span><span class="field-value">${esc(req.customer_phone||'—')}</span></div>
+        <div class="field"><span class="field-label">Tipo de evento</span><span class="field-value">${esc(req.event_type||req.parsed_event_type||'—')}</span></div>
+        <div class="field"><span class="field-label">Data do evento</span><span class="field-value">${fmtDate(req.event_date||req.parsed_event_date)}</span></div>
+        <div class="field"><span class="field-label">Local</span><span class="field-value">${esc(req.location||req.parsed_location||'—')}</span></div>
+        <div class="field"><span class="field-label">Recebido</span><span class="field-value">${fmtDate(req.created_at||req.received_at)}</span></div>
+      </div>
+      ${req.raw_request ? `
+      <details style="margin-top:.75rem">
+        <summary>Texto original do pedido</summary>
+        <div class="raw-text">${esc(req.raw_request)}</div>
+      </details>` : ''}
+    </div>`;
+
+  let quotesHtml = '';
+  if (hasQuote) {
+    quotesHtml = `<div class="card">
+      <div class="card-title">Orcamentos associados</div>
+      ${quotes.map(q => `
+        <div class="quote-item${q.id === selectedQuoteId ? ' selected' : ''}" onclick="selectQuote(${q.id}, ${req.id})">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <span class="quote-num">${esc(q.quote_number||'ORC-'+q.id)}</span>
+            ${badge(q.status)}
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:.35rem">
+            <span style="font-size:.75rem;color:var(--muted)">Valido ate ${fmtDate(q.valid_until)}</span>
+            <span class="quote-total">${fmtEur(q.total_with_vat||q.total_eur)}</span>
+          </div>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  // Action bar (depends on status)
+  let actionBar = '<div class="action-bar">';
+  const reqStatus = req.status || '';
+
+  if (isOperator && !hasQuote) {
+    actionBar += `<button class="btn btn-primary" id="btn-gen-quote" onclick="generateQuote(${req.id})">Gerar Orcamento</button>`;
+  }
+  if (hasQuote && latestQuote) {
+    actionBar += `<button class="btn btn-ghost" onclick="selectQuote(${latestQuote.id}, ${req.id})">Ver Orcamento</button>`;
+    if (isSupervisor && qStatus === 'draft') {
+      actionBar += `<button class="btn btn-warning" onclick="approveQuote(${latestQuote.id})">Aprovar</button>`;
+    }
+    if (isSupervisor && qStatus === 'approved') {
+      actionBar += `<button class="btn btn-purple" onclick="sendQuoteEmail(${latestQuote.id}, ${JSON.stringify(esc(req.customer_email||''))})">Enviar Email</button>`;
+    }
+    if (qStatus === 'approved' || qStatus === 'sent') {
+      actionBar += `<button class="btn btn-ghost" onclick="downloadPDF(${latestQuote.id})">Descarregar PDF</button>`;
+    }
+    if (isSupervisor && qStatus === 'sent') {
+      actionBar += `<button class="btn btn-success" onclick="markWon(${req.id})">Ganho</button>`;
+      actionBar += `<button class="btn btn-danger" onclick="markLost(${req.id})">Perdido</button>`;
+    }
+  }
+  actionBar += '</div>';
+
+  detailBody.innerHTML = actionBar + fields + quotesHtml;
+
+  // If a quote was previously selected, render it inline if still in list
+  if (selectedQuoteId && quotes.find(q => q.id === selectedQuoteId)) {
+    selectQuote(selectedQuoteId, req.id);
+  }
+}
+
+// ── Select quote ──────────────────────────────────────────────────────────────
+async function selectQuote(qid, reqId) {
+  selectedQuoteId = qid;
+  // Highlight
+  document.querySelectorAll('.quote-item').forEach(el => {
+    const m = el.getAttribute('onclick')?.match(/selectQuote\((\d+)/);
+    el.classList.toggle('selected', m && Number(m[1]) === qid);
+  });
+  try {
+    const d = await api(`/api/commercial/quotes/${qid}`);
+    const q = d.quote || d;
+    renderQuoteDetail(q, reqId);
+  } catch(e) {
+    toast('Erro ao carregar orcamento: ' + String(e), 'err');
+  }
+}
+
+function renderQuoteDetail(q, reqId) {
+  // Find or create a quote-detail div below the quote list card
+  let qdiv = document.getElementById('quote-detail-inline');
+  if (!qdiv) {
+    qdiv = document.createElement('div');
+    qdiv.id = 'quote-detail-inline';
+    document.getElementById('detail-body').appendChild(qdiv);
+  }
+
+  const lineItems = Array.isArray(q.line_items) ? q.line_items : [];
+  const isDraft  = q.status === 'draft';
+  const isApproved = q.status === 'approved';
+  const isSent   = q.status === 'sent';
+
+  const liRows = lineItems.map((li, i) => `
+    <tr>
+      <td>${isDraft ? `<input type="text" value="${esc(li.description||li.desc||'')}" data-li="${i}" data-field="description">` : esc(li.description||li.desc||'—')}</td>
+      <td style="width:70px">${isDraft ? `<input type="number" value="${li.qty||1}" min="0" step="0.1" data-li="${i}" data-field="qty" style="width:60px">` : (li.qty||'—')}</td>
+      <td style="width:100px">${isDraft ? `<input type="number" value="${li.unit_price||li.price||0}" min="0" step="0.01" data-li="${i}" data-field="unit_price" style="width:90px">` : fmtEur(li.unit_price||li.price)}</td>
+      <td style="width:100px;text-align:right">${fmtEur((li.qty||1)*(li.unit_price||li.price||0))}</td>
+    </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:1rem">Sem linhas</td></tr>';
+
+  const subtotal = lineItems.reduce((s, li) => s + (li.qty||1)*(li.unit_price||li.price||0), 0);
+  const vat = subtotal * 0.23;
+  const total = subtotal + vat;
+
+  qdiv.innerHTML = `<div class="card">
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between">
+      <span>Orcamento ${esc(q.quote_number||'ORC-'+q.id)}</span>
+      <span>${badge(q.status)}</span>
+    </div>
+
+    <div class="fields" style="margin-bottom:.75rem">
+      <div class="field"><span class="field-label">Validade</span><span class="field-value">${fmtDate(q.valid_until)}</span></div>
+      <div class="field"><span class="field-label">Criado</span><span class="field-value">${fmtDate(q.created_at)}</span></div>
+    </div>
+
+    <table class="li-table">
+      <thead><tr>
+        <th>Descricao</th><th>Qtd</th><th>Preco unit.</th><th style="text-align:right">Total</th>
+      </tr></thead>
+      <tbody id="li-tbody">${liRows}</tbody>
+    </table>
+
+    <div class="totals-row">
+      <div><span class="tl">Subtotal:&nbsp;</span><span class="tv">${fmtEur(subtotal)}</span></div>
+      <div><span class="tl">IVA 23%:&nbsp;</span><span class="tv">${fmtEur(vat)}</span></div>
+      <div><span class="tl grand">Total c/IVA:&nbsp;</span><span class="tv grand">${fmtEur(q.total_with_vat||total)}</span></div>
+    </div>
+
+    ${q.assumptions ? `<div class="form-group" style="margin-top:.75rem">
+      <label>Pressupostos</label>
+      ${isDraft ? `<textarea id="q-assumptions" rows="3">${esc(q.assumptions)}</textarea>` : `<div class="raw-text">${esc(q.assumptions)}</div>`}
+    </div>` : isDraft ? `<div class="form-group" style="margin-top:.75rem"><label>Pressupostos</label><textarea id="q-assumptions" rows="2" placeholder="Pressupostos e condicoes incluidas..."></textarea></div>` : ''}
+
+    ${q.exclusions ? `<div class="form-group">
+      <label>Exclusoes</label>
+      ${isDraft ? `<textarea id="q-exclusions" rows="2">${esc(q.exclusions)}</textarea>` : `<div class="raw-text">${esc(q.exclusions)}</div>`}
+    </div>` : isDraft ? `<div class="form-group"><label>Exclusoes</label><textarea id="q-exclusions" rows="2" placeholder="O que nao esta incluido..."></textarea></div>` : ''}
+
+    <div class="action-bar" style="margin-top:.75rem">
+      ${isDraft && isOperator ? `<button class="btn btn-ghost btn-sm" onclick="saveQuote(${q.id}, ${reqId})">Guardar</button>` : ''}
+      ${isDraft && isSupervisor ? `<button class="btn btn-warning btn-sm" onclick="approveQuote(${q.id})">Aprovar para envio</button>` : ''}
+      ${isApproved && isSupervisor ? `<button class="btn btn-purple btn-sm" onclick="sendQuoteEmail(${q.id}, '')">Enviar Email</button>` : ''}
+      ${(isApproved || isSent) ? `<button class="btn btn-ghost btn-sm" onclick="downloadPDF(${q.id})">Descarregar PDF</button>` : ''}
+    </div>
+  </div>`;
+}
+
+// ── Generate quote ────────────────────────────────────────────────────────────
+async function generateQuote(reqId) {
+  const btn = document.getElementById('btn-gen-quote');
+  if (btn) { btn.disabled = true; btn.textContent = 'A gerar…'; }
+  try {
+    const d = await api(`/api/commercial/requests/${reqId}/quote`, { method: 'POST', body: '{}' });
+    if (d.ok === false) throw new Error(d.error || 'Erro desconhecido');
+    toast('Orcamento gerado com sucesso', 'ok');
+    await selectRequest(reqId);
+    loadStats();
+    loadRequests(currentFilter);
+  } catch(e) {
+    toast('Erro ao gerar orcamento: ' + String(e), 'err');
+    if (btn) { btn.disabled = false; btn.textContent = 'Gerar Orcamento'; }
+  }
+}
+
+// ── Save quote (update line items) ────────────────────────────────────────────
+async function saveQuote(qid, reqId) {
+  try {
+    const liInputs = document.querySelectorAll('#li-tbody input[data-li]');
+    const lineItemsMap = {};
+    liInputs.forEach(inp => {
+      const i = inp.dataset.li;
+      if (!lineItemsMap[i]) lineItemsMap[i] = {};
+      lineItemsMap[i][inp.dataset.field] = inp.type === 'number' ? parseFloat(inp.value)||0 : inp.value;
+    });
+    const line_items = Object.values(lineItemsMap);
+    const assumptions = document.getElementById('q-assumptions')?.value || '';
+    const exclusions  = document.getElementById('q-exclusions')?.value  || '';
+    const d = await api(`/api/commercial/quotes/${qid}`, {
+      method: 'PUT', body: JSON.stringify({ line_items, assumptions, exclusions })
+    });
+    if (d.ok === false) throw new Error(d.error || 'Erro');
+    toast('Orcamento guardado', 'ok');
+    await selectRequest(reqId);
+  } catch(e) { toast('Erro ao guardar: ' + String(e), 'err'); }
+}
+
+// ── Approve quote ─────────────────────────────────────────────────────────────
+async function approveQuote(qid) {
+  try {
+    const d = await api(`/api/commercial/quotes/${qid}/approve`, {
+      method: 'POST', body: JSON.stringify({ approved_by: ME?.username || 'admin' })
+    });
+    if (d.ok === false) throw new Error(d.error || 'Erro');
+    toast('Orcamento aprovado', 'ok');
+    if (selectedRequestId) await selectRequest(selectedRequestId);
+    loadStats(); loadRequests(currentFilter);
+  } catch(e) { toast('Erro ao aprovar: ' + String(e), 'err'); }
+}
+
+// ── Send email ────────────────────────────────────────────────────────────────
+async function sendQuoteEmail(qid, email) {
+  const dest = email || 'o cliente';
+  if (!confirm(`Enviar orcamento a ${dest}?\nEsta accao nao pode ser desfeita.`)) return;
+  try {
+    const d = await api(`/api/commercial/quotes/${qid}/send`, { method: 'POST', body: '{}' });
+    if (d.ok === false) throw new Error(d.error || 'Erro');
+    toast('Orcamento enviado por email', 'ok');
+    if (selectedRequestId) await selectRequest(selectedRequestId);
+    loadStats(); loadRequests(currentFilter);
+  } catch(e) { toast('Erro ao enviar: ' + String(e), 'err'); }
+}
+
+// ── Download PDF ──────────────────────────────────────────────────────────────
+function downloadPDF(qid) {
+  const url = `/api/commercial/quotes/${qid}/pdf`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  // Add auth header via hidden iframe trick — fall back to direct link with token param
+  // Simplest: open URL + rely on server session; but we use JWT
+  // Use fetch + blob for proper auth
+  toast('A preparar PDF…', 'ok');
+  fetch(url, { headers: { 'Authorization': 'Bearer ' + TOKEN } })
+    .then(res => {
+      if (!res.ok) throw new Error('PDF nao disponivel (status ' + res.status + ')');
+      return res.blob();
+    })
+    .then(blob => {
+      const burl = URL.createObjectURL(blob);
+      const a2 = document.createElement('a');
+      a2.href = burl; a2.download = `orcamento-${qid}.pdf`;
+      document.body.appendChild(a2); a2.click();
+      setTimeout(() => { URL.revokeObjectURL(burl); a2.remove(); }, 2000);
+      toast('PDF descarregado', 'ok');
+    })
+    .catch(e => toast('Erro PDF: ' + String(e), 'err'));
+}
+
+// ── Mark won/lost ─────────────────────────────────────────────────────────────
+async function markWon(reqId) {
+  if (!confirm('Marcar este pedido como GANHO?')) return;
+  try {
+    const d = await api(`/api/commercial/requests/${reqId}/won`, { method: 'POST', body: '{}' });
+    if (d.ok === false) throw new Error(d.error || 'Erro');
+    toast('Marcado como Ganho', 'ok');
+    await selectRequest(reqId); loadStats(); loadRequests(currentFilter);
+  } catch(e) { toast('Erro: ' + String(e), 'err'); }
+}
+async function markLost(reqId) {
+  if (!confirm('Marcar este pedido como PERDIDO?')) return;
+  try {
+    const d = await api(`/api/commercial/requests/${reqId}/lost`, { method: 'POST', body: '{}' });
+    if (d.ok === false) throw new Error(d.error || 'Erro');
+    toast('Marcado como Perdido', 'ok');
+    await selectRequest(reqId); loadStats(); loadRequests(currentFilter);
+  } catch(e) { toast('Erro: ' + String(e), 'err'); }
+}
+
+// ── New request modal ─────────────────────────────────────────────────────────
+function openNewModal() {
+  document.getElementById('nrq-raw').value    = '';
+  document.getElementById('nrq-source').value = 'manual';
+  document.getElementById('new-modal').classList.add('open');
+  setTimeout(() => document.getElementById('nrq-raw').focus(), 50);
+}
+function closeNewModal() {
+  document.getElementById('new-modal').classList.remove('open');
+}
+// Close on backdrop click
+document.getElementById('new-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeNewModal();
+});
+
+async function submitNewRequest() {
+  const raw = document.getElementById('nrq-raw').value.trim();
+  if (!raw) { toast('Texto do pedido e obrigatorio', 'err'); return; }
+  const source = document.getElementById('nrq-source').value;
+  const btn    = document.getElementById('nrq-submit');
+  btn.disabled = true; btn.textContent = 'A submeter…';
+  try {
+    const d = await api('/api/commercial/requests', {
+      method: 'POST',
+      body: JSON.stringify({ raw_request: raw, source })
+    });
+    if (d.ok === false) throw new Error(d.error || 'Erro');
+    toast('Pedido submetido com sucesso', 'ok');
+    closeNewModal();
+    loadStats();
+    loadRequests(currentFilter);
+    if (d.id) setTimeout(() => selectRequest(d.id), 400);
+  } catch(e) {
+    toast('Erro ao submeter: ' + String(e), 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Submeter';
+  }
+}
+
+// ── Auto-refresh ──────────────────────────────────────────────────────────────
+function startRefresh() {
+  clearInterval(refreshTimer);
+  refreshTimer = setInterval(() => {
+    loadStats();
+    loadRequests(currentFilter);
+  }, 30000);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadStats();
+loadRequests('');
+startRefresh();
+</script>
+</body>
+</html>

@@ -40,6 +40,9 @@ function verifyJWT(token) {
     if (sig !== expected) return null;
     const payload = JSON.parse(Buffer.from(p, 'base64').toString('utf8'));
     if (payload.exp && Math.floor(Date.now()/1000) > payload.exp) return null;
+    // Normalise client_id
+    if (payload.client_id !== undefined && payload.client_id !== null)
+      payload.client_id = parseInt(payload.client_id, 10);
     return payload;
   } catch(e) { return null; }
 }
@@ -55,8 +58,8 @@ app.use((req, res, next) => {
   let   rec = _rl.get(ip);
   if (!rec || now - rec.start > win) { rec = { start: now, count: 0 }; _rl.set(ip, rec); }
   rec.count++;
-  if (rec.count > 100) {
-    return res.status(429).json({ ok: false, error: 'rate limit exceeded (100 req/min)' });
+  if (rec.count > 500) {
+    return res.status(429).json({ ok: false, error: 'rate limit exceeded (500 req/min)' });
   }
   next();
 });
@@ -83,13 +86,15 @@ const AUTH_EXEMPT = new Set([
   '/incidents',
   // Toconline health — public (sem dados sensíveis)
   '/finance/toconline/health',
+  // WhatsApp ponto webhook (Twilio envia sem JWT)
+  '/whatsapp/inbound', '/whatsapp/status', '/whatsapp/health',
 ]);
 app.use('/api', (req, res, next) => {
   if (AUTH_EXEMPT.has(req.path)) return next();
   if (req.path.startsWith('/twin/batch'))  return next();  // auth própria em cada endpoint
   if (req.path.startsWith('/twin/client')) return next(); // client portal — token validado no noc_query
   if (req.path.match(/^\/client\/[a-zA-Z0-9]+\/(timesheets|timesheet)/)) return next(); // client timesheet portal
-  if (req.path.match(/^\/service\/validate\/[a-zA-Z0-9\-]+$/)) return next(); // service validation (public token)
+  if (req.path.match(/^\/service\/validate\/[a-zA-Z0-9\-]+/)) return next(); // service validation (public token)
   // OPS token bypasses JWT entirely (system/bot calls)
   const opsTokGlobal = String(req.headers['x-aios-ops-token'] || '').trim();
   if (OPS_TOKEN && opsTokGlobal === OPS_TOKEN) return next();
@@ -103,8 +108,12 @@ app.use('/api', (req, res, next) => {
 });
 
 // --- requireRole middleware ---
-// RBAC: admin > supervisor > operator/factory > finance > viewer > show > cliente
-const ROLE_LEVEL = { admin:100, supervisor:80, operator:60, factory:60, finance:50, viewer:30, worker:25, show:20, cliente:10 };
+// RBAC: admin > supervisor > operator/factory > finance > viewer > show > cliente/client_*
+const ROLE_LEVEL = {
+  admin:100, supervisor:80, operator:60, factory:60, finance:50, viewer:30,
+  worker:25, show:20, cliente:10,
+  client_manager:45, client_accounting:40,
+};
 function requireRole(...roles) {
   return (req, res, next) => {
     // OPS token bypasses role check (system/bot calls)
@@ -119,6 +128,20 @@ function requireRole(...roles) {
     if (userLevel >= minLevel) return next();
     return res.status(403).json({ ok: false, error: `role insuficiente. Requer: ${roles.join(' | ')}` });
   };
+}
+
+// --- requireClientAccess: role ≥ client_accounting AND client_id set (or admin) ---
+function requireClientAccess(req, res, next) {
+  const opsTok = String(req.headers['x-aios-ops-token'] || '').trim();
+  if (OPS_TOKEN && opsTok === OPS_TOKEN) return next();
+  if (!req.user) return res.status(401).json({ ok: false, error: 'unauthorized' });
+  const lvl = ROLE_LEVEL[req.user.role] || 0;
+  if (lvl >= 80) return next(); // admin/supervisor always pass
+  if (lvl < ROLE_LEVEL['client_accounting'])
+    return res.status(403).json({ ok: false, error: 'acesso negado' });
+  if (!req.user.client_id)
+    return res.status(403).json({ ok: false, error: 'utilizador sem cliente associado' });
+  next();
 }
 
 // --- Auth endpoints ---
@@ -143,10 +166,11 @@ app.get('/api/users', requireRole('admin'), (req, res) => {
 
 app.post('/api/users/create', requireRole('admin'), (req, res) => {
   try {
-    const { username, password, role } = req.body || {};
+    const { username, password, role, client_id } = req.body || {};
     if (!username || !password) return res.status(400).json({ ok: false, error: 'username e password obrigatórios' });
-    const r = role ? ` ${JSON.stringify(role)}` : '';
-    const out = execSync(`python3 /home/jdl/ai-os/bin/auth.py create ${JSON.stringify(username)} ${JSON.stringify(password)}${r}`, { timeout: 8000 });
+    const r   = role      ? ` ${JSON.stringify(role)}` : '';
+    const cid = client_id ? ` --client-id ${parseInt(client_id,10)}` : '';
+    const out = execSync(`python3 /home/jdl/ai-os/bin/auth.py create ${JSON.stringify(username)} ${JSON.stringify(password)}${r}${cid}`, { timeout: 8000 });
     res.json(JSON.parse(out.toString()));
   } catch(e) { res.json({ ok: false, error: String(e) }); }
 });
@@ -420,6 +444,9 @@ app.get('/tenders', (req, res) => res.sendFile(__dirname + '/tenders.html'));
 app.get('/control', (req, res) => res.sendFile(__dirname + '/control.html'));
 app.get('/worker',  (req, res) => res.sendFile(__dirname + '/worker.html'));
 app.get('/finance', (req, res) => res.sendFile(__dirname + '/finance.html'));
+app.get('/seguros', (req, res) => res.sendFile(__dirname + '/joao.html'));
+app.get('/quick',   (req, res) => res.sendFile(__dirname + '/quick.html'));
+app.get('/capture', (req, res) => res.sendFile(__dirname + '/quick.html'));
 app.get('/login',   (req, res) => res.sendFile(__dirname + '/login.html'));
 
 // Serve cliente.html (portal cliente público por token) — legado
@@ -631,8 +658,25 @@ app.get('/api/docs/requests', requireRole('viewer'), (req, res) => {
 
 // ── Vehicles ─────────────────────────────────────────────────────────────────
 app.get('/api/vehicles', requireRole('viewer'), (req, res) => {
-  const limit = parseInt(req.query.limit, 10) || 20;
-  res.json(nocExec(`vehicle_list ${limit}`));
+  try {
+    const { Client } = require('pg');
+    const client = new Client({ host:'127.0.0.1', database:'aios', user:'aios_user', password:'jdl' });
+    client.connect();
+    client.query(`
+      SELECT id, matricula, marca, modelo, ano, cor, estado, owner_type,
+             combustivel, km_atual, notes,
+             inspecao_data, inspecao_proxima, iuc_data, iuc_valor,
+             seguro_apolice, seguro_validade,
+             (inspecao_proxima - CURRENT_DATE)::int AS dias_inspecao,
+             (iuc_data         - CURRENT_DATE)::int AS dias_iuc,
+             (seguro_validade  - CURRENT_DATE)::int AS dias_seguro
+      FROM public.vehicles WHERE estado != 'inativo' ORDER BY matricula
+    `, (err, r) => {
+      client.end();
+      if (err) return res.status(500).json({ ok: false, error: err.message });
+      res.json({ ok: true, vehicles: r.rows });
+    });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message||e) }); }
 });
 
 app.get('/api/vehicles/:id', requireRole('viewer'), (req, res) => {
@@ -925,7 +969,57 @@ app.get('/api/timesheets/all', requireRole(...FINANCE_ROLES), (req, res) => {
 app.post('/api/timesheets/:id/approve', requireRole('supervisor', 'admin', 'finance'), (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
-  res.json(nocExec(`timesheet_approve ${id}`));
+  const result = nocExec(`timesheet_approve ${id}`);
+  if (result.ok) {
+    // Fire-and-forget: criar rascunho mock sem bloquear resposta
+    require('child_process').exec(
+      `python3 /home/jdl/ai-os/bin/invoice_mock.py draft_ts ${id}`,
+      (err, stdout) => { if (err) console.error('[mock draft]', err.message?.slice(0,100)); }
+    );
+  }
+  res.json(result);
+});
+
+// Manual entry + promote
+app.post('/api/service/manual', requireRole('supervisor', 'admin', 'finance'), (req, res) => {
+  try {
+    const { person_id, log_date, start_time, end_time, event_name, notes, car_used, client_id } = req.body || {};
+    if (!person_id || !log_date || !start_time || !end_time)
+      return res.status(400).json({ ok: false, error: 'person_id, log_date, start_time, end_time obrigatorios' });
+    const args = [
+      String(parseInt(person_id, 10)), String(log_date),
+      String(start_time), String(end_time),
+    ];
+    if (event_name) args.push('--event', String(event_name).slice(0, 100));
+    if (notes)      args.push('--notes', String(notes).slice(0, 300));
+    if (car_used)   args.push('--car');
+    if (client_id)  args.push('--client-id', String(parseInt(client_id, 10)));
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('python3', ['/home/jdl/ai-os/bin/service_billing.py', 'manual', ...args],
+      { timeout: 10000 }).toString();
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message || e).slice(0, 300) }); }
+});
+
+app.post('/api/timesheets/:id/promote', requireRole('supervisor', 'admin', 'finance'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ ok: false, error: 'id invalido' });
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('python3', ['/home/jdl/ai-os/bin/service_billing.py', 'promote', String(id)],
+      { timeout: 10000 }).toString();
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message || e).slice(0, 300) }); }
+});
+
+app.get('/api/service/persons', requireRole('viewer'), (req, res) => {
+  try {
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('python3', ['-c',
+      `import psycopg2,json; conn=psycopg2.connect("dbname=aios user=aios_user password=jdl host=127.0.0.1"); cur=conn.cursor(); cur.execute("SELECT id,name FROM public.persons WHERE status IS DISTINCT FROM 'inactive' ORDER BY name"); print(json.dumps([{"id":r[0],"name":r[1]} for r in cur.fetchall()]))`
+    ], { timeout: 5000 }).toString();
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
 });
 
 // ── finance obligations ────────────────────────────────────────────────────────
@@ -1148,8 +1242,10 @@ app.get('/api/ideas', requireRole(...JOAO_ROLES), (req, res) => {
 app.post('/api/ideas', requireRole(...JOAO_ROLES), (req, res) => {
   const title   = String(req.body?.title   || '').trim();
   const message = String(req.body?.message || '').trim();
+  const source  = String(req.body?.source  || 'manual').trim();
   if (!title) return res.status(400).json({ ok: false, error: 'title obrigatório' });
-  const args = [JSON.stringify(title), ...(message ? [JSON.stringify(message)] : [])];
+  const msgArg = message ? JSON.stringify(message) : '""';
+  const args = [JSON.stringify(title), msgArg, JSON.stringify(source)];
   res.json(nocExec(`idea_create ${args.join(' ')}`));
 });
 
@@ -1278,7 +1374,10 @@ app.get('/api/control/overview', (req, res) => {
     const agentStatus    = nocExec('agent_status');
     const docSummary     = nocExec('doc_summary');
     const svcStats       = nocExec('service_stats');
+    const svcActive      = nocExec('whatsapp_active');
     const systemAutonomy = nocExec('system_autonomy');
+    const insStats       = nocExec('insurance_stats');
+    const insAlerts      = nocExec('insurance_alerts 5');
 
     const arr = v => Array.isArray(v) ? v : [];
     res.json({
@@ -1300,7 +1399,10 @@ app.get('/api/control/overview', (req, res) => {
       agent_status:    arr(agentStatus),
       doc_summary:     docSummary,
       service_stats:   svcStats,
+      whatsapp_active: arr(svcActive),
       system_autonomy: systemAutonomy,
+      insurance_stats:  insStats,
+      insurance_alerts: arr(insAlerts),
       generated_at:  new Date().toISOString(),
     });
   } catch(e) {
@@ -1370,7 +1472,7 @@ app.get('/validar/:token', (req, res) => {
 app.get('/api/service/validate/:token', (req, res) => {
   try {
     const token = req.params.token.replace(/[^a-zA-Z0-9\-]/g, '');
-    const out   = execSync(`python3 /home/jdl/ai-os/bin/service_billing.py get ${token}`,
+    const out   = execSync(`python3 /home/jdl/ai-os/bin/service_billing.py get_with_expenses ${token}`,
                            { timeout: 10000, encoding: 'utf8' });
     const d     = JSON.parse(out);
     if (!d || !d.id) return res.status(404).json({ error: 'not found' });
@@ -1378,20 +1480,155 @@ app.get('/api/service/validate/:token', (req, res) => {
   } catch(e) { res.status(500).json({ error: String(e) }); }
 });
 
-// Public API: validate (approve/reject)
+// Public API: validate (approve/reject) — supports adjusted_days, extras, expense_decisions
 app.post('/api/service/validate/:token', express.json(), (req, res) => {
   try {
     const token    = req.params.token.replace(/[^a-zA-Z0-9\-]/g, '');
     const approved = req.body?.approved ? true : false;
-    const note     = String(req.body?.note || '').slice(0, 500).replace(/'/g, "'\\''");
+    const note     = String(req.body?.note || '').slice(0, 500);
     const flag     = approved ? '--approve' : '--reject';
-    const out      = execSync(
-      `python3 /home/jdl/ai-os/bin/service_billing.py validate ${token} ${flag} --note '${note}'`,
-      { timeout: 20000, encoding: 'utf8' }
-    );
+    const ip       = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || '';
+    const args     = [
+      'python3', '/home/jdl/ai-os/bin/service_billing.py',
+      'validate', token, flag,
+      '--note', note, '--ip', ip,
+    ];
+    if (req.body?.adjusted_days) args.push('--adjusted-days', String(parseFloat(req.body.adjusted_days)));
+    if (req.body?.extras)             args.push('--extras', JSON.stringify(req.body.extras));
+    if (req.body?.expense_decisions)  args.push('--expense-decisions', JSON.stringify(req.body.expense_decisions));
+    const { execFileSync } = require('child_process');
+    const out = execFileSync(args[0], args.slice(1), { timeout: 20000, encoding: 'utf8' });
     res.json(JSON.parse(out));
   } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
 });
+
+// Public: mark expense reimbursed via token
+app.post('/api/service/validate/:token/expense/:eid/reimburse', express.json(), (req, res) => {
+  try {
+    const token = req.params.token.replace(/[^a-zA-Z0-9\-]/g, '');
+    const eid   = parseInt(req.params.eid, 10);
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('python3',
+      ['/home/jdl/ai-os/bin/service_billing.py', 'reimburse_expense', token, String(eid)],
+      { timeout: 10000, encoding: 'utf8' });
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+// Public: serve expense photo via validation token
+app.get('/api/service/validate/:token/expense/:eid/photo', (req, res) => {
+  try {
+    const token = req.params.token.replace(/[^a-zA-Z0-9\-]/g, '');
+    const eid   = parseInt(req.params.eid, 10);
+    // Verify token owns the expense
+    const out = execSync(
+      `python3 /home/jdl/ai-os/bin/service_billing.py get_with_expenses ${token}`,
+      { timeout: 8000, encoding: 'utf8' });
+    const d = JSON.parse(out);
+    if (!d?.id) return res.status(404).json({ error: 'not found' });
+    const exp = (d.expenses||[]).find(e => e.id === eid);
+    if (!exp || !exp.receipt_image_url) return res.status(404).json({ error: 'sem foto' });
+    const photoPath = path.join('/home/jdl/ai-os/runtime/expenses', exp.receipt_image_url);
+    if (!fs.existsSync(photoPath)) return res.status(404).json({ error: 'ficheiro não encontrado' });
+    res.sendFile(photoPath);
+  } catch(e) { res.status(500).json({ error: String(e) }); }
+});
+
+// Authenticated: list expenses for a timesheet by ID
+app.get('/api/service/timesheets/:id/expenses', requireRole('operator'), (req, res) => {
+  try {
+    const ts_id = parseInt(req.params.id, 10);
+    const out = execSync(`python3 -c "
+import psycopg2,json,os
+from psycopg2.extras import RealDictCursor
+conn=psycopg2.connect(os.environ.get('DATABASE_URL','dbname=aios user=aios_user password=jdl host=127.0.0.1'),cursor_factory=RealDictCursor)
+cur=conn.cursor()
+cur.execute('SELECT id,worker_name,worker_phone_mbway,amount,expense_type,notes,receipt_name,receipt_nif_name,receipt_image_url,status,created_at FROM public.timesheet_expenses WHERE timesheet_id=%s ORDER BY id',(${ts_id},))
+rows=[dict(r) for r in cur.fetchall()]
+for r in rows:
+    for k,v in r.items():
+        if hasattr(v,'isoformat'): r[k]=v.isoformat()
+conn.close()
+print(json.dumps(rows))
+"`, { timeout: 8000, encoding: 'utf8' });
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+// Authenticated: validate endpoint also used by modal for expense fetch (via validate token route)
+// Additional: get expenses by validate token (already handled by GET /api/service/validate/:token)
+app.get('/api/service/validate/:token/expenses', (req, res) => {
+  try {
+    const token = req.params.token.replace(/[^a-zA-Z0-9\-]/g, '');
+    const out = execSync(`python3 /home/jdl/ai-os/bin/service_billing.py get_with_expenses ${token}`,
+                         { timeout: 8000, encoding: 'utf8' });
+    const d = JSON.parse(out);
+    res.json(d.expenses || []);
+  } catch(e) { res.status(500).json({ error: String(e) }); }
+});
+
+// Authenticated: add expense to a timesheet
+app.post('/api/service/timesheets/:id/expenses', requireRole('operator'), express.json(), (req, res) => {
+  try {
+    const ts_id = parseInt(req.params.id, 10);
+    const { worker_id, worker_name, worker_phone_mbway, amount, expense_type,
+            notes, receipt_name, receipt_nif_name, client_id } = req.body || {};
+    if (!worker_id || !worker_name || !worker_phone_mbway || !amount)
+      return res.status(400).json({ ok: false, error: 'worker_id, worker_name, phone_mbway e amount obrigatórios' });
+    const { execFileSync } = require('child_process');
+    const args = [
+      '/home/jdl/ai-os/bin/service_billing.py', 'add_expense', String(ts_id),
+      '--worker-id',   worker_id,
+      '--worker-name', worker_name,
+      '--phone-mbway', worker_phone_mbway,
+      '--amount',      String(parseFloat(amount)),
+      '--type',        expense_type || 'other',
+    ];
+    if (notes)            args.push('--notes',        notes);
+    if (receipt_name)     args.push('--receipt-name', receipt_name);
+    if (receipt_nif_name) args.push('--nif-name',     receipt_nif_name);
+    if (client_id)        args.push('--client-id',    String(client_id));
+    const out = execFileSync('python3', args, { timeout: 10000, encoding: 'utf8' });
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+// Authenticated: upload photo for expense
+const _expenseDir = path.join('/home/jdl/ai-os/runtime/expenses');
+if (!fs.existsSync(_expenseDir)) fs.mkdirSync(_expenseDir, { recursive: true });
+
+const multer = (() => { try { return require('multer'); } catch(e) { return null; } })();
+const _expUpload = multer ? multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, _expenseDir),
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname) || '.jpg';
+      cb(null, `${req.params.eid}_${Date.now()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, /image\//i.test(file.mimetype)),
+}) : null;
+
+app.post('/api/service/expenses/:eid/photo', requireRole('operator'),
+  ...[_expUpload ? _expUpload.single('photo') : (req, res, next) => { res.status(501).json({error:'multer unavailable'}); }],
+  (req, res) => {
+    if (!req.file) return res.status(400).json({ ok: false, error: 'ficheiro não enviado ou formato inválido' });
+    const eid = parseInt(req.params.eid, 10);
+    const relPath = req.file.filename;
+    // Update receipt_image_url in DB
+    try {
+      execSync(
+        `python3 -c "
+import psycopg2, os
+conn = psycopg2.connect(os.environ.get('DATABASE_URL','dbname=aios user=aios_user password=jdl host=127.0.0.1'))
+conn.cursor().execute('UPDATE public.timesheet_expenses SET receipt_image_url=%s, updated_at=now() WHERE id=%s', ('${relPath}', ${eid}))
+conn.commit(); conn.close()"`,
+        { timeout: 5000 });
+      res.json({ ok: true, expense_id: eid, file: relPath });
+    } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+  }
+);
 
 // Authenticated: list logs + stats
 app.get('/api/service/logs', requireRole('viewer'), (req, res) => {
@@ -1409,8 +1646,39 @@ app.get('/api/service/stats', requireRole('viewer'), (req, res) => {
   res.json(nocExec('service_stats'));
 });
 
+app.get('/api/service/active', requireRole('viewer'), (req, res) => {
+  res.json(nocExec('whatsapp_active'));
+});
+
+app.get('/api/service/calendar', requireRole('viewer'), (req, res) => {
+  const worker = req.query.worker || '';
+  const months = req.query.months || '3';
+  res.json(nocExec(`worker_calendar ${worker} ${months}`.trim()));
+});
+
 app.get('/api/system/autonomy', requireRole('viewer'), (req, res) => res.json(nocExec('system_autonomy')));
 app.get('/api/jobs/by-role', requireRole('viewer'), (req, res) => res.json(nocExec('jobs_by_role')));
+// ── Excel Export ──────────────────────────────────────────────────────────────
+const EXPORT_TYPES = new Set(['insurance', 'ideas', 'decisions']);
+const EXPORT_NAMES = { insurance: 'seguros', ideas: 'ideias', decisions: 'decisoes' };
+
+app.get('/api/export/excel', requireRole('viewer'), (req, res) => {
+  const type = String(req.query.type || '').toLowerCase();
+  if (!EXPORT_TYPES.has(type))
+    return res.status(400).json({ ok: false, error: `type inválido. Disponíveis: ${[...EXPORT_TYPES].join(', ')}` });
+  try {
+    const { execFileSync } = require('child_process');
+    const data = execFileSync('python3', ['/home/jdl/ai-os/bin/export_excel.py', type], { timeout: 20000 });
+    const ts   = new Date().toISOString().slice(0, 10);
+    const name = `${EXPORT_NAMES[type]}_${ts}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    res.send(data);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e.message || e).slice(0, 200) });
+  }
+});
+
 app.get('/api/council/reviews', requireRole('viewer'), (req, res) => {
   const limit = parseInt(req.query.limit || '10');
   res.json(nocExec(`council_list ${limit}`));
@@ -1426,6 +1694,368 @@ app.post('/api/service/submit', requireRole('operator'), express.json(), (req, r
     const out     = execSync(
       `python3 /home/jdl/ai-os/bin/service_billing.py submit ${person_id} ${log_date} ${hours} '${safeLoc}'${carFlag}`,
       { timeout: 15000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+// ── Commercial Quotes ─────────────────────────────────────────────────────────
+
+app.get('/comercial', (req, res) => res.sendFile(path.join(__dirname, 'comercial.html')));
+
+app.get('/api/commercial/requests', requireRole('viewer'), (req, res) => {
+  const status = req.query.status || '';
+  const limit  = parseInt(req.query.limit) || 20;
+  res.json(nocExec(`commercial_requests ${status} ${limit}`.trim()));
+});
+
+app.get('/api/commercial/requests/:id', requireRole('viewer'), (req, res) => {
+  const id = parseInt(req.params.id) || 0;
+  res.json(nocExec(`commercial_request_get ${id}`));
+});
+
+app.post('/api/commercial/requests', requireRole('operator'), (req, res) => {
+  try {
+    const { raw_request, source } = req.body || {};
+    if (!raw_request) return res.status(400).json({ ok: false, error: 'raw_request obrigatório' });
+    const safeRaw = String(raw_request).slice(0, 4000).replace(/'/g, "'\\''");
+    const safeSrc = ['manual','email','whatsapp','form'].includes(source) ? source : 'manual';
+    const out = execSync(
+      `python3 /home/jdl/ai-os/bin/commercial_engine.py submit '${safeRaw}' --source ${safeSrc}`,
+      { timeout: 15000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.post('/api/commercial/requests/:id/quote', requireRole('operator'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id) || 0;
+    const out = execSync(
+      `python3 /home/jdl/ai-os/bin/commercial_engine.py quote ${id}`,
+      { timeout: 30000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.get('/api/commercial/quotes/:id', requireRole('viewer'), (req, res) => {
+  const id = parseInt(req.params.id) || 0;
+  res.json(nocExec(`commercial_quote_get ${id}`));
+});
+
+app.post('/api/commercial/quotes/:id/approve', requireRole('supervisor', 'admin'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id) || 0;
+    const by = String(req.body?.approved_by || req.user?.username || 'admin').replace(/[^a-zA-Z0-9_ ]/g, '').slice(0, 80);
+    const out = execSync(
+      `python3 /home/jdl/ai-os/bin/commercial_engine.py approve ${id} --by ${JSON.stringify(by)}`,
+      { timeout: 10000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.put('/api/commercial/quotes/:id', requireRole('operator'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id) || 0;
+    const { line_items, assumptions, exclusions } = req.body || {};
+    const payload = JSON.stringify({ line_items, assumptions, exclusions });
+    const safePayload = payload.replace(/'/g, "'\\''");
+    const out = execSync(
+      `python3 /home/jdl/ai-os/bin/commercial_engine.py update_quote ${id} '${safePayload}'`,
+      { timeout: 10000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.post('/api/commercial/quotes/:id/send', requireRole('supervisor', 'admin'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id) || 0;
+    const out = execSync(
+      `python3 /home/jdl/ai-os/bin/commercial_engine.py send ${id}`,
+      { timeout: 30000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+app.get('/api/commercial/quotes/:id/pdf', requireRole('viewer'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id) || 0;
+    const out = execSync(
+      `python3 /home/jdl/ai-os/bin/commercial_engine.py pdf ${id}`,
+      { timeout: 30000, encoding: 'utf8' }
+    );
+    const result = JSON.parse(out);
+    if (!result.ok || !result.pdf_path) return res.status(404).json(result);
+    res.download(result.pdf_path);
+  } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+app.get('/api/commercial/stats', requireRole('viewer'), (req, res) => {
+  res.json(nocExec('commercial_stats'));
+});
+
+// ── Insurance Module ──────────────────────────────────────────────────────────
+
+app.get('/api/insurance/policies', requireRole('viewer'), (req, res) => {
+  const status = (req.query.status || '').replace(/[^a-z_]/gi, '');
+  const type   = (req.query.type   || '').replace(/[^a-z_]/gi, '');
+  const limit  = Math.max(1, Math.min(200, parseInt(req.query.limit) || 50));
+  res.json(nocExec(`insurance_policies ${status} ${type} ${limit}`.trim()));
+});
+
+app.get('/api/insurance/policies/:id', requireRole('viewer'), (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ error: 'id inválido' });
+  res.json(nocExec(`insurance_policy_get ${id}`));
+});
+
+app.post('/api/insurance/policies', requireRole('operator'), (req, res) => {
+  try {
+    const b = req.body || {};
+    const args = [
+      '--insurer',        JSON.stringify(String(b.insurer_name || b.insurer || '')),
+      '--entity-type',    JSON.stringify(String(b.entity_type  || 'company')),
+      '--entity-ref',     JSON.stringify(String(b.entity_ref   || '')),
+      '--policy-number',  JSON.stringify(String(b.policy_number || '')),
+      '--category',       JSON.stringify(String(b.category     || '')),
+      '--status',         JSON.stringify(String(b.status       || 'active')),
+    ];
+    if (b.start_date)     args.push('--start',   JSON.stringify(String(b.start_date)));
+    if (b.end_date)       args.push('--end',     JSON.stringify(String(b.end_date)));
+    if (b.renewal_date)   args.push('--renewal', JSON.stringify(String(b.renewal_date)));
+    if (b.premium_amount) args.push('--premium', parseFloat(b.premium_amount));
+    if (b.notes)          args.push('--notes',   JSON.stringify(String(b.notes).slice(0,500)));
+    const out = require('child_process').execSync(
+      `python3 /home/jdl/ai-os/bin/insurance_engine.py add ${args.join(' ')}`,
+      { timeout: 10000, encoding: 'utf8' }
+    );
+    const result = JSON.parse(out);
+    // Gerar alertas automáticos (fire-and-forget)
+    require('child_process').exec('python3 /home/jdl/ai-os/bin/insurance_engine.py generate-alerts');
+    res.json(result);
+  } catch(e) { res.status(500).json({ error: String(e.message || e).slice(0,300) }); }
+});
+
+app.put('/api/insurance/policies/:id', requireRole('operator'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    const b = req.body || {};
+    const args = [id];
+    if (b.insurer_name)   args.push('--insurer',  JSON.stringify(String(b.insurer_name)));
+    if (b.end_date)       args.push('--end',      JSON.stringify(String(b.end_date)));
+    if (b.renewal_date)   args.push('--renewal',  JSON.stringify(String(b.renewal_date)));
+    if (b.status)         args.push('--status',   JSON.stringify(String(b.status)));
+    if (b.notes)          args.push('--notes',    JSON.stringify(String(b.notes).slice(0,500)));
+    if (b.premium_amount) args.push('--premium',  parseFloat(b.premium_amount));
+    const out = require('child_process').execSync(
+      `python3 /home/jdl/ai-os/bin/insurance_engine.py update ${args.join(' ')}`,
+      { timeout: 10000, encoding: 'utf8' }
+    );
+    const result = JSON.parse(out);
+    require('child_process').exec('python3 /home/jdl/ai-os/bin/insurance_engine.py generate-alerts');
+    res.json(result);
+  } catch(e) { res.status(500).json({ error: String(e.message || e).slice(0,300) }); }
+});
+
+app.get('/api/insurance/alerts', requireRole('viewer'), (req, res) => {
+  const limit = Math.max(1, Math.min(200, parseInt(req.query.limit) || 50));
+  res.json(nocExec(`insurance_alerts ${limit}`));
+});
+
+app.post('/api/insurance/alerts/:id/resolve', requireRole('operator'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    const out = require('child_process').execSync(
+      `python3 -c "
+import sys; sys.path.insert(0,'/home/jdl/ai-os/bin')
+from insurance_engine import _conn, resolve_alert
+e,t = _conn()
+import json; print(json.dumps(resolve_alert(e,t,${id})))
+"`, { timeout: 8000, encoding: 'utf8' });
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ error: String(e.message || e).slice(0,300) }); }
+});
+
+app.get('/api/insurance/stats', requireRole('viewer'), (req, res) => {
+  res.json(nocExec('insurance_stats'));
+});
+
+app.post('/api/insurance/generate-alerts', requireRole('operator'), (req, res) => {
+  try {
+    const out = require('child_process').execSync(
+      'python3 /home/jdl/ai-os/bin/insurance_engine.py generate-alerts',
+      { timeout: 15000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ error: String(e.message || e).slice(0,300) }); }
+});
+
+app.post('/api/insurance/ingest', requireRole('operator'), (req, res) => {
+  try {
+    const { file_base64, filename } = req.body || {};
+    if (!file_base64 || !filename) return res.status(400).json({ error: 'file_base64 e filename obrigatórios' });
+    const safeFilename = String(filename).replace(/[^a-zA-Z0-9_.\-]/g, '_').slice(0, 100);
+    const dest = `/home/jdl/ai-os/runtime/insurance/${safeFilename}`;
+    require('fs').writeFileSync(dest, Buffer.from(file_base64, 'base64'));
+    const out = require('child_process').execSync(
+      `python3 /home/jdl/ai-os/bin/insurance_engine.py ingest ${JSON.stringify(dest)}`,
+      { timeout: 30000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ error: String(e.message || e).slice(0,300) }); }
+});
+
+app.post('/api/insurance/policies/:id/doc', requireRole('operator'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    const b = req.body || {};
+    const docType = (b.doc_type || 'policy').replace(/[^a-z_]/gi, '');
+    const amount  = b.amount ? parseFloat(b.amount) : '';
+    const out = require('child_process').execSync(
+      `python3 /home/jdl/ai-os/bin/insurance_engine.py add-doc ${id} --type ${docType}${amount ? ' --amount '+amount : ''}`,
+      { timeout: 10000, encoding: 'utf8' }
+    );
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ error: String(e.message || e).slice(0,300) }); }
+});
+
+// Serve PDF de documento de apólice
+app.get('/api/insurance/docs/:docId/pdf', requireRole('viewer'), (req, res) => {
+  try {
+    const docId = parseInt(req.params.docId);
+    if (!docId || isNaN(docId)) return res.status(400).json({ error: 'id inválido' });
+    const out = execSync(
+      `python3 /home/jdl/ai-os/bin/noc_query.py insurance_doc_path ${docId}`,
+      { timeout: 5000, encoding: 'utf8' }).trim();
+    if (!out || !fs.existsSync(out)) return res.status(404).json({ error: 'ficheiro não encontrado' });
+    res.sendFile(path.resolve(out));
+  } catch(e) { res.status(500).json({ error: String(e.message || e).slice(0,200) }); }
+});
+
+// ── Mock Invoice ───────────────────────────────────────────────────────────────
+
+app.post('/api/finance/invoice/mock', requireRole(...FINANCE_ROLES), (req, res) => {
+  try {
+    const { client, description, net, vat_rate, items, email_to } = req.body || {};
+    if (!client || !net) return res.status(400).json({ ok: false, error: 'client e net obrigatorios' });
+    const args = JSON.stringify({ client, description: description || '', net: parseFloat(net),
+      vat_rate: parseFloat(vat_rate || 23), items: items || [], email_to: email_to || '' });
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('python3', [
+      '/home/jdl/ai-os/bin/invoice_mock.py', 'generate_api', args
+    ], { timeout: 15000 }).toString();
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message || e).slice(0, 300) }); }
+});
+
+app.post('/api/finance/invoice/mock/draft_ts/:tsId', requireRole(...FINANCE_ROLES), (req, res) => {
+  try {
+    const tsId = parseInt(req.params.tsId, 10);
+    if (!tsId) return res.status(400).json({ ok: false, error: 'tsId invalido' });
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('python3',
+      ['/home/jdl/ai-os/bin/invoice_mock.py', 'draft_ts', String(tsId)],
+      { timeout: 15000 }).toString();
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message || e).slice(0, 300) }); }
+});
+
+app.get('/api/finance/invoice/mock/drafts', requireRole(...FINANCE_ROLES), (req, res) => {
+  try {
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('python3', ['/home/jdl/ai-os/bin/invoice_mock.py', 'drafts_api'],
+      { timeout: 10000 }).toString();
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message || e).slice(0, 200) }); }
+});
+
+app.post('/api/finance/invoice/mock/:id/send', requireRole(...FINANCE_ROLES), (req, res) => {
+  try {
+    const id    = parseInt(req.params.id, 10);
+    const email = String(req.body?.email || '').trim();
+    if (!id || !email) return res.status(400).json({ ok: false, error: 'id e email obrigatorios' });
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('python3',
+      ['/home/jdl/ai-os/bin/invoice_mock.py', 'send_draft_api', String(id), email],
+      { timeout: 20000 }).toString();
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message || e).slice(0, 300) }); }
+});
+
+app.get('/api/finance/invoice/mock/list', requireRole(...FINANCE_ROLES), (req, res) => {
+  try {
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('python3', ['/home/jdl/ai-os/bin/invoice_mock.py', 'list_api'],
+      { timeout: 10000 }).toString();
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message || e).slice(0, 200) }); }
+});
+
+app.get('/api/finance/invoice/mock/:id/pdf', requireRole(...FINANCE_ROLES), (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('python3', ['/home/jdl/ai-os/bin/invoice_mock.py', 'get_pdf', String(id)],
+      { timeout: 10000 }).toString();
+    const r = JSON.parse(out);
+    if (!r.ok || !r.pdf_path) return res.status(404).json({ ok: false, error: 'PDF nao encontrado' });
+    res.sendFile(r.pdf_path);
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message || e).slice(0, 200) }); }
+});
+
+// ── Viaturas ──────────────────────────────────────────────────────────────────
+
+app.put('/api/vehicles/:id', requireRole('operator'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const allowed = ['inspecao_data','inspecao_proxima','iuc_data','iuc_valor',
+                     'seguro_apolice','seguro_validade','km_atual','notes','estado'];
+    const sets = []; const vals = [];
+    for (const k of allowed) {
+      if (req.body[k] !== undefined) { sets.push(`${k}=$${sets.length+1}`); vals.push(req.body[k] || null); }
+    }
+    if (!sets.length) return res.status(400).json({ ok: false, error: 'Nada para actualizar' });
+    vals.push(id);
+    const { Client } = require('pg');
+    const client = new Client({ host:'127.0.0.1', database:'aios', user:'aios_user', password:'jdl' });
+    client.connect();
+    client.query(
+      `UPDATE public.vehicles SET ${sets.join(',')}, updated_at=NOW() WHERE id=$${vals.length} RETURNING id`,
+      vals, (err, r) => {
+        client.end();
+        if (err) return res.status(500).json({ ok: false, error: err.message });
+        res.json({ ok: true, id: r.rows[0]?.id });
+      });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message||e) }); }
+});
+
+// ── System Config ─────────────────────────────────────────────────────────────
+
+app.get('/api/sysconfig', requireRole('admin'), (req, res) => {
+  const cat = req.query.category || '';
+  res.json(nocExec(`sysconfig_list ${cat}`.trim()));
+});
+
+app.get('/api/sysconfig/:key', requireRole('admin'), (req, res) => {
+  res.json(nocExec(`sysconfig_get ${req.params.key}`));
+});
+
+app.post('/api/sysconfig/:key', requireRole('admin'), (req, res) => {
+  try {
+    const key   = req.params.key.replace(/[^a-z0-9_]/gi, '');
+    const value = String(req.body?.value ?? '').slice(0, 2000);
+    const by    = String(req.user?.username || 'admin').replace(/[^a-zA-Z0-9_ ]/g, '').slice(0, 80);
+    const safeV = value.replace(/'/g, "'\\''");
+    const out   = execSync(
+      `python3 /home/jdl/ai-os/bin/noc_query.py sysconfig_set ${key} '${safeV}' '${by}'`,
+      { timeout: 5000, encoding: 'utf8' }
     );
     res.json(JSON.parse(out));
   } catch(e) { res.json({ ok: false, error: String(e) }); }
@@ -1483,16 +2113,26 @@ app.get('/api/council', requireRole('viewer'), (req, res) => {
 
 app.post('/api/council/analyze', requireRole('operator'), (req, res) => {
   try {
-    const { topic, kind } = req.body || {};
+    const { topic, kind, context } = req.body || {};
     if (!topic) return res.status(400).json({ ok: false, error: 'topic required' });
-    const safeTopic = String(topic).replace(/'/g, "'\\''").slice(0, 500);
-    const safeKind  = ['idea','decision','project','architecture','problem','general'].includes(kind) ? kind : 'general';
+    const safeTopic   = String(topic).replace(/'/g, "'\\''").slice(0, 500);
+    const safeKind    = ['idea','decision','project','architecture','problem','general'].includes(kind) ? kind : 'general';
+    const safeContext = context ? ` --context '${String(context).replace(/'/g,"'\\''").slice(0,800)}'` : '';
     const out = execSync(
-      `python3 /home/jdl/ai-os/bin/council.py analyze '${safeTopic}' --kind ${safeKind}`,
+      `python3 /home/jdl/ai-os/bin/council.py analyze '${safeTopic}' --kind ${safeKind}${safeContext}`,
       { timeout: 120000, encoding: 'utf8' }
     );
     res.json(JSON.parse(out));
-  } catch(e) { res.json({ ok: false, error: String(e) }); }
+  } catch(e) { res.json({ ok: false, error: String(e.stderr || e.message || e).slice(0,400) }); }
+});
+
+app.get('/api/council/:id', requireRole('viewer'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    const out = execSync(`python3 /home/jdl/ai-os/bin/council.py get ${id}`, { timeout: 10000, encoding: 'utf8' });
+    res.json(JSON.parse(out));
+  } catch(e) { res.json({ ok: false, error: String(e.message || e).slice(0,300) }); }
 });
 
 // ── Knowledge (Qdrant) ────────────────────────────────────────────────────────
@@ -1568,5 +2208,368 @@ app.get('/api/model-router/credits', requireRole('admin'), (req, res) => {
 
 // Adiciona model-router/state à whitelist pública (dashboard não requer JWT)
 AUTH_EXEMPT.add('/model-router/state');
+
+// ── WhatsApp Ponto (Twilio webhook) ───────────────────────────────────────────
+
+// Inbound: worker envia "inicio"/"fim" via WhatsApp
+app.post('/api/whatsapp/inbound', express.urlencoded({ extended: false }), (req, res) => {
+  const from        = (req.body.From        || '').replace(/^whatsapp:/, '');
+  const body        = (req.body.Body        || '').trim();
+  const lat         = req.body.Latitude     || '';
+  const lon         = req.body.Longitude    || '';
+  const addr        = (req.body.Address     || '').replace(/'/g, "\\'");
+  const profileName = (req.body.ProfileName || '').trim();
+
+  const sid   = req.body.MessageSid || '';
+  const pyArgs = [
+    '/home/jdl/ai-os/bin/whatsapp_handler.py',
+    '--from', from,
+    '--body', body,
+    '--sid',  sid,
+  ];
+  if (lat) pyArgs.push('--lat', lat, '--lon', lon);
+  if (addr) pyArgs.push('--addr', addr);
+  if (profileName) pyArgs.push('--profile-name', profileName);
+
+  let stdout = '', stderr = '';
+  const { spawn } = require('child_process');
+  const p = spawn('python3', pyArgs, {
+    env: { ...process.env },
+    timeout: 12000,
+  });
+  p.stdout.on('data', d => stdout += d);
+  p.stderr.on('data', d => stderr += d);
+  p.on('close', () => {
+    let reply = '';
+    try { reply = JSON.parse(stdout).reply || ''; } catch(e) {
+      console.error('[whatsapp] parse error:', stderr.slice(0, 200));
+    }
+    const safe = reply
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    res.set('Content-Type', 'text/xml');
+    res.send(
+      '<?xml version="1.0" encoding="UTF-8"?><Response>' +
+      (safe ? `<Message>${safe}</Message>` : '') +
+      '</Response>'
+    );
+  });
+});
+
+// Status callback — Twilio envia updates de entrega (delivered, read, failed)
+app.post('/api/whatsapp/status', express.urlencoded({ extended: false }), (req, res) => {
+  const { MessageSid, MessageStatus, To, ErrorCode } = req.body;
+  const fs = require('fs');
+  const logLine = JSON.stringify({
+    ts: new Date().toISOString(),
+    sid: MessageSid, status: MessageStatus, to: To, error: ErrorCode || null,
+  }) + '\n';
+  fs.appendFile('/home/jdl/ai-os/runtime/whatsapp/status.log', logLine, () => {});
+
+  // 63016: free-form fora da janela 24h → fallback email assíncrono
+  if (ErrorCode === '63016' && MessageSid) {
+    const { execFile } = require('child_process');
+    execFile('python3', [
+      '/home/jdl/ai-os/bin/whatsapp_fallback.py',
+      '--sid', MessageSid,
+      '--to', (To || '').replace(/^whatsapp:/, ''),
+    ], { timeout: 15000 }, (err, stdout) => {
+      if (err) console.error('[wa/status] fallback error:', err.message);
+      else if (stdout.trim()) console.log('[wa/status] fallback:', stdout.trim());
+    });
+  }
+
+  res.status(204).end();
+});
+
+// Health check
+app.get('/api/whatsapp/health', (req, res) => {
+  const sid  = String(process.env.TWILIO_ACCOUNT_SID || '');
+  const from = process.env.TWILIO_WHATSAPP_FROM || process.env.TWILIO_WHATSAPP_NUMBER || null;
+  res.json({
+    ok:         true,
+    configured: sid.startsWith('AC') && !!from,
+    mode:       process.env.WHATSAPP_MODE || 'sandbox',
+    from,
+  });
+});
+
+// Últimos inbound WhatsApp (admin)
+app.get('/api/admin/whatsapp/inbound-recent', requireRole('operator'), async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
+    const rows = await _pgQuery(`
+      SELECT id, from_phone, profile_name, body, client_id, watched,
+             received_at
+      FROM public.whatsapp_inbound_log
+      ORDER BY received_at DESC
+      LIMIT $1
+    `, [limit]);
+    res.json({ ok: true, rows });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e.message) });
+  }
+});
+
+// ── Workspace ────────────────────────────────────────────────────────────────
+const WS_PY = '/home/jdl/ai-os/bin/workspace_engine.py';
+const { execFileSync: _execFile } = require('child_process');
+
+function wsExec(args, timeout = 10000) {
+  try {
+    const out = _execFile('python3', [WS_PY, ...args], { timeout, encoding: 'utf8' });
+    return JSON.parse(out);
+  } catch(e) {
+    return { error: (e.stderr || e.message || String(e)).slice(0, 400) };
+  }
+}
+
+app.get('/api/workspace/sessions', requireRole('viewer'), (req, res) => {
+  res.json(wsExec(['list_sessions']));
+});
+
+app.post('/api/workspace/sessions', requireRole('viewer'), (req, res) => {
+  const title = String(req.body.title || 'Nova sessão').slice(0, 200);
+  const agent = String(req.body.agent || 'sonnet');
+  res.json(wsExec(['new_session', title, agent]));
+});
+
+app.get('/api/workspace/sessions/:id', requireRole('viewer'), (req, res) => {
+  res.json(wsExec(['get_session', req.params.id]));
+});
+
+app.delete('/api/workspace/sessions/:id', requireRole('viewer'), (req, res) => {
+  res.json(wsExec(['delete_session', req.params.id]));
+});
+
+app.post('/api/workspace/sessions/:id/chat', requireRole('viewer'), (req, res) => {
+  const message = String(req.body.message || '').trim();
+  const agent   = String(req.body.agent || 'sonnet');
+  if (!message) return res.status(400).json({ error: 'Mensagem vazia' });
+  const result = wsExec(['chat', req.params.id, agent, message], 120000);
+  res.json(result);
+});
+
+// ── Client portal routes (/conta.html) ───────────────────────────────────────
+// Serve /conta as static HTML (requires login with client role)
+app.get('/conta', (req, res) => {
+  res.sendFile(path.join(__dirname, 'conta.html'));
+});
+
+// ── Clients CRUD (admin only) ─────────────────────────────────────────────────
+app.get('/api/clients', requireRole('admin'), (req, res) => {
+  res.json(nocExec('clients_list'));
+});
+
+app.post('/api/clients', requireRole('admin'), (req, res) => {
+  const { name, nif, contact_email, contact_phone, notes } = req.body || {};
+  if (!name) return res.status(400).json({ ok: false, error: 'name obrigatório' });
+  const safe = (s) => String(s || '').replace(/'/g, "''");
+  const out = execSync(
+    `python3 -c "
+import psycopg2, json, os
+dsn = os.environ.get('DATABASE_URL','dbname=aios user=aios_user password=jdl host=127.0.0.1')
+conn = psycopg2.connect(dsn)
+cur = conn.cursor()
+cur.execute('''INSERT INTO public.clients (name,nif,contact_email,contact_phone,notes) VALUES (%s,%s,%s,%s,%s) RETURNING id''',
+  ('${safe(name)}','${safe(nif)}','${safe(contact_email)}','${safe(contact_phone)}','${safe(notes)}'))
+row = cur.fetchone()
+conn.commit()
+conn.close()
+print(json.dumps({'ok':True,'id':row[0]}))
+"`,
+    { timeout: 8000, encoding: 'utf8', env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL || '' } }
+  );
+  try { res.json(JSON.parse(out)); } catch(e) { res.json({ ok: false, error: String(e) }); }
+});
+
+// ── Client dashboard API (/api/client/*) ──────────────────────────────────────
+// All endpoints: requireClientAccess → filters by req.user.client_id (or all if admin)
+
+function _clientId(req) {
+  const lvl = ROLE_LEVEL[req.user?.role] || 0;
+  if (lvl >= 80) return null; // admin: no filter
+  return req.user?.client_id || null;
+}
+
+const _pgClient = (() => {
+  const { Pool } = (() => { try { return require('pg'); } catch(e) { return null; } })() || {};
+  if (!Pool) return null;
+  return new Pool({ connectionString: process.env.DATABASE_URL || 'postgresql://aios_user:jdl@127.0.0.1/aios' });
+})();
+
+async function _pgQuery(sql, params) {
+  if (!_pgClient) throw new Error('pg module not available');
+  const r = await _pgClient.query(sql, params);
+  return r.rows;
+}
+
+// Overview
+app.get('/api/client/overview', requireClientAccess, async (req, res) => {
+  try {
+    const cid = _clientId(req);
+    const filter = cid ? 'AND et.client_id=$1' : '';
+    const p = cid ? [cid] : [];
+    const [active, pending, completed, expenses, monthly] = await Promise.all([
+      _pgQuery(`SELECT COUNT(*) AS n FROM public.event_timesheets et
+                WHERE et.status='submitted' AND et.log_date=CURRENT_DATE ${filter}`, p),
+      _pgQuery(`SELECT COUNT(*) AS n FROM public.event_timesheets et
+                WHERE et.status='submitted' ${filter}`, p),
+      _pgQuery(`SELECT COUNT(*) AS n, COALESCE(SUM(
+                  COALESCE(et.adjusted_invoice_total,et.invoice_total)
+                ),0) AS total
+                FROM public.event_timesheets et
+                WHERE et.status IN ('approved_client','adjusted_client','validated','invoiced_mock') ${filter}`, p),
+      _pgQuery(`SELECT COUNT(*) FILTER (WHERE te.status='pending_client_review') AS pending,
+                       COUNT(*) FILTER (WHERE te.status='approved_client') AS approved,
+                       COALESCE(SUM(te.amount) FILTER (WHERE te.status='approved_client'),0) AS approved_amount
+                FROM public.timesheet_expenses te
+                JOIN public.event_timesheets et ON et.id=te.timesheet_id
+                WHERE 1=1 ${filter}`, p),
+      _pgQuery(`SELECT COALESCE(SUM(COALESCE(et.adjusted_invoice_total,et.invoice_total)),0) AS total
+                FROM public.event_timesheets et
+                WHERE et.status IN ('approved_client','adjusted_client','validated','invoiced_mock')
+                AND et.log_date >= date_trunc('month',CURRENT_DATE) ${filter}`, p),
+    ]);
+    res.json({
+      ok: true,
+      active_today:       parseInt(active[0]?.n || 0),
+      pending_validation: parseInt(pending[0]?.n || 0),
+      completed:          parseInt(completed[0]?.n || 0),
+      invoiced_total:     parseFloat(completed[0]?.total || 0),
+      expenses_pending:   parseInt(expenses[0]?.pending || 0),
+      expenses_approved:  parseInt(expenses[0]?.approved || 0),
+      expenses_approved_amount: parseFloat(expenses[0]?.approved_amount || 0),
+      monthly_total:      parseFloat(monthly[0]?.total || 0),
+    });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+// Timesheets (no worker_pay, no payout internal data)
+app.get('/api/client/timesheets', requireClientAccess, async (req, res) => {
+  try {
+    const cid = _clientId(req);
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const status = req.query.status || '';
+    const params = cid ? [cid] : [];
+    let statusClause = '';
+    if (status) {
+      params.push(status);
+      statusClause = `AND et.status=$${params.length}`;
+    }
+    const cidClause = cid ? 'AND et.client_id=$1' : '';
+    params.push(limit);
+    const rows = await _pgQuery(`
+      SELECT et.id, et.worker_id, et.log_date, et.hours,
+             et.days_equivalent, et.location, et.status,
+             et.start_time, et.check_out_at,
+             et.notes, et.invoice_net, et.invoice_vat, et.invoice_total,
+             et.adjusted_days, et.adjusted_invoice_total,
+             COALESCE(et.adjusted_invoice_total, et.invoice_total) AS effective_total,
+             et.validation_token, et.validated_at, et.validator_note,
+             et.client_extras
+      FROM public.event_timesheets et
+      WHERE (et.validation_token IS NOT NULL OR et.source='manual')
+        ${cidClause} ${statusClause}
+      ORDER BY et.log_date DESC, et.id DESC
+      LIMIT $${params.length}
+    `, params);
+    // Serialise dates
+    const result = rows.map(r => {
+      const d = {...r};
+      for (const k of Object.keys(d)) {
+        if (d[k] instanceof Date) d[k] = d[k].toISOString();
+      }
+      return d;
+    });
+    res.json({ ok: true, timesheets: result });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+// Expenses (client view — includes photo path for download)
+app.get('/api/client/expenses', requireClientAccess, async (req, res) => {
+  try {
+    const cid = _clientId(req);
+    const params = cid ? [cid] : [];
+    const cidClause = cid ? 'AND et.client_id=$1' : '';
+    const rows = await _pgQuery(`
+      SELECT te.id, te.timesheet_id, te.worker_name,
+             te.amount, te.expense_type, te.notes,
+             te.receipt_name, te.receipt_nif_name,
+             te.receipt_image_url,
+             te.status, te.approved_at, te.rejected_reason, te.reimbursed_at,
+             te.created_at,
+             et.log_date, et.worker_id
+      FROM public.timesheet_expenses te
+      JOIN public.event_timesheets et ON et.id=te.timesheet_id
+      WHERE 1=1 ${cidClause}
+      ORDER BY te.created_at DESC
+    `, params);
+    const result = rows.map(r => {
+      const d = {...r};
+      for (const k of Object.keys(d)) {
+        if (d[k] instanceof Date) d[k] = d[k].toISOString();
+      }
+      return d;
+    });
+    res.json({ ok: true, expenses: result });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+// Invoices (client view)
+app.get('/api/client/invoices', requireClientAccess, async (req, res) => {
+  try {
+    const cid = _clientId(req);
+    const params = [];
+    let cidClause = '';
+    if (cid) {
+      params.push(cid);
+      cidClause = `AND (ti.metadata->>'ts_id')::int IN (
+        SELECT id FROM public.event_timesheets WHERE client_id=$1)`;
+    }
+    const rows = await _pgQuery(`
+      SELECT ti.id, ti.number, ti.status, ti.amount, ti.currency,
+             ti.client, ti.due_date, ti.created_at,
+             ti.metadata->>'log_date'  AS log_date,
+             ti.metadata->>'service_note' AS service_note,
+             ti.metadata->'lines'      AS lines
+      FROM public.twin_invoices ti
+      WHERE ti.status IN ('draft','sent','paid') ${cidClause}
+      ORDER BY ti.id DESC
+      LIMIT 100
+    `, params);
+    const result = rows.map(r => {
+      const d = {...r};
+      for (const k of Object.keys(d)) {
+        if (d[k] instanceof Date) d[k] = d[k].toISOString();
+      }
+      return d;
+    });
+    res.json({ ok: true, invoices: result });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+// Monthly breakdown
+app.get('/api/client/monthly', requireClientAccess, async (req, res) => {
+  try {
+    const cid = _clientId(req);
+    const params = cid ? [cid] : [];
+    const cidClause = cid ? 'AND et.client_id=$1' : '';
+    const rows = await _pgQuery(`
+      SELECT to_char(et.log_date,'YYYY-MM') AS month,
+             COUNT(*) AS services,
+             COALESCE(SUM(COALESCE(et.adjusted_invoice_total,et.invoice_total)),0) AS invoice_total,
+             COALESCE(SUM(te.amount) FILTER (WHERE te.status='approved_client'),0) AS expenses_total
+      FROM public.event_timesheets et
+      LEFT JOIN public.timesheet_expenses te ON te.timesheet_id=et.id
+      WHERE et.status IN ('approved_client','adjusted_client','validated','invoiced_mock')
+        ${cidClause}
+      GROUP BY 1 ORDER BY 1 DESC
+      LIMIT 12
+    `, params);
+    res.json({ ok: true, monthly: rows });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
 
 app.listen(3000, () => console.log("UI http://localhost:3000"));

@@ -495,6 +495,27 @@ function renderFinance(data) {
     </div>`;
   }
 
+  // Ponto ao vivo
+  const active = data.whatsapp_active || [];
+  if (active.length) {
+    const elapsedStr = start => {
+      const ms = Date.now() - new Date(start).getTime();
+      const h  = Math.floor(ms / 3600000);
+      const m  = Math.floor((ms % 3600000) / 60000);
+      return h > 0 ? `${h}h${m}m` : `${m}m`;
+    };
+    html += active.map(a => `<div style="padding:.3rem 0;border-top:1px solid #1e293b">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <span style="color:#22c55e;margin-right:.4rem">●</span>
+        <span style="flex:1;color:#f8fafc;font-size:.82rem;font-weight:600">${esc(a.display_name || a.worker_id || '?')}${a.car_used ? ' 🚗' : ''}</span>
+        <span style="font-size:.72rem;color:#64748b;margin-right:.4rem">${a.start_time ? new Date(a.start_time).toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'}) : '—'}</span>
+        <span class="tag info">${elapsedStr(a.start_time)}</span>
+      </div>
+      ${a.location ? `<div style="font-size:.72rem;color:#64748b;padding-left:1.2rem">📍 ${esc(a.location)}</div>` : ''}
+      ${a.notes ? `<div style="font-size:.72rem;color:#94a3b8;padding-left:1.2rem">📝 ${esc(a.notes)}</div>` : ''}
+    </div>`).join('');
+  }
+
   el.innerHTML = html || '<div class="empty">Sem dados financeiros</div>';
   upd('upd-finance');
 }

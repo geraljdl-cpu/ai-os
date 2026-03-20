@@ -5,8 +5,10 @@
 
 set -euo pipefail
 
-AIOS_ROOT="/home/jdl/ai-os"
-export PYTHONPATH="$AIOS_ROOT/bin:${PYTHONPATH:-}"
+AIOS_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export PYTHONPATH="$AIOS_ROOT/pylib:${PYTHONPATH:-}"
+# Usar pg8000 (pure Python) quando DATABASE_URL não definido — compatível com cluster nodes
+export DATABASE_URL="${DATABASE_URL:-postgresql+pg8000://aios_user:jdl@192.168.1.101:5432/aios}"
 LOG_DIR="$AIOS_ROOT/runtime/radar/logs"
 mkdir -p "$LOG_DIR"
 

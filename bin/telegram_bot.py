@@ -364,6 +364,11 @@ def handle_tenders(args: list) -> str:
     return "\n".join(lines)
 
 
+def _ops_headers() -> dict:
+    """Headers para chamadas autenticadas ao UI (OPS token)."""
+    return {"x-aios-ops-token": _get_ops_token()}
+
+
 def handle_idea(args: list) -> str:
     """Cria nova ideia via Telegram: /idea título da ideia"""
     if not args:
@@ -372,18 +377,57 @@ def handle_idea(args: list) -> str:
     try:
         r = requests.post(
             f"{UI_BASE}/api/ideas",
-            json={"title": title, "message": title},
-            headers={"Authorization": f"Bearer {_get_ops_token()}"},
+            json={"title": title, "message": title, "source": "telegram"},
+            headers=_ops_headers(),
             timeout=10,
         )
         d = r.json()
         if d.get("ok"):
-            return (
-                f"💡 Ideia #{d['id']} guardada!\n\n"
-                f"*{title}*\n\n"
-                f"Para analisar com o Conselho de IA:\n"
-                f"  Acede a {UI_BASE}/joao e clica 'Analisar'"
-            )
+            if d.get("duplicate"):
+                return f"Já registado recentemente ✔"
+            return f"💡 Ideia #{d['id']} guardada ✔\n_{title}_"
+        return f"Erro: {d.get('error', 'desconhecido')}"
+    except Exception as e:
+        return f"Erro: {e}"
+
+
+def handle_task(args: list) -> str:
+    """Cria tarefa via Telegram: /task texto da tarefa"""
+    if not args:
+        return "Uso: /task <texto da tarefa>\nEx: /task Ligar ao fornecedor até sexta"
+    title = " ".join(args)
+    try:
+        r = requests.post(
+            f"{UI_BASE}/api/ideas",
+            json={"title": title, "message": title, "source": "telegram"},
+            headers=_ops_headers(),
+            timeout=10,
+        )
+        d = r.json()
+        if d.get("ok"):
+            if d.get("duplicate"):
+                return f"Já registado recentemente ✔"
+            return f"✅ Tarefa #{d['id']} guardada ✔\n_{title}_"
+        return f"Erro: {d.get('error', 'desconhecido')}"
+    except Exception as e:
+        return f"Erro: {e}"
+
+
+def handle_decision(args: list) -> str:
+    """Cria decisão via Telegram: /decision texto da decisão"""
+    if not args:
+        return "Uso: /decision <texto da decisão>\nEx: /decision Renovar contrato com fornecedor X"
+    title = " ".join(args)
+    try:
+        r = requests.post(
+            f"{UI_BASE}/api/decisions",
+            json={"title": title, "kind": "manual", "source": "telegram"},
+            headers=_ops_headers(),
+            timeout=10,
+        )
+        d = r.json()
+        if d.get("ok"):
+            return f"⚖️ Decisão #{d['id']} guardada ✔\n_{title}_"
         return f"Erro: {d.get('error', 'desconhecido')}"
     except Exception as e:
         return f"Erro: {e}"
@@ -970,9 +1014,17 @@ def handle_command(text: str):
         args = t.split()[1:]
         send(handle_tenders(args))
         return
-    if t.startswith("/idea"):
+    if t.startswith("/idea") or t.startswith("/ideia"):
         args = t.split()[1:]
         send(handle_idea(args))
+        return
+    if t.startswith("/task"):
+        args = t.split()[1:]
+        send(handle_task(args))
+        return
+    if t.startswith("/decision"):
+        args = t.split()[1:]
+        send(handle_decision(args))
         return
     if t.startswith("/joao"):
         args = t.split()[1:]
@@ -1127,6 +1179,8 @@ def handle_command(text: str):
             "/status — estado da infra\n"
             "/approvals — aprovações da fábrica\n"
             "/idea <texto> — nova ideia\n"
+            "/task <texto> — nova tarefa\n"
+            "/decision <texto> — nova decisão pendente\n"
             "/tenders — radar de concursos\n"
             "/lote ver|novo|avancar|resultado|faturar|fechar\n"
             "/do health|tick|watchdog|enqueue\n"

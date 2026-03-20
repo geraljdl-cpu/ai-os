@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Quick Capture — AI-OS</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #0f172a; color: #e2e8f0;
+  min-height: 100dvh; padding: 1rem;
+}
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 1.25rem;
+}
+.header h1 { font-size: 1.1rem; font-weight: 700; color: #f8fafc; }
+.back-link { color: #64748b; text-decoration: none; font-size: .85rem; }
+
+.type-bar {
+  display: flex; gap: .5rem; margin-bottom: 1rem;
+}
+.type-btn {
+  flex: 1; padding: .6rem .25rem; border-radius: 8px;
+  border: 1.5px solid #334155; background: #1e293b;
+  color: #94a3b8; font-size: .8rem; font-weight: 600; cursor: pointer;
+  transition: all .15s;
+}
+.type-btn.active {
+  border-color: #6366f1; background: #312e81; color: #c7d2fe;
+}
+
+textarea {
+  width: 100%; height: 130px; resize: none;
+  background: #1e293b; color: #f1f5f9;
+  border: 1.5px solid #334155; border-radius: 10px;
+  padding: .75rem; font-size: 1rem; line-height: 1.5;
+  outline: none; margin-bottom: .75rem;
+}
+textarea:focus { border-color: #6366f1; }
+textarea::placeholder { color: #475569; }
+
+.origin-row {
+  display: flex; gap: .5rem; margin-bottom: .75rem; align-items: center;
+}
+.origin-row label { font-size: .75rem; color: #64748b; white-space: nowrap; }
+.origin-row select {
+  flex: 1; background: #1e293b; color: #94a3b8;
+  border: 1px solid #334155; border-radius: 6px;
+  padding: .35rem .5rem; font-size: .8rem;
+}
+
+.submit-btn {
+  width: 100%; padding: .9rem; border-radius: 10px;
+  background: #6366f1; color: #fff;
+  border: none; font-size: 1rem; font-weight: 700; cursor: pointer;
+  transition: background .15s;
+}
+.submit-btn:active { background: #4f46e5; }
+.submit-btn:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+
+.toast {
+  position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+  background: #22c55e; color: #fff; padding: .6rem 1.2rem;
+  border-radius: 20px; font-size: .9rem; font-weight: 600;
+  opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap;
+}
+.toast.show { opacity: 1; }
+.toast.err  { background: #ef4444; }
+
+.recent {
+  margin-top: 1.5rem;
+}
+.recent-title { font-size: .75rem; color: #475569; margin-bottom: .5rem; text-transform: uppercase; letter-spacing: .05em; }
+.recent-item {
+  background: #1e293b; border-radius: 8px; padding: .6rem .75rem;
+  margin-bottom: .4rem; font-size: .82rem; color: #94a3b8;
+  border-left: 3px solid #334155;
+}
+.recent-item.ideia   { border-left-color: #6366f1; }
+.recent-item.decisao { border-left-color: #f59e0b; }
+.recent-item.tarefa  { border-left-color: #22c55e; }
+.recent-item .ri-text { color: #e2e8f0; margin-bottom: .2rem; font-size: .85rem; }
+.recent-item .ri-meta { font-size: .72rem; color: #475569; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>⚡ Quick Capture</h1>
+  <a href="/joao" class="back-link">← Dashboard</a>
+</div>
+
+<div class="type-bar">
+  <button class="type-btn active" data-type="ideia"   onclick="setType('ideia')">💡 Ideia</button>
+  <button class="type-btn"        data-type="decisao" onclick="setType('decisao')">⚖️ Decisão</button>
+  <button class="type-btn"        data-type="tarefa"  onclick="setType('tarefa')">✅ Tarefa</button>
+</div>
+
+<textarea id="txt" placeholder="Descreve a ideia, decisão ou tarefa..."></textarea>
+
+<div class="origin-row">
+  <label>Origem:</label>
+  <select id="origin">
+    <option value="mobile">📱 Mobile</option>
+    <option value="manual">✍️ Manual</option>
+    <option value="reuniao">🤝 Reunião</option>
+    <option value="cliente">👤 Cliente</option>
+    <option value="email">📧 Email</option>
+  </select>
+</div>
+
+<button class="submit-btn" id="btn" onclick="submit()">Guardar</button>
+
+<div class="recent" id="recent-section" style="display:none">
+  <div class="recent-title">Capturado hoje</div>
+  <div id="recent-list"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const TOKEN = localStorage.getItem('aios_jwt');
+if (!TOKEN) location.href = '/login?next=/quick';
+
+let currentType = 'ideia';
+const _session = [];
+
+function setType(t) {
+  currentType = t;
+  document.querySelectorAll('.type-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.type === t);
+  });
+  const placeholders = {
+    ideia:   'Descreve a ideia, produto, melhoria...',
+    decisao: 'Que decisão precisas de tomar?',
+    tarefa:  'Que tarefa queres registar?',
+  };
+  document.getElementById('txt').placeholder = placeholders[t] || '';
+  document.getElementById('txt').focus();
+}
+
+function toast(msg, err = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (err ? ' err' : '');
+  setTimeout(() => t.className = 'toast', 2500);
+}
+
+async function submit() {
+  const text   = document.getElementById('txt').value.trim();
+  const origin = document.getElementById('origin').value;
+  const btn    = document.getElementById('btn');
+  if (!text) { toast('Escreve algo primeiro', true); return; }
+
+  btn.disabled = true;
+  btn.textContent = '…';
+
+  try {
+    let url, body;
+    if (currentType === 'ideia' || currentType === 'tarefa') {
+      url  = '/api/ideas';
+      body = { title: text, source: origin, message: text };
+    } else {
+      url  = '/api/decisions';
+      body = { title: text, kind: 'manual', source: origin };
+    }
+
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+
+    if (d.ok || d.id || d.thread_id) {
+      if (d.duplicate) {
+        toast('Já registado recentemente ✔');
+      } else {
+        _session.push({ type: currentType, text, origin, ts: new Date().toLocaleTimeString('pt-PT', {hour:'2-digit',minute:'2-digit'}) });
+        renderRecent();
+        document.getElementById('txt').value = '';
+        toast('✓ Guardado!');
+      }
+    } else {
+      toast(d.error || 'Erro ao guardar', true);
+    }
+  } catch(e) {
+    toast('Erro de rede', true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Guardar';
+    document.getElementById('txt').focus();
+  }
+}
+
+function renderRecent() {
+  if (!_session.length) return;
+  document.getElementById('recent-section').style.display = '';
+  document.getElementById('recent-list').innerHTML = _session.slice().reverse().map(s =>
+    `<div class="recent-item ${s.type}">
+      <div class="ri-text">${escHtml(s.text)}</div>
+      <div class="ri-meta">${s.type} · ${s.origin} · ${s.ts}</div>
+    </div>`
+  ).join('');
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Auto-focus textarea on load
+window.addEventListener('load', () => document.getElementById('txt').focus());
+
+// Submit on Ctrl+Enter
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') submit();
+});
+</script>
+</body>
+</html>

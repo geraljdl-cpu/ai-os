@@ -1,0 +1,13 @@
+[Unit]
+Description=WhatsApp Weekly Summary — resumo semanal colaboradores
+After=network.target
+
+[Service]
+Type=oneshot
+User=jdl
+WorkingDirectory=/home/jdl/ai-os
+EnvironmentFile=/home/jdl/.env.db
+Environment=DATABASE_URL=postgresql://aios_user:jdl@127.0.0.1:5432/aios
+ExecStart=/usr/bin/python3 /home/jdl/ai-os/bin/whatsapp_weekly_summary.py
+StandardOutput=journal
+StandardError=journal

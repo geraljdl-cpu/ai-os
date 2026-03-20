@@ -81,8 +81,10 @@ async function doLogin(e) {
     const d = await r.json();
     if (d.ok && d.token) {
       localStorage.setItem('aios_jwt', d.token);
-      localStorage.setItem('aios_user', JSON.stringify({ username: d.username, role: d.role }));
-      window.location = nextUrl;
+      localStorage.setItem('aios_user', JSON.stringify({ username: d.username, role: d.role, client_id: d.client_id }));
+      const clientRoles = ['client_accounting','client_manager'];
+      const dest = clientRoles.includes(d.role) ? '/conta' : nextUrl;
+      window.location = dest;
     } else {
       err.textContent = d.error || 'Credenciais inválidas.';
       err.style.display = 'block';

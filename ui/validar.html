@@ -3,164 +3,453 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Validação de Serviço — AI-OS</title>
+<title>Validação de Serviço — JDL</title>
 <style>
+:root{
+  --bg:#f8fafc;--panel:#fff;--border:#e2e8f0;
+  --green:#16a34a;--green-bg:#f0fdf4;--green-border:#bbf7d0;
+  --blue:#3b82f6;--blue-bg:#eff6ff;
+  --red:#dc2626;--red-bg:#fef2f2;--red-border:#fecaca;
+  --yellow:#d97706;--yellow-bg:#fffbeb;
+  --ink:#1e293b;--ink2:#64748b;--ink3:#94a3b8;
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --r:10px;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem}
-.card{background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.1);max-width:480px;width:100%;padding:2rem}
-.logo{font-size:.8rem;color:#94a3b8;margin-bottom:1.5rem;text-transform:uppercase;letter-spacing:.05em}
-h1{font-size:1.25rem;font-weight:700;color:#0f172a;margin-bottom:.25rem}
-.subtitle{font-size:.875rem;color:#64748b;margin-bottom:1.5rem}
-.field{display:flex;justify-content:space-between;align-items:center;padding:.6rem 0;border-bottom:1px solid #f1f5f9}
-.field:last-of-type{border-bottom:none}
-.field-label{font-size:.8rem;color:#64748b;text-transform:uppercase;letter-spacing:.04em}
-.field-value{font-size:.9rem;font-weight:600;color:#1e293b}
-.divider{border:none;border-top:2px solid #e2e8f0;margin:1.25rem 0}
-.billing{background:#f0fdf4;border-radius:8px;padding:1rem;margin-bottom:1.5rem}
-.billing-row{display:flex;justify-content:space-between;font-size:.875rem;padding:.2rem 0}
-.billing-total{font-weight:700;color:#16a34a;font-size:1rem;border-top:1px solid #bbf7d0;margin-top:.5rem;padding-top:.5rem}
-.billing-label{color:#166534}
-textarea{width:100%;border:1px solid #e2e8f0;border-radius:8px;padding:.75rem;font-size:.875rem;resize:vertical;min-height:60px;margin-bottom:1rem;font-family:inherit}
-textarea:focus{outline:none;border-color:#3b82f6}
-.btn{width:100%;padding:.875rem;border-radius:8px;font-size:.95rem;font-weight:600;border:none;cursor:pointer;transition:all .15s}
-.btn-approve{background:#22c55e;color:#fff;margin-bottom:.75rem}
-.btn-approve:hover{background:#16a34a}
-.btn-reject{background:#fff;color:#ef4444;border:2px solid #ef4444}
-.btn-reject:hover{background:#fef2f2}
+body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:100vh;padding:1rem}
+.wrap{max-width:560px;margin:0 auto}
+
+.logo{font-size:.75rem;color:var(--ink3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:1rem}
+h1{font-size:1.2rem;font-weight:700;color:#0f172a;margin-bottom:.2rem}
+.subtitle{font-size:.875rem;color:var(--ink2);margin-bottom:1.5rem}
+
+.section{background:var(--panel);border:1px solid var(--border);border-radius:var(--r);padding:1.25rem;margin-bottom:1rem}
+.section-title{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3);margin-bottom:.75rem}
+
+/* Summary fields */
+.field{display:flex;justify-content:space-between;align-items:center;padding:.45rem 0;border-bottom:1px solid var(--border)}
+.field:last-child{border-bottom:none}
+.fl{font-size:.78rem;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em}
+.fv{font-size:.875rem;font-weight:600}
+
+/* Days selector */
+.days-selector{display:flex;gap:.5rem;flex-wrap:wrap}
+.day-opt{flex:1;min-width:80px}
+.day-opt input{display:none}
+.day-opt label{
+  display:flex;align-items:center;justify-content:center;
+  padding:.6rem;border:2px solid var(--border);border-radius:8px;
+  font-size:.875rem;font-weight:600;cursor:pointer;transition:all .15s;
+  color:var(--ink2);
+}
+.day-opt input:checked + label{border-color:var(--blue);background:var(--blue-bg);color:var(--blue)}
+.day-opt label:hover{border-color:var(--blue);color:var(--blue)}
+
+/* Extras */
+.extra-row{display:flex;gap:.5rem;margin-bottom:.5rem;align-items:center}
+.extra-row input{flex:1;padding:.5rem .7rem;border:1px solid var(--border);border-radius:6px;font-size:.875rem}
+.extra-row input:focus{outline:none;border-color:var(--blue)}
+.extra-row .amount-input{width:90px;flex:none}
+.btn-remove{background:none;border:none;color:var(--red);cursor:pointer;padding:.25rem .5rem;font-size:1rem}
+.btn-add{background:none;border:1px dashed var(--border);border-radius:6px;padding:.5rem 1rem;
+  font-size:.8rem;color:var(--blue);cursor:pointer;width:100%;margin-top:.25rem}
+.btn-add:hover{background:var(--blue-bg)}
+
+/* Expenses */
+.exp-card{border:1px solid var(--border);border-radius:8px;margin-bottom:.75rem;overflow:hidden}
+.exp-card:last-child{margin-bottom:0}
+.exp-header{display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;background:#fafafa}
+.exp-badge{font-size:.7rem;font-weight:700;padding:.2rem .6rem;border-radius:12px;text-transform:uppercase}
+.exp-badge-pending{background:#fef3c7;color:#92400e}
+.exp-badge-approved{background:#dcfce7;color:#15803d}
+.exp-badge-rejected{background:#fee2e2;color:#dc2626}
+.exp-amount{font-size:1rem;font-weight:700;color:var(--green)}
+.exp-body{padding:.75rem 1rem;border-top:1px solid var(--border)}
+.exp-meta{font-size:.8rem;color:var(--ink2);margin-bottom:.5rem}
+.exp-meta b{color:var(--ink)}
+.exp-actions{display:flex;gap:.5rem;margin-top:.5rem}
+.btn-exp{padding:.4rem .9rem;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer;border:none}
+.btn-exp-approve{background:#dcfce7;color:#15803d}
+.btn-exp-approve:hover{background:#bbf7d0}
+.btn-exp-reject{background:#fee2e2;color:#dc2626}
+.btn-exp-reject:hover{background:#fecaca}
+.btn-exp-undo{background:#f1f5f9;color:var(--ink2)}
+.mbway-block{margin-top:.75rem;background:#f0fdf4;border:1px solid var(--green-border);border-radius:8px;padding:.75rem}
+.mbway-block p{font-size:.875rem;margin-bottom:.25rem}
+.mbway-number{font-size:1.25rem;font-weight:700;color:var(--green);letter-spacing:.05em}
+.mbway-amount{font-size:.9rem;color:var(--green-border)!important;font-weight:700}
+.btn-reimbursed{margin-top:.5rem;padding:.4rem .9rem;background:var(--green);color:#fff;
+  border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer}
+.reject-reason{margin-top:.5rem}
+.reject-reason input{width:100%;padding:.45rem .7rem;border:1px solid var(--red-border);
+  border-radius:6px;font-size:.8rem;background:var(--red-bg)}
+.reject-reason input:focus{outline:none;border-color:var(--red)}
+.ineligible-note{font-size:.75rem;color:var(--ink3);font-style:italic}
+
+/* Billing preview */
+.billing{background:var(--green-bg);border-radius:8px;padding:1rem}
+.billing-row{display:flex;justify-content:space-between;font-size:.875rem;padding:.18rem 0;color:#166534}
+.billing-total{font-weight:700;font-size:1rem;color:var(--green);border-top:1px solid var(--green-border);margin-top:.5rem;padding-top:.5rem}
+
+textarea{width:100%;border:1px solid var(--border);border-radius:8px;padding:.75rem;
+  font-size:.875rem;resize:vertical;min-height:56px;margin:.75rem 0;font-family:inherit}
+textarea:focus{outline:none;border-color:var(--blue)}
+
+.btn{width:100%;padding:.875rem;border-radius:8px;font-size:.95rem;font-weight:600;
+  border:none;cursor:pointer;transition:all .15s;margin-bottom:.5rem}
+.btn-approve{background:#22c55e;color:#fff}
+.btn-approve:hover{background:var(--green)}
+.btn-reject{background:#fff;color:var(--red);border:2px solid var(--red)}
+.btn-reject:hover{background:var(--red-bg)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
-.status-ok{text-align:center;padding:2rem 0}
-.status-ok .icon{font-size:3rem;margin-bottom:.75rem}
-.status-ok h2{color:#16a34a;margin-bottom:.5rem}
-.status-err{text-align:center;padding:2rem 0}
-.status-err .icon{font-size:3rem;margin-bottom:.75rem}
-.status-err h2{color:#dc2626;margin-bottom:.5rem}
-.loading{text-align:center;padding:2rem;color:#94a3b8}
-.badge{display:inline-block;padding:.2rem .6rem;border-radius:20px;font-size:.75rem;font-weight:600}
-.badge-pending{background:#fef3c7;color:#92400e}
-.badge-approved{background:#dcfce7;color:#166534}
-.badge-rejected{background:#fee2e2;color:#991b1b}
+
+.status-ok,.status-err{text-align:center;padding:2rem 0}
+.status-ok .icon,.status-err .icon{font-size:2.5rem;margin-bottom:.75rem}
+.status-ok h2{color:var(--green)}
+.status-err h2{color:var(--red)}
+.muted{color:var(--ink2);font-size:.875rem;margin-top:.5rem}
+
+.loading{text-align:center;padding:2rem;color:var(--ink3)}
 </style>
 </head>
 <body>
-<div class="card" id="card">
-  <div class="loading">A carregar...</div>
+<div class="wrap">
+  <div id="root"><div class="loading">A carregar...</div></div>
 </div>
 
 <script>
-const token = location.pathname.split('/validar/')[1] || '';
-let tsData = null;
+const token  = location.pathname.split('/validar/')[1]?.replace(/[^a-zA-Z0-9\-]/g,'') || '';
+let tsData   = null;
+let extras   = [];            // [{description, amount}]
+let expenseDecisions = {};    // {eid: {status:"approved_client"|"rejected_client", reason?}}
 
-async function load() {
-  const card = document.getElementById('card');
-  try {
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmt(v){ return parseFloat(v||0).toFixed(2).replace('.',','); }
+function fmtDate(s){
+  if(!s) return '—';
+  const d = new Date(s.includes('T')?s:s+'T12:00:00');
+  return isNaN(d)?s:d.toLocaleDateString('pt-PT');
+}
+function daysLabel(d){ return d==2?'2 dias':d==1.5?'1,5 dias':'1 dia'; }
+function selectedDays(){
+  const el = document.querySelector('input[name="days"]:checked');
+  return el ? parseFloat(el.value) : parseFloat(tsData?.days_equivalent||1);
+}
+function rateDay(){
+  // Infer rate from base data: invoice_net / days_equivalent
+  const net  = parseFloat(tsData?.invoice_net||100);
+  const days = parseFloat(tsData?.days_equivalent||1);
+  return days>0 ? net/days : 100;
+}
+function vatRate(){
+  const net = parseFloat(tsData?.invoice_net||0);
+  const vat = parseFloat(tsData?.invoice_vat||0);
+  return (net>0&&vat>0) ? vat/net : 0.23;
+}
+
+// ── Load ──────────────────────────────────────────────────────────────────────
+async function load(){
+  try{
     const r = await fetch(`/api/service/validate/${token}`);
     const d = await r.json();
-    if (!d || d.error || !d.id) {
-      card.innerHTML = `<div class="status-err"><div class="icon">❌</div><h2>Link inválido</h2><p style="color:#64748b;font-size:.875rem">Este link de validação não existe ou já expirou.</p></div>`;
+    if(!d||d.error||!d.id){
+      document.getElementById('root').innerHTML = `
+        <div class="section status-err">
+          <div class="icon">❌</div><h2>Link inválido</h2>
+          <p class="muted">Este link de validação não existe ou já expirou.</p>
+        </div>`;
       return;
     }
     tsData = d;
     renderForm(d);
-  } catch(e) {
-    card.innerHTML = `<div class="status-err"><div class="icon">⚠️</div><h2>Erro</h2><p style="color:#64748b">${e.message}</p></div>`;
+  } catch(e){
+    document.getElementById('root').innerHTML = `<div class="section status-err"><div class="icon">⚠️</div><h2>Erro</h2><p class="muted">${esc(e.message)}</p></div>`;
   }
 }
 
-function fmt_date(s) {
-  if (!s) return '—';
-  const d = new Date(s);
-  if (isNaN(d)) return s;
-  return d.toLocaleDateString('pt-PT');
-}
-
-function days_label(d) {
-  return d == 2 ? '2 dias' : d == 1.5 ? '1,5 dias' : '1 dia';
-}
-
-function renderForm(d) {
-  const status = d.status;
-  if (status === 'approved') {
-    document.getElementById('card').innerHTML = `
-      <div class="logo">AI-OS · Serviços</div>
-      <div class="status-ok"><div class="icon">✅</div><h2>Já validado</h2>
-      <p style="color:#64748b;font-size:.875rem">Este registo foi aprovado anteriormente.</p></div>`;
+// ── Render ────────────────────────────────────────────────────────────────────
+function renderForm(d){
+  const alreadyDone = ['approved_client','adjusted_client','validated','invoiced_mock'].includes(d.status);
+  const rejected    = ['rejected_client','rejected'].includes(d.status);
+  if(alreadyDone){
+    document.getElementById('root').innerHTML = `
+      <div class="section status-ok">
+        <div class="icon">✅</div><h2>Já validado</h2>
+        <p class="muted">Este registo foi aprovado anteriormente. Obrigado.</p>
+      </div>`;
     return;
   }
-  if (status === 'rejected') {
-    document.getElementById('card').innerHTML = `
-      <div class="logo">AI-OS · Serviços</div>
-      <div class="status-err"><div class="icon">❌</div><h2>Já rejeitado</h2>
-      <p style="color:#64748b;font-size:.875rem">Este registo foi rejeitado anteriormente.</p></div>`;
+  if(rejected){
+    document.getElementById('root').innerHTML = `
+      <div class="section status-err">
+        <div class="icon">❌</div><h2>Já rejeitado</h2>
+        <p class="muted">Este registo foi rejeitado anteriormente.</p>
+      </div>`;
     return;
   }
 
-  const days  = parseFloat(d.days_equivalent || 1);
-  const car   = d.car_used ? ' + 🚗 carro' : '';
-  const log_date = d.log_date ? fmt_date(d.log_date + 'T12:00:00') : '—';
+  const days   = parseFloat(d.days_equivalent||1);
+  const car    = d.car_used ? ' + carro' : '';
+  const hasExp = d.expenses && d.expenses.length > 0;
 
-  document.getElementById('card').innerHTML = `
-    <div class="logo">AI-OS · Validação de Serviço</div>
+  document.getElementById('root').innerHTML = `
+    <div class="logo">Grupo JDL · Validação de Serviço</div>
     <h1>Pedido de Validação</h1>
-    <p class="subtitle">Por favor confirme o trabalho realizado.</p>
+    <p class="subtitle">Confirme o serviço prestado e a faturação.</p>
 
-    <div class="field"><span class="field-label">Colaborador</span><span class="field-value">${esc(d.person_name || d.worker_id || '—')}</span></div>
-    <div class="field"><span class="field-label">Data</span><span class="field-value">${log_date}</span></div>
-    <div class="field"><span class="field-label">Horas trabalhadas</span><span class="field-value">${d.hours}h → ${days_label(days)}${car}</span></div>
-    <div class="field"><span class="field-label">Local</span><span class="field-value">${esc(d.location || '—')}</span></div>
-
-    <hr class="divider">
-    <div class="billing">
-      <div class="billing-row"><span class="billing-label">Valor base (${days_label(days)} × 100€)</span><span>${fmt_eur(d.invoice_net)}</span></div>
-      <div class="billing-row"><span class="billing-label">IVA 23%</span><span>${fmt_eur(d.invoice_vat)}</span></div>
-      <div class="billing-row billing-total"><span>Total a pagar</span><span>${fmt_eur(d.invoice_total)}</span></div>
+    <!-- 1: Resumo -->
+    <div class="section">
+      <div class="section-title">Resumo do turno</div>
+      <div class="field"><span class="fl">Colaborador</span><span class="fv">${esc(d.person_name||d.worker_id||'—')}</span></div>
+      <div class="field"><span class="fl">Data</span><span class="fv">${fmtDate(d.log_date)}</span></div>
+      <div class="field"><span class="fl">Horas trabalhadas</span><span class="fv">${parseFloat(d.hours||0).toFixed(1)}h → ${daysLabel(days)}${car}</span></div>
+      <div class="field"><span class="fl">Local</span><span class="fv">${esc(d.location||'—')}</span></div>
+      ${d.notes?`<div class="field"><span class="fl">Notas</span><span class="fv" style="max-width:280px;text-align:right">${esc(d.notes)}</span></div>`:''}
     </div>
 
-    <textarea id="note" placeholder="Nota opcional (visível no registo)..."></textarea>
-    <button class="btn btn-approve" id="btn-approve" onclick="validate(true)">✅ Validar e Confirmar</button>
-    <button class="btn btn-reject" id="btn-reject" onclick="validate(false)">❌ Rejeitar</button>
+    <!-- 2: Ajuste de dias -->
+    <div class="section">
+      <div class="section-title">Unidade facturável</div>
+      <div class="days-selector">
+        ${[1,1.5,2].map(v=>`
+          <div class="day-opt">
+            <input type="radio" name="days" id="d${v}" value="${v}" ${v==days?'checked':''} onchange="updatePreview()">
+            <label for="d${v}">${daysLabel(v)}</label>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <!-- 3: Extras -->
+    <div class="section">
+      <div class="section-title">Adicionais à fatura</div>
+      <div id="extras-list"></div>
+      <button class="btn-add" onclick="addExtra()">+ Adicionar linha</button>
+    </div>
+
+    <!-- 4: Despesas MB WAY -->
+    ${hasExp?`
+    <div class="section" id="sec-expenses">
+      <div class="section-title">Despesas para reembolso MB WAY</div>
+      <p style="font-size:.8rem;color:var(--ink2);margin-bottom:.75rem">Despesas pagas pelo colaborador com recibo em nome do cliente. Aprovar permite reembolso directo por MB WAY.</p>
+      <div id="exp-cards">${renderExpenses(d.expenses)}</div>
+    </div>`:''}
+
+    <!-- 5: Preview + acções -->
+    <div class="section">
+      <div class="section-title">Resumo de faturação</div>
+      <div class="billing" id="billing-preview"></div>
+      <textarea id="client-note" placeholder="Nota opcional..."></textarea>
+      <button class="btn btn-approve" id="btn-approve" onclick="submitValidation(true)">✅ Aprovar e Confirmar</button>
+      <button class="btn btn-reject" id="btn-reject" onclick="submitValidation(false)">❌ Rejeitar</button>
+    </div>
   `;
+
+  renderExtrasList();
+  updatePreview();
 }
 
-function fmt_eur(v) { return parseFloat(v || 0).toFixed(2) + ' €'; }
-function esc(s) { return String(s).replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// ── Extras ────────────────────────────────────────────────────────────────────
+function addExtra(){
+  extras.push({description:'',amount:''});
+  renderExtrasList();
+  updatePreview();
+}
+function removeExtra(i){
+  extras.splice(i,1);
+  renderExtrasList();
+  updatePreview();
+}
+function renderExtrasList(){
+  const el = document.getElementById('extras-list');
+  if(!el) return;
+  el.innerHTML = extras.map((e,i)=>`
+    <div class="extra-row">
+      <input type="text" placeholder="Descrição (ex: Deslocação)" value="${esc(e.description)}"
+        oninput="extras[${i}].description=this.value;updatePreview()">
+      <input type="number" class="amount-input" placeholder="€" step="0.01" min="0" value="${e.amount||''}"
+        oninput="extras[${i}].amount=this.value;updatePreview()">
+      <button class="btn-remove" onclick="removeExtra(${i})">✕</button>
+    </div>`).join('');
+}
 
-async function validate(approved) {
-  const note = document.getElementById('note')?.value || '';
-  document.getElementById('btn-approve').disabled = true;
-  document.getElementById('btn-reject').disabled  = true;
+// ── Expenses ──────────────────────────────────────────────────────────────────
+const expTypeLabel={meal:'Refeição',material:'Material',transport:'Transporte',other:'Outro'};
 
-  try {
-    const r = await fetch(`/api/service/validate/${token}`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({approved, note}),
+function renderExpenses(expenses){
+  return expenses.map(e=>{
+    const eligible = e.receipt_image_url || parseFloat(e.amount||0)>0;
+    return `<div class="exp-card" id="exp-card-${e.id}">
+      <div class="exp-header">
+        <div style="display:flex;align-items:center;gap:.5rem">
+          <span class="exp-badge exp-badge-pending" id="exp-badge-${e.id}">Pendente</span>
+          <span style="font-size:.8rem;color:var(--ink2)">${expTypeLabel[e.expense_type]||e.expense_type}</span>
+        </div>
+        <span class="exp-amount">${fmt(e.amount)} €</span>
+      </div>
+      <div class="exp-body">
+        <div class="exp-meta">
+          <b>Lançado por:</b> ${esc(e.worker_name)}
+          ${e.receipt_nif_name?` · <b>Recibo em nome de:</b> ${esc(e.receipt_nif_name)}`:''}
+          ${e.notes?` · ${esc(e.notes)}`:''}
+        </div>
+        ${e.receipt_image_url?`<div style="margin-bottom:.5rem"><a href="/api/service/validate/${token}/expense/${e.id}/photo" target="_blank" style="font-size:.8rem;color:var(--blue)">Ver comprovativo ↗</a></div>`:''}
+        ${eligible?`
+        <div class="exp-actions" id="exp-actions-${e.id}">
+          <button class="btn-exp btn-exp-approve" onclick="decideExpense(${e.id},true)">✅ Aprovar</button>
+          <button class="btn-exp btn-exp-reject"  onclick="decideExpense(${e.id},false)">❌ Rejeitar</button>
+        </div>
+        <div id="mbway-${e.id}" hidden class="mbway-block">
+          <p>💳 Reembolsar <b>${esc(e.worker_name)}</b> via MB WAY:</p>
+          <div class="mbway-number">${esc(e.worker_phone_mbway)}</div>
+          <div class="mbway-amount">${fmt(e.amount)} €</div>
+          <button class="btn-reimbursed" onclick="markReimbursed(${e.id})">✅ Reembolso efectuado</button>
+        </div>
+        <div id="reject-reason-${e.id}" hidden class="reject-reason">
+          <input type="text" placeholder="Motivo de rejeição (opcional)..." id="reason-${e.id}">
+        </div>`:
+        `<div class="ineligible-note">Sem comprovativo — não elegível para reembolso</div>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function decideExpense(eid, approved){
+  const badge    = document.getElementById(`exp-badge-${eid}`);
+  const actions  = document.getElementById(`exp-actions-${eid}`);
+  const mbway    = document.getElementById(`mbway-${eid}`);
+  const reasonEl = document.getElementById(`reject-reason-${eid}`);
+
+  if(approved){
+    expenseDecisions[eid] = {status:'approved_client'};
+    if(badge){ badge.className='exp-badge exp-badge-approved'; badge.textContent='Aprovada'; }
+    if(mbway)   mbway.hidden=false;
+    if(reasonEl) reasonEl.hidden=true;
+  } else {
+    if(badge){ badge.className='exp-badge exp-badge-rejected'; badge.textContent='Rejeitada'; }
+    if(mbway)   mbway.hidden=true;
+    if(reasonEl) reasonEl.hidden=false;
+    const reason = document.getElementById(`reason-${eid}`)?.value||'';
+    expenseDecisions[eid] = {status:'rejected_client', reason};
+  }
+  // Add undo button
+  if(actions){
+    actions.innerHTML=`<button class="btn-exp btn-exp-undo" onclick="undoExpense(${eid},${approved})">↩ Desfazer</button>`;
+  }
+}
+
+function undoExpense(eid, wasApproved){
+  delete expenseDecisions[eid];
+  const badge    = document.getElementById(`exp-badge-${eid}`);
+  const actions  = document.getElementById(`exp-actions-${eid}`);
+  const mbway    = document.getElementById(`mbway-${eid}`);
+  const reasonEl = document.getElementById(`reject-reason-${eid}`);
+  if(badge){ badge.className='exp-badge exp-badge-pending'; badge.textContent='Pendente'; }
+  if(mbway)    mbway.hidden=true;
+  if(reasonEl) reasonEl.hidden=true;
+  if(actions)  actions.innerHTML=`
+    <button class="btn-exp btn-exp-approve" onclick="decideExpense(${eid},true)">✅ Aprovar</button>
+    <button class="btn-exp btn-exp-reject"  onclick="decideExpense(${eid},false)">❌ Rejeitar</button>`;
+}
+
+async function markReimbursed(eid){
+  try{
+    const r = await fetch(`/api/service/validate/${token}/expense/${eid}/reimburse`,{method:'POST',headers:{'Content-Type':'application/json'}});
+    const d = await r.json();
+    if(d.ok){
+      const card = document.getElementById(`exp-card-${eid}`);
+      if(card){
+        const badge = document.getElementById(`exp-badge-${eid}`);
+        if(badge){ badge.className='exp-badge'; badge.style.cssText='background:#d1fae5;color:#065f46'; badge.textContent='Reembolsado'; }
+        const mbway = document.getElementById(`mbway-${eid}`);
+        if(mbway) mbway.innerHTML='<p style="color:var(--green);font-size:.875rem">✅ Reembolso registado. Obrigado!</p>';
+      }
+    }
+  } catch(e){ alert('Erro: '+e.message); }
+}
+
+// ── Preview ───────────────────────────────────────────────────────────────────
+function updatePreview(){
+  const days   = selectedDays();
+  const rate   = rateDay();
+  const vr     = vatRate();
+  const net    = days * rate;
+  const vat    = net * vr;
+  const extrasValid = extras.filter(e=>e.description&&parseFloat(e.amount||0)>0);
+  const extraTotal  = extrasValid.reduce((s,e)=>s+parseFloat(e.amount||0),0);
+  const total  = net + vat + extraTotal;
+
+  const el = document.getElementById('billing-preview');
+  if(!el) return;
+  const extraLines = extrasValid.map(e=>`
+    <div class="billing-row"><span>${esc(e.description)}</span><span>${fmt(e.amount)} €</span></div>`).join('');
+  el.innerHTML = `
+    <div class="billing-row"><span>Mão de obra (${daysLabel(days)} × ${fmt(rate)} €)</span><span>${fmt(net)} €</span></div>
+    <div class="billing-row"><span>IVA ${Math.round(vr*100)}%</span><span>${fmt(vat)} €</span></div>
+    ${extraLines}
+    <div class="billing-row billing-total"><span>Total a pagar</span><span>${fmt(total)} €</span></div>`;
+}
+
+// ── Submit ────────────────────────────────────────────────────────────────────
+async function submitValidation(approved){
+  // Collect rejection reasons
+  for(const eid of Object.keys(expenseDecisions)){
+    if(expenseDecisions[eid].status==='rejected_client'){
+      const r = document.getElementById(`reason-${eid}`)?.value||'';
+      expenseDecisions[eid].reason = r;
+    }
+  }
+
+  const days = selectedDays();
+  const origDays = parseFloat(tsData?.days_equivalent||1);
+  const extrasValid = extras.filter(e=>e.description&&parseFloat(e.amount||0)>0);
+  const note = document.getElementById('client-note')?.value||'';
+
+  const payload = { approved, note };
+  if(approved){
+    if(days !== origDays) payload.adjusted_days = days;
+    if(extrasValid.length) payload.extras = extrasValid.map(e=>({description:e.description,amount:parseFloat(e.amount)}));
+    if(Object.keys(expenseDecisions).length) payload.expense_decisions = expenseDecisions;
+  }
+
+  const btn1 = document.getElementById('btn-approve');
+  const btn2 = document.getElementById('btn-reject');
+  if(btn1) btn1.disabled = true;
+  if(btn2) btn2.disabled = true;
+
+  try{
+    const r = await fetch(`/api/service/validate/${token}`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
     });
     const d = await r.json();
-    if (d.ok) {
-      if (approved) {
-        document.getElementById('card').innerHTML = `
-          <div class="status-ok">
+    if(d.ok){
+      if(approved){
+        document.getElementById('root').innerHTML = `
+          <div class="section status-ok">
             <div class="icon">✅</div>
             <h2>Obrigado pela confirmação!</h2>
-            <p style="color:#64748b;font-size:.875rem">O registo foi validado. A fatura draft foi gerada automaticamente.</p>
+            <p class="muted">O registo foi validado com sucesso.</p>
+            ${d.final_total?`<p style="margin-top:.5rem;font-size:.875rem;color:var(--green);font-weight:700">Total: ${fmt(d.final_total)} €</p>`:''}
           </div>`;
       } else {
-        document.getElementById('card').innerHTML = `
-          <div class="status-err">
+        document.getElementById('root').innerHTML = `
+          <div class="section status-err">
             <div class="icon">📝</div>
             <h2>Rejeição registada</h2>
-            <p style="color:#64748b;font-size:.875rem">O registo foi rejeitado. A nossa equipa será notificada.</p>
+            <p class="muted">O registo foi rejeitado. A nossa equipa será notificada.</p>
           </div>`;
       }
     } else {
-      alert('Erro: ' + (d.error || 'Tente novamente'));
-      document.getElementById('btn-approve').disabled = false;
-      document.getElementById('btn-reject').disabled  = false;
+      alert('Erro: '+(d.error||'Tente novamente'));
+      if(btn1) btn1.disabled=false;
+      if(btn2) btn2.disabled=false;
     }
-  } catch(e) {
-    alert('Erro de rede: ' + e.message);
-    document.getElementById('btn-approve').disabled = false;
-    document.getElementById('btn-reject').disabled  = false;
+  } catch(e){
+    alert('Erro de rede: '+e.message);
+    if(btn1) btn1.disabled=false;
+    if(btn2) btn2.disabled=false;
   }
 }
 
