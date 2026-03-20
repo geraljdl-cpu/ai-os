@@ -2385,6 +2385,180 @@ print(json.dumps({'ok':True,'id':row[0]}))
 });
 
 // ── Client dashboard API (/api/client/*) ──────────────────────────────────────
+// ── Admin Invoices (client_invoices) ─────────────────────────────────────────
+
+app.get('/api/admin/invoices', requireRole('finance'), async (req, res) => {
+  try {
+    const { status, client_id } = req.query;
+    const params = [];
+    let where = 'WHERE 1=1';
+    if (status)    { params.push(status);    where += ` AND ci.status=$${params.length}`; }
+    if (client_id) { params.push(client_id); where += ` AND ci.client_id=$${params.length}`; }
+    const rows = await _pgQuery(`
+      SELECT ci.id, ci.client_id, c.name AS client_name,
+             ci.timesheet_id, ci.invoice_number, ci.status,
+             ci.issue_date, ci.due_date, ci.subtotal, ci.tax_total, ci.total,
+             ci.sent_at, ci.paid_at, ci.created_at,
+             et.worker_id, et.log_date
+      FROM public.client_invoices ci
+      LEFT JOIN public.clients c ON c.id = ci.client_id
+      LEFT JOIN public.event_timesheets et ON et.id = ci.timesheet_id
+      ${where}
+      ORDER BY ci.created_at DESC LIMIT 200
+    `, params);
+    res.json({ ok: true, invoices: rows });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.get('/api/admin/invoices/:id', requireRole('finance'), async (req, res) => {
+  try {
+    const id = req.params.id;
+    const [inv, lines, payments] = await Promise.all([
+      _pgQuery(`
+        SELECT ci.*, c.name AS client_name, et.worker_id, et.log_date, et.hours
+        FROM public.client_invoices ci
+        LEFT JOIN public.clients c ON c.id = ci.client_id
+        LEFT JOIN public.event_timesheets et ON et.id = ci.timesheet_id
+        WHERE ci.id = $1
+      `, [id]),
+      _pgQuery(`SELECT * FROM public.client_invoice_lines WHERE invoice_id=$1 ORDER BY id`, [id]),
+      _pgQuery(`SELECT * FROM public.payments_received WHERE invoice_id=$1 ORDER BY paid_at`, [id]),
+    ]);
+    if (!inv.length) return res.status(404).json({ ok: false, error: 'not found' });
+    res.json({ ok: true, invoice: inv[0], lines, payments });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.post('/api/admin/invoices/:id/issue', requireRole('finance'), async (req, res) => {
+  try {
+    const { invoice_number, due_days = 30 } = req.body;
+    const [existing] = await _pgQuery(
+      `SELECT id, status FROM public.client_invoices WHERE id=$1`, [req.params.id]);
+    if (!existing) return res.status(404).json({ ok: false, error: 'not found' });
+    if (existing.status !== 'invoice_draft')
+      return res.status(400).json({ ok: false, error: `status is ${existing.status}, expected invoice_draft` });
+    const seq = await _pgQuery(
+      `SELECT COALESCE(MAX(id),0)+1 AS n FROM public.client_invoices`);
+    const num = invoice_number || `JDL-${new Date().getFullYear()}-${String(seq[0].n).padStart(4,'0')}`;
+    await _pgQuery(`
+      UPDATE public.client_invoices
+      SET status='invoiced', invoice_number=$1,
+          issue_date=CURRENT_DATE, due_date=CURRENT_DATE + $2::int,
+          sent_at=now()
+      WHERE id=$3
+    `, [num, due_days, req.params.id]);
+    console.log(JSON.stringify({ event:'invoice_issued', invoice_id:req.params.id, number:num }));
+    res.json({ ok: true, invoice_number: num });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.post('/api/admin/invoices/:id/mark-paid', requireRole('finance'), async (req, res) => {
+  try {
+    const { amount, method = 'bank_transfer', reference = '', notes = '' } = req.body;
+    const [inv] = await _pgQuery(
+      `SELECT id, total, status FROM public.client_invoices WHERE id=$1`, [req.params.id]);
+    if (!inv) return res.status(404).json({ ok: false, error: 'not found' });
+    const paid_amount = parseFloat(amount || inv.total);
+    await _pgQuery(`
+      INSERT INTO public.payments_received (invoice_id, amount, method, reference, notes)
+      VALUES ($1, $2, $3, $4, $5)
+    `, [req.params.id, paid_amount, method, reference, notes]);
+    await _pgQuery(`
+      UPDATE public.client_invoices SET status='paid', paid_at=now() WHERE id=$1
+    `, [req.params.id]);
+    console.log(JSON.stringify({ event:'invoice_marked_paid', invoice_id:req.params.id, amount:paid_amount }));
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+// ── Admin Cashflow ────────────────────────────────────────────────────────────
+
+app.get('/api/admin/cashflow/overview', requireRole('finance'), async (req, res) => {
+  try {
+    const [invoiced, received, receivable, payPending, payPaid] = await Promise.all([
+      _pgQuery(`
+        SELECT COALESCE(SUM(total),0) AS v FROM public.client_invoices
+        WHERE status IN ('invoiced','paid')
+          AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())
+      `, []),
+      _pgQuery(`
+        SELECT COALESCE(SUM(amount),0) AS v FROM public.payments_received
+        WHERE DATE_TRUNC('month', paid_at) = DATE_TRUNC('month', NOW())
+      `, []),
+      _pgQuery(`
+        SELECT COALESCE(SUM(total),0) AS v FROM public.client_invoices
+        WHERE status='invoiced'
+      `, []),
+      _pgQuery(`
+        SELECT COALESCE(SUM(amount),0) AS v FROM public.worker_payouts
+        WHERE status='pending'
+      `, []),
+      _pgQuery(`
+        SELECT COALESCE(SUM(amount),0) AS v FROM public.worker_payouts
+        WHERE status='paid'
+          AND DATE_TRUNC('month', paid_at) = DATE_TRUNC('month', NOW())
+      `, []),
+    ]);
+    const inv   = parseFloat(invoiced[0].v);
+    const recv  = parseFloat(received[0].v);
+    const open  = parseFloat(receivable[0].v);
+    const ppend = parseFloat(payPending[0].v);
+    const ppaid = parseFloat(payPaid[0].v);
+    console.log(JSON.stringify({ event: 'cashflow_overview_requested', user: req.user?.sub }));
+    res.json({
+      ok: true,
+      total_invoiced_month:   inv,
+      total_received_month:   recv,
+      total_receivable_open:  open,
+      total_payout_pending:   ppend,
+      total_payout_paid:      ppaid,
+      estimated_margin:       parseFloat((inv - ppend).toFixed(2)),
+      operational_balance:    parseFloat((recv - ppaid).toFixed(2)),
+    });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.get('/api/admin/payouts', requireRole('finance'), async (req, res) => {
+  try {
+    const { status } = req.query;
+    const params = [];
+    let where = 'WHERE 1=1';
+    if (status) { params.push(status); where += ` AND wp.status=$${params.length}`; }
+    const rows = await _pgQuery(`
+      SELECT wp.id, wp.timesheet_id, wp.worker_id, wp.client_id,
+             c.name AS client_name, wp.amount, wp.status,
+             wp.due_date, wp.paid_at, wp.payment_method, wp.notes, wp.created_at,
+             et.log_date, et.hours
+      FROM public.worker_payouts wp
+      LEFT JOIN public.clients c ON c.id = wp.client_id
+      LEFT JOIN public.event_timesheets et ON et.id = wp.timesheet_id
+      ${where}
+      ORDER BY wp.created_at DESC LIMIT 200
+    `, params);
+    res.json({ ok: true, payouts: rows });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.post('/api/admin/payouts/:id/mark-paid', requireRole('finance'), async (req, res) => {
+  try {
+    const { method = 'bank_transfer', notes = '' } = req.body;
+    const [wp] = await _pgQuery(
+      `SELECT id, status FROM public.worker_payouts WHERE id=$1`, [req.params.id]);
+    if (!wp) return res.status(404).json({ ok: false, error: 'not found' });
+    if (wp.status === 'paid') return res.status(400).json({ ok: false, error: 'already paid' });
+    await _pgQuery(`
+      UPDATE public.worker_payouts
+      SET status='paid', paid_at=now(), payment_method=$1, notes=$2
+      WHERE id=$3
+    `, [method, notes || null, req.params.id]);
+    console.log(JSON.stringify({
+      event: 'worker_payout_marked_paid', payout_id: req.params.id,
+      method, user: req.user?.sub,
+    }));
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
 // All endpoints: requireClientAccess → filters by req.user.client_id (or all if admin)
 
 function _clientId(req) {
@@ -2521,32 +2695,27 @@ app.get('/api/client/expenses', requireClientAccess, async (req, res) => {
 app.get('/api/client/invoices', requireClientAccess, async (req, res) => {
   try {
     const cid = _clientId(req);
-    const params = [];
-    let cidClause = '';
-    if (cid) {
-      params.push(cid);
-      cidClause = `AND (ti.metadata->>'ts_id')::int IN (
-        SELECT id FROM public.event_timesheets WHERE client_id=$1)`;
-    }
+    const params = cid ? [cid] : [];
+    const cidClause = cid ? 'AND ci.client_id=$1' : '';
     const rows = await _pgQuery(`
-      SELECT ti.id, ti.number, ti.status, ti.amount, ti.currency,
-             ti.client, ti.due_date, ti.created_at,
-             ti.metadata->>'log_date'  AS log_date,
-             ti.metadata->>'service_note' AS service_note,
-             ti.metadata->'lines'      AS lines
-      FROM public.twin_invoices ti
-      WHERE ti.status IN ('draft','sent','paid') ${cidClause}
-      ORDER BY ti.id DESC
-      LIMIT 100
+      SELECT ci.id, ci.invoice_number, ci.status,
+             ci.subtotal, ci.tax_total, ci.total,
+             ci.issue_date, ci.due_date, ci.paid_at, ci.created_at,
+             et.worker_id, et.log_date, et.hours
+      FROM public.client_invoices ci
+      LEFT JOIN public.event_timesheets et ON et.id = ci.timesheet_id
+      ${cidClause ? 'WHERE ' + cidClause.slice(4) : ''}
+      ORDER BY ci.created_at DESC LIMIT 100
     `, params);
-    const result = rows.map(r => {
-      const d = {...r};
-      for (const k of Object.keys(d)) {
-        if (d[k] instanceof Date) d[k] = d[k].toISOString();
-      }
-      return d;
-    });
-    res.json({ ok: true, invoices: result });
+    // Totais por estado (sem mostrar worker_pay)
+    const totals = { draft: 0, invoiced: 0, paid: 0, pending: 0 };
+    for (const r of rows) {
+      const v = parseFloat(r.total || 0);
+      if (r.status === 'paid')           totals.paid     += v;
+      else if (r.status === 'invoice_draft') totals.draft += v;
+      else if (r.status === 'invoiced')  { totals.invoiced += v; totals.pending += v; }
+    }
+    res.json({ ok: true, invoices: rows, totals });
   } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
 });
 

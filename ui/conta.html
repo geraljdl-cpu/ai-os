@@ -199,14 +199,29 @@ tr:hover td{background:#f8fafc}
 
     <!-- Invoices tab -->
     <div class="tab-content" id="tab-invoices">
-      <div class="card-header"><h3>Faturas / drafts</h3></div>
+      <div class="card-header"><h3>Faturas</h3></div>
+      <!-- KPIs faturas -->
+      <div id="inv-kpis" style="display:none;gap:10px;margin-bottom:12px;display:flex;flex-wrap:wrap">
+        <div class="kpi-card" style="min-width:130px">
+          <div class="kpi-label">Pendentes</div>
+          <div class="kpi-value" id="inv-kpi-pending">—</div>
+        </div>
+        <div class="kpi-card" style="min-width:130px">
+          <div class="kpi-label">Pagas</div>
+          <div class="kpi-value" id="inv-kpi-paid">—</div>
+        </div>
+        <div class="kpi-card" style="min-width:130px">
+          <div class="kpi-label">Rascunhos</div>
+          <div class="kpi-value" id="inv-kpi-draft">—</div>
+        </div>
+      </div>
       <div id="inv-loading" class="empty"><span class="spinner"></span></div>
       <div id="inv-table" style="overflow-x:auto;display:none">
         <table>
           <thead>
             <tr>
-              <th>Nº</th><th>Data serviço</th><th>Colaborador</th>
-              <th>Total</th><th>Estado</th><th>Detalhe</th>
+              <th>Nº / ID</th><th>Serviço</th><th>Colaborador</th>
+              <th>Subtotal</th><th>IVA</th><th>Total</th><th>Estado</th><th>Vencimento</th>
             </tr>
           </thead>
           <tbody id="inv-body"></tbody>
@@ -394,24 +409,46 @@ async function loadInvoices() {
 
   const d = await api('/client/invoices');
   document.getElementById('inv-loading').style.display = 'none';
+
+  // KPIs
+  if (d.totals) {
+    document.getElementById('inv-kpis').style.display = 'flex';
+    document.getElementById('inv-kpi-pending').textContent = fmt(d.totals.pending) + ' €';
+    document.getElementById('inv-kpi-paid').textContent    = fmt(d.totals.paid) + ' €';
+    document.getElementById('inv-kpi-draft').textContent   = fmt(d.totals.draft) + ' €';
+  }
+
   if (!d.ok || !d.invoices?.length) {
     document.getElementById('inv-empty').style.display = 'block';
     return;
   }
-  const invStatusLabel = {draft:'Rascunho',sent:'Enviada',paid:'Paga'};
+  const invStatusLabel = {
+    invoice_draft: 'Rascunho',
+    invoiced:      'Emitida',
+    partially_paid:'Pag. parcial',
+    paid:          'Paga',
+    cancelled:     'Cancelada',
+  };
+  const invStatusColor = {
+    invoice_draft: '#64748b',
+    invoiced:      '#3b82f6',
+    partially_paid:'#f59e0b',
+    paid:          '#22c55e',
+    cancelled:     '#ef4444',
+  };
   const tbody = document.getElementById('inv-body');
   tbody.innerHTML = d.invoices.map(inv => {
-    const lines = inv.lines || [];
-    const detail = lines.length > 1
-      ? `<span title="${lines.map(l=>l.description+': '+fmt(l.total)+'€').join('\n')}" style="cursor:help;font-size:12px;color:var(--blue)">${lines.length} linhas</span>`
-      : (lines[0]?.description || '—');
+    const num = inv.invoice_number || `#${inv.id}`;
+    const color = invStatusColor[inv.status] || '#64748b';
     return `<tr>
-      <td><b>${inv.number}</b></td>
+      <td><b>${num}</b></td>
       <td>${fmtDate(inv.log_date)}</td>
-      <td>${inv.client||'—'}</td>
-      <td class="amount">${fmt(inv.amount)} €</td>
-      <td><span class="badge badge-${inv.status}">${invStatusLabel[inv.status]||inv.status}</span></td>
-      <td>${detail}</td>
+      <td>${inv.worker_id || '—'}</td>
+      <td class="amount">${fmt(inv.subtotal)} €</td>
+      <td class="amount" style="color:#64748b">${fmt(inv.tax_total)} €</td>
+      <td class="amount"><b>${fmt(inv.total)} €</b></td>
+      <td><span style="background:${color}22;color:${color};padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600">${invStatusLabel[inv.status]||inv.status}</span></td>
+      <td style="color:${inv.status==='invoiced'&&inv.due_date&&new Date(inv.due_date)<new Date()?'#ef4444':'inherit'}">${fmtDate(inv.due_date)}</td>
     </tr>`;
   }).join('');
   document.getElementById('inv-table').style.display = 'block';

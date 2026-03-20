@@ -396,6 +396,21 @@ header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
         <div id="fin-payouts-list"><div class="loading"><span class="spinner"></span></div></div>
       </div>
 
+      <!-- Cashflow Overview (admin only) -->
+      <div class="card" id="cashflow-card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+          Cashflow — mês actual
+          <button class="btn btn-ghost btn-sm" onclick="loadCashflow()">↺</button>
+        </div>
+        <div id="cashflow-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.75rem;margin-top:.5rem">
+          <div class="loading"><span class="spinner"></span></div>
+        </div>
+        <div style="margin-top:1rem">
+          <div style="font-size:.72rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.5rem;font-weight:700">Pagamentos pendentes ao colaborador</div>
+          <div id="cashflow-payouts-list" style="font-size:.82rem"></div>
+        </div>
+      </div>
+
       <!-- Mock Invoice Panel -->
       <div class="card" id="mock-invoice-panel">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
@@ -1507,7 +1522,60 @@ async function loadFinance() {
       : `<div style="color:#475569;font-size:.83rem">Sem pagamentos calculados para esta semana.
            <a href="/finance" style="color:#3b82f6;text-decoration:none;margin-left:.4rem">Calcular →</a></div>`;
     loadMockInvoices();
+    loadCashflow();
   } catch(e) { console.error(e); }
+}
+
+async function loadCashflow() {
+  const kpiEl = document.getElementById('cashflow-kpis');
+  const payEl = document.getElementById('cashflow-payouts-list');
+  if (!kpiEl) return;
+  try {
+    const [cf, pays] = await Promise.all([
+      api('/api/admin/cashflow/overview'),
+      api('/api/admin/payouts?status=pending'),
+    ]);
+    if (!cf.ok) { kpiEl.innerHTML = '<span style="color:#ef4444;font-size:.8rem">Sem acesso</span>'; return; }
+    const kpis = [
+      { lbl:'Faturado (mês)',  val: fmtEur(cf.total_invoiced_month),   clr:'#60a5fa' },
+      { lbl:'Recebido (mês)',  val: fmtEur(cf.total_received_month),   clr:'#34d399' },
+      { lbl:'A receber',       val: fmtEur(cf.total_receivable_open),  clr:'#f59e0b' },
+      { lbl:'Pagar colabor.', val: fmtEur(cf.total_payout_pending),   clr:'#fb923c' },
+      { lbl:'Margem estimada', val: fmtEur(cf.estimated_margin),       clr: cf.estimated_margin >= 0 ? '#34d399' : '#ef4444' },
+      { lbl:'Saldo operac.',   val: fmtEur(cf.operational_balance),    clr: cf.operational_balance >= 0 ? '#34d399' : '#ef4444' },
+    ];
+    kpiEl.innerHTML = kpis.map(k => `
+      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:.5rem;padding:.75rem">
+        <div style="font-size:1.1rem;font-weight:700;color:${k.clr}">${k.val}</div>
+        <div style="font-size:.65rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-top:.2rem">${k.lbl}</div>
+      </div>`).join('');
+    const pending = (pays.payouts || []);
+    if (!pending.length) {
+      payEl.innerHTML = '<span style="color:#475569">Sem pagamentos pendentes</span>';
+      return;
+    }
+    payEl.innerHTML = pending.map(p => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:.4rem 0;border-bottom:1px solid #1e293b">
+        <div>
+          <span style="font-weight:600;color:#e2e8f0">${esc(p.worker_id||'?')}</span>
+          <span style="color:#64748b;font-size:.75rem;margin-left:.4rem">${p.log_date||''}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:.5rem">
+          <span style="font-weight:700;color:#fb923c">${fmtEur(p.amount)}</span>
+          <button onclick="markPayoutPaid(${p.id})" style="background:#1e3a5f;color:#60a5fa;border:1px solid #2563eb;border-radius:4px;padding:.15rem .5rem;font-size:.72rem;cursor:pointer">Pago</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { if(kpiEl) kpiEl.innerHTML = '<span style="color:#ef4444;font-size:.8rem">Erro ao carregar</span>'; }
+}
+
+async function markPayoutPaid(id) {
+  if (!confirm('Marcar este pagamento como efectuado?')) return;
+  try {
+    const r = await api(`/api/admin/payouts/${id}/mark-paid`, { method: 'POST',
+      headers: {'Content-Type':'application/json'}, body: JSON.stringify({ method: 'bank_transfer' }) });
+    if (r.ok) loadCashflow();
+    else alert('Erro: ' + (r.error || 'desconhecido'));
+  } catch(e) { alert('Erro de rede'); }
 }
 
 function getMondayISO() {

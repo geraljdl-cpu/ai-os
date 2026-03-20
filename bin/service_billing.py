@@ -323,6 +323,7 @@ def validate_service_log(conn, token: str, approved: bool, note: str = "",
         if adjusted_days:
             ts_for_payout["worker_pay"] = round(float(rate["rate_worker_day"]) * eff_days, 2)
         payout_id  = generate_payout(conn, ts_id, ts_for_payout)
+        create_worker_payout(conn, ts_id, ts_for_payout)
         ts_for_inv = dict(ts)
         if adjusted_days:
             ts_for_inv["days_equivalent"] = eff_days
@@ -331,6 +332,8 @@ def validate_service_log(conn, token: str, approved: bool, note: str = "",
             ts_for_inv["invoice_total"]   = net + vat
         invoice_id = generate_invoice_draft(conn, ts_id, ts_for_inv,
                                             extras=extras, final_total=final_total)
+        create_client_invoice(conn, ts_id, ts_for_inv,
+                              extras=extras, final_total=final_total)
         msg   = f"Servico validado: {ts.get('worker_id','?')} · {ts.get('log_date','?')} · {eff_days}d"
         level = "info"
     else:
@@ -443,6 +446,110 @@ def generate_invoice_draft(conn, ts_id: int, ts: dict,
         invoice_id = cur.fetchone()["id"]
 
     return invoice_id
+
+
+def create_worker_payout(conn, ts_id: int, ts: dict) -> int:
+    """Cria worker_payout por timesheet aprovado (granularidade cashflow)."""
+    worker_id = ts.get("worker_id", "")
+    amount    = float(ts.get("worker_pay") or 0)
+    client_id = ts.get("client_id") or None
+
+    with conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO public.worker_payouts
+                (timesheet_id, worker_id, client_id, amount, status, due_date)
+            VALUES (%s, %s, %s, %s, 'pending',
+                    CURRENT_DATE + INTERVAL '7 days')
+            RETURNING id
+        """, (ts_id, worker_id, client_id or None, amount))
+        payout_id = cur.fetchone()["id"]
+
+    print(json.dumps({
+        "event":        "worker_payout_created",
+        "payout_id":    payout_id,
+        "timesheet_id": ts_id,
+        "worker_id":    worker_id,
+        "amount":       amount,
+    }), file=sys.stderr)
+    return payout_id
+
+
+def create_client_invoice(conn, ts_id: int, ts: dict,
+                          extras: list = None, final_total: float = None) -> int:
+    """
+    Cria client_invoices + client_invoice_lines a partir de um timesheet aprovado.
+    Resolve client_id via resolve_client_context se necessário.
+    Retorna invoice_id (0 se não foi possível resolver o cliente).
+    """
+    extras = extras or []
+
+    days       = float(ts.get("days_equivalent") or 1)
+    net        = float(ts.get("invoice_net") or 0)
+    vat        = float(ts.get("invoice_vat") or 0)
+    base_total = round(net + vat, 2)
+    extras_sum = sum(round(float(e.get("amount", 0)), 2) for e in extras)
+    total      = round(final_total if final_total is not None else (base_total + extras_sum), 2)
+    subtotal   = round(net + extras_sum, 2)
+
+    # Resolver client_id — direto ou via worker_contacts → client_contacts
+    client_id = ts.get("client_id")
+    if not client_id:
+        wc = q1(conn, """
+            SELECT cc.client_id FROM public.worker_contacts wc
+            JOIN public.client_contacts cc ON cc.phone = wc.default_client_phone
+            WHERE wc.whatsapp_phone = %s AND wc.active = true LIMIT 1
+        """, (ts.get("worker_phone") or "",))
+        client_id = wc.get("client_id")
+
+    if not client_id:
+        import logging as _l
+        _l.getLogger(__name__).warning(
+            "create_client_invoice: client_id not resolved for ts_id=%s", ts_id)
+        return 0
+
+    # Inserir fatura
+    with conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO public.client_invoices
+                (client_id, timesheet_id, status, subtotal, tax_total, total, due_date)
+            VALUES (%s, %s, 'invoice_draft', %s, %s, %s,
+                    CURRENT_DATE + INTERVAL '30 days')
+            RETURNING id
+        """, (client_id, ts_id, subtotal, round(vat, 2), total))
+        inv_id = cur.fetchone()["id"]
+
+    # Linhas: base + extras (despesas MB WAY não entram aqui)
+    unit_price_base = round(net / days, 2) if days else net
+    lines = [("service", f"Mão de obra ({days:.4g}d)", days, unit_price_base, base_total)]
+    for e in extras:
+        amt = round(float(e.get("amount", 0)), 2)
+        lines.append(("extra", e.get("description", "Extra"), 1, amt, amt))
+
+    with conn.cursor() as cur:
+        for lt, desc, qty, unit, amt in lines:
+            cur.execute("""
+                INSERT INTO public.client_invoice_lines
+                    (invoice_id, line_type, description, qty, unit_price, amount)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (inv_id, lt, desc, qty, unit, amt))
+
+    # Ligar timesheet → invoice
+    ex(conn, """
+        UPDATE public.event_timesheets
+        SET client_invoice_id = %s
+        WHERE id = %s
+    """, (inv_id, ts_id))
+
+    conn.commit()
+    print(json.dumps({
+        "event":        "invoice_draft_created",
+        "invoice_id":   inv_id,
+        "timesheet_id": ts_id,
+        "client_id":    client_id,
+        "total":        total,
+        "lines":        len(lines),
+    }), file=sys.stderr)
+    return inv_id
 
 
 def add_manual_entry(conn, person_id: int, log_date: str, start_time: str, end_time: str,
