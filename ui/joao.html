@@ -252,6 +252,10 @@ header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
     <div class="sidebar-item" data-view="config" onclick="setView('config')">
       <span class="icon">⚙️</span> Config
     </div>
+    <div class="sidebar-item" data-view="rh" onclick="setView('rh')">
+      <span class="icon">👥</span> RH
+      <span id="badge-rh" style="margin-left:auto;background:#ef4444;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;display:none"></span>
+    </div>
     <div class="sidebar-item" data-view="seguros" onclick="setView('seguros')">
       <span class="icon">🛡️</span> Seguros
       <span id="badge-seguros" style="margin-left:auto;background:#f59e0b;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;display:none"></span>
@@ -808,6 +812,146 @@ header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
       <div id="config-table"></div>
     </div>
 
+    <!-- VIEW: RH -->
+    <div id="view-rh" style="display:none">
+      <div class="section-header">
+        <div class="section-title">👥 Gestão de Recursos Humanos</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadRh()">↺ Actualizar</button>
+      </div>
+
+      <!-- KPIs -->
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1rem">
+        <div class="card" style="text-align:center">
+          <div style="font-size:2rem;font-weight:700;color:#34d399" id="rh-kpi-total">—</div>
+          <div style="color:#94a3b8;font-size:.8rem;margin-top:.25rem">Pessoas</div>
+        </div>
+        <div class="card" style="text-align:center">
+          <div style="font-size:2rem;font-weight:700;color:#f59e0b" id="rh-kpi-expiring">—</div>
+          <div style="color:#94a3b8;font-size:.8rem;margin-top:.25rem">Contratos a vencer 30d</div>
+        </div>
+        <div class="card" style="text-align:center">
+          <div style="font-size:2rem;font-weight:700;color:#ef4444" id="rh-kpi-docs-missing">—</div>
+          <div style="color:#94a3b8;font-size:.8rem;margin-top:.25rem">Sem documentos</div>
+        </div>
+      </div>
+
+      <!-- Tabela de pessoas -->
+      <div class="card" style="margin-bottom:1rem">
+        <div class="card-title">👤 Pessoas</div>
+        <div id="rh-persons-list"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+
+      <!-- Painel de detalhe -->
+      <div id="rh-detail-panel" style="display:none">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+            <span id="rh-detail-name" style="font-weight:700;font-size:1.1rem;color:#e2e8f0"></span>
+            <button onclick="document.getElementById('rh-detail-panel').style.display='none'"
+              style="background:#334155;color:#e2e8f0;border:none;padding:.3rem .7rem;border-radius:4px;cursor:pointer;font-size:.8rem">✕ Fechar</button>
+          </div>
+
+          <!-- Tabs -->
+          <div style="display:flex;gap:.5rem;margin-bottom:1rem;border-bottom:1px solid #334155;padding-bottom:.5rem">
+            <button id="rh-tab-dados-btn"     onclick="rhTab('dados')"     style="padding:.35rem .8rem;border:none;border-radius:4px;cursor:pointer;font-size:.8rem;background:#6366f1;color:#fff">Dados Pessoais</button>
+            <button id="rh-tab-contratos-btn" onclick="rhTab('contratos')" style="padding:.35rem .8rem;border:none;border-radius:4px;cursor:pointer;font-size:.8rem;background:#1e293b;color:#94a3b8">Contratos</button>
+            <button id="rh-tab-docs-btn"      onclick="rhTab('docs')"      style="padding:.35rem .8rem;border:none;border-radius:4px;cursor:pointer;font-size:.8rem;background:#1e293b;color:#94a3b8">Documentos</button>
+          </div>
+
+          <!-- Tab: Dados Pessoais -->
+          <div id="rh-tab-dados">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+              <div><label style="font-size:.78rem;color:#94a3b8">IBAN</label>
+                <input id="rh-ed-iban" placeholder="PT50..." style="width:100%;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.4rem;font-size:.85rem;box-sizing:border-box"></div>
+              <div><label style="font-size:.78rem;color:#94a3b8">NISS</label>
+                <input id="rh-ed-niss" placeholder="123456789XX" style="width:100%;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.4rem;font-size:.85rem;box-sizing:border-box"></div>
+              <div><label style="font-size:.78rem;color:#94a3b8">Data de Nascimento</label>
+                <input id="rh-ed-nasc" type="date" style="width:100%;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.4rem;font-size:.85rem;box-sizing:border-box"></div>
+              <div><label style="font-size:.78rem;color:#94a3b8">Data de Admissão</label>
+                <input id="rh-ed-adm" type="date" style="width:100%;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.4rem;font-size:.85rem;box-sizing:border-box"></div>
+              <div><label style="font-size:.78rem;color:#94a3b8">Tipo de Contrato Actual</label>
+                <select id="rh-ed-tipo" style="width:100%;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.4rem;font-size:.85rem">
+                  <option value="">—</option>
+                  <option value="trabalho_prazo">Trabalho a Prazo</option>
+                  <option value="trabalho_sem_termo">Trabalho Sem Termo</option>
+                  <option value="recibo_verde">Recibo Verde</option>
+                  <option value="nda">NDA / Confidencialidade</option>
+                </select></div>
+              <div><label style="font-size:.78rem;color:#94a3b8">Morada</label>
+                <input id="rh-ed-morada" placeholder="Rua, nº, localidade" style="width:100%;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.4rem;font-size:.85rem;box-sizing:border-box"></div>
+            </div>
+            <div style="margin-top:.75rem">
+              <button onclick="savePersonExtra()" style="background:#22c55e;color:#fff;border:none;padding:.45rem 1rem;border-radius:4px;cursor:pointer;font-size:.85rem">💾 Guardar</button>
+            </div>
+          </div>
+
+          <!-- Tab: Contratos -->
+          <div id="rh-tab-contratos" style="display:none">
+            <div style="margin-bottom:.75rem">
+              <button onclick="showRhContractModal()" style="background:#6366f1;color:#fff;border:none;padding:.35rem .8rem;border-radius:4px;cursor:pointer;font-size:.82rem">+ Adicionar Contrato</button>
+            </div>
+            <div id="rh-contracts-list"><div style="color:#64748b;font-size:.85rem">Nenhum contrato registado.</div></div>
+          </div>
+
+          <!-- Tab: Documentos -->
+          <div id="rh-tab-docs" style="display:none">
+            <div style="margin-bottom:.75rem">
+              <button onclick="showRhDocModal()" style="background:#6366f1;color:#fff;border:none;padding:.35rem .8rem;border-radius:4px;cursor:pointer;font-size:.82rem">+ Upload Documento</button>
+            </div>
+            <div id="rh-docs-list"><div style="color:#64748b;font-size:.85rem">Nenhum documento.</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: Adicionar Contrato -->
+      <div id="rh-contract-modal" style="display:none" class="card">
+        <div class="card-title">+ Novo Contrato</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+          <div><label style="font-size:.78rem;color:#94a3b8">Tipo *</label>
+            <select id="rh-cm-tipo" style="width:100%;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.4rem;font-size:.85rem">
+              <option value="trabalho_prazo">Trabalho a Prazo</option>
+              <option value="trabalho_sem_termo">Trabalho Sem Termo</option>
+              <option value="recibo_verde">Recibo Verde</option>
+              <option value="nda">NDA / Confidencialidade</option>
+            </select></div>
+          <div><label style="font-size:.78rem;color:#94a3b8">Data de Início *</label>
+            <input id="rh-cm-inicio" type="date" style="width:100%;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.4rem;font-size:.85rem;box-sizing:border-box"></div>
+          <div><label style="font-size:.78rem;color:#94a3b8">Data de Fim (opcional)</label>
+            <input id="rh-cm-fim" type="date" style="width:100%;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.4rem;font-size:.85rem;box-sizing:border-box"></div>
+          <div><label style="font-size:.78rem;color:#94a3b8">Notas</label>
+            <input id="rh-cm-notas" placeholder="Observações" style="width:100%;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.4rem;font-size:.85rem;box-sizing:border-box"></div>
+          <div style="grid-column:1/-1"><label style="font-size:.78rem;color:#94a3b8">PDF do Contrato (opcional)</label>
+            <input id="rh-cm-file" type="file" accept=".pdf" style="color:#94a3b8;font-size:.82rem;width:100%"></div>
+        </div>
+        <div style="margin-top:.75rem;display:flex;gap:.5rem">
+          <button onclick="addRhContract()" style="background:#22c55e;color:#fff;border:none;padding:.45rem 1rem;border-radius:4px;cursor:pointer;font-size:.85rem">Guardar</button>
+          <button onclick="document.getElementById('rh-contract-modal').style.display='none'" style="background:#334155;color:#e2e8f0;border:none;padding:.45rem .8rem;border-radius:4px;cursor:pointer;font-size:.85rem">Cancelar</button>
+        </div>
+      </div>
+
+      <!-- Modal: Upload Documento -->
+      <div id="rh-doc-modal" style="display:none" class="card">
+        <div class="card-title">+ Upload Documento</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+          <div><label style="font-size:.78rem;color:#94a3b8">Tipo *</label>
+            <select id="rh-dm-tipo" style="width:100%;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.4rem;font-size:.85rem">
+              <option value="id">Documento de Identificação</option>
+              <option value="contrato">Contrato</option>
+              <option value="iban">Comprovativo IBAN</option>
+              <option value="certificado">Certificado</option>
+              <option value="outro">Outro</option>
+            </select></div>
+          <div><label style="font-size:.78rem;color:#94a3b8">Descrição</label>
+            <input id="rh-dm-descricao" placeholder="Ex: BI frente" style="width:100%;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.4rem;font-size:.85rem;box-sizing:border-box"></div>
+          <div style="grid-column:1/-1"><label style="font-size:.78rem;color:#94a3b8">Ficheiro PDF *</label>
+            <input id="rh-dm-file" type="file" accept=".pdf" style="color:#94a3b8;font-size:.82rem;width:100%"></div>
+        </div>
+        <div style="margin-top:.75rem;display:flex;gap:.5rem">
+          <button onclick="uploadRhDoc()" style="background:#22c55e;color:#fff;border:none;padding:.45rem 1rem;border-radius:4px;cursor:pointer;font-size:.85rem">Fazer Upload</button>
+          <button onclick="document.getElementById('rh-doc-modal').style.display='none'" style="background:#334155;color:#e2e8f0;border:none;padding:.45rem .8rem;border-radius:4px;cursor:pointer;font-size:.85rem">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
     <!-- VIEW: Seguros -->
     <div id="view-seguros" style="display:none">
       <div class="section-header">
@@ -1055,6 +1199,7 @@ function setView(v) {
   if (v === 'agent-inbox') loadAgentInbox();
   if (v === 'docs')        loadDocs();
   if (v === 'viaturas')   loadViaturas();
+  if (v === 'rh')          loadRh();
   if (v === 'seguros')     loadSeguros();
   if (v === 'inbox')       loadInbox();
   if (v === 'autonomia') loadAutonomia();
@@ -2026,6 +2171,272 @@ const DOC_TYPE_LABEL   = {
   seguro_viatura: 'Seguro', inspecao_viatura: 'Inspeção', iuc: 'IUC',
   contrato_concurso: 'Contrato/Concurso',
 };
+
+// ── RH ────────────────────────────────────────────────────────────────────────
+
+let _rhCurrentPersonId = null;
+
+async function loadRh() {
+  // Load stats + badge
+  try {
+    const stats = await api('/api/rh/stats');
+    const kpi = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v ?? '—'; };
+    kpi('rh-kpi-total',        stats.persons_total);
+    kpi('rh-kpi-expiring',     stats.contracts_expiring_30d);
+    kpi('rh-kpi-docs-missing', stats.docs_missing);
+    const badge = document.getElementById('badge-rh');
+    if (badge) {
+      const n = (stats.badge_count || 0);
+      badge.textContent = n;
+      badge.style.display = n > 0 ? '' : 'none';
+    }
+  } catch(e) {}
+
+  // Load persons table
+  try {
+    const persons = await api('/api/rh/persons');
+    const el = document.getElementById('rh-persons-list');
+    if (!el) return;
+    if (!persons.length) {
+      el.innerHTML = '<div style="color:#94a3b8;padding:.5rem;font-size:.85rem">Sem pessoas registadas.</div>';
+      return;
+    }
+    const TIPO_LABEL = {
+      trabalho_prazo: 'Trabalho a Prazo', trabalho_sem_termo: 'Sem Termo',
+      recibo_verde: 'Recibo Verde', nda: 'NDA'
+    };
+    el.innerHTML = '<table style="width:100%;font-size:.83rem;border-collapse:collapse">' +
+      '<thead><tr style="color:#64748b;font-size:.78rem">' +
+      '<th style="text-align:left;padding:.35rem .4rem">Nome</th>' +
+      '<th style="text-align:left;padding:.35rem .4rem">Role</th>' +
+      '<th style="text-align:left;padding:.35rem .4rem">Contrato</th>' +
+      '<th style="text-align:left;padding:.35rem .4rem">Admissão</th>' +
+      '<th style="padding:.35rem .4rem"></th></tr></thead><tbody>' +
+      persons.map(p => `<tr style="border-bottom:1px solid #1e293b;cursor:pointer" onclick="openRhDetail(${p.id})">
+        <td style="padding:.4rem">${esc(p.name)}</td>
+        <td style="padding:.4rem;color:#94a3b8">${esc(p.role||'—')}</td>
+        <td style="padding:.4rem">${TIPO_LABEL[p.tipo_contrato_atual] || (p.tipo_contrato_atual ? esc(p.tipo_contrato_atual) : '—')}</td>
+        <td style="padding:.4rem;color:#94a3b8">${fmtDate(p.data_admissao)}</td>
+        <td style="padding:.4rem"><button onclick="event.stopPropagation();openRhDetail(${p.id})"
+          style="background:#334155;color:#e2e8f0;border:none;padding:.2rem .5rem;border-radius:3px;cursor:pointer;font-size:.75rem">▸ Ver</button></td>
+      </tr>`).join('') +
+      '</tbody></table>';
+  } catch(e) {
+    const el = document.getElementById('rh-persons-list');
+    if (el) el.innerHTML = `<div style="color:#ef4444;font-size:.82rem">Erro: ${esc(String(e))}</div>`;
+  }
+}
+
+async function openRhDetail(personId) {
+  _rhCurrentPersonId = personId;
+  const panel = document.getElementById('rh-detail-panel');
+  if (panel) panel.style.display = '';
+  // Scroll to panel
+  panel && panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  try {
+    const p = await api(`/api/rh/persons/${personId}`);
+    const nameEl = document.getElementById('rh-detail-name');
+    if (nameEl) nameEl.textContent = p.name || '';
+
+    // Fill Dados Pessoais tab
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+    set('rh-ed-iban',   p.iban);
+    set('rh-ed-niss',   p.niss);
+    set('rh-ed-nasc',   p.data_nascimento ? p.data_nascimento.slice(0,10) : '');
+    set('rh-ed-adm',    p.data_admissao   ? p.data_admissao.slice(0,10)   : '');
+    set('rh-ed-morada', p.morada);
+    const tipoEl = document.getElementById('rh-ed-tipo');
+    if (tipoEl) tipoEl.value = p.tipo_contrato_atual || '';
+
+    renderRhContracts(p.contracts || []);
+    renderRhDocs(p.documents || []);
+  } catch(e) {
+    showToast('Erro ao carregar pessoa', 'err');
+  }
+
+  rhTab('dados');
+}
+
+function rhTab(tab) {
+  ['dados','contratos','docs'].forEach(t => {
+    const panel = document.getElementById(`rh-tab-${t}`);
+    const btn   = document.getElementById(`rh-tab-${t}-btn`);
+    if (panel) panel.style.display = t === tab ? '' : 'none';
+    if (btn) {
+      btn.style.background = t === tab ? '#6366f1' : '#1e293b';
+      btn.style.color      = t === tab ? '#fff'    : '#94a3b8';
+    }
+  });
+}
+
+function renderRhContracts(contracts) {
+  const el = document.getElementById('rh-contracts-list');
+  if (!el) return;
+  if (!contracts.length) {
+    el.innerHTML = '<div style="color:#64748b;font-size:.85rem">Nenhum contrato registado.</div>';
+    return;
+  }
+  const TIPO_LABEL = {
+    trabalho_prazo: 'Trabalho a Prazo', trabalho_sem_termo: 'Sem Termo',
+    recibo_verde: 'Recibo Verde', nda: 'NDA'
+  };
+  el.innerHTML = '<table style="width:100%;font-size:.82rem;border-collapse:collapse">' +
+    '<thead><tr style="color:#64748b;font-size:.78rem">' +
+    '<th style="text-align:left;padding:.3rem .4rem">Tipo</th>' +
+    '<th style="text-align:left;padding:.3rem .4rem">Início</th>' +
+    '<th style="text-align:left;padding:.3rem .4rem">Fim</th>' +
+    '<th style="padding:.3rem .4rem">Ficheiro</th>' +
+    '<th style="padding:.3rem .4rem"></th></tr></thead><tbody>' +
+    contracts.map(c => `<tr style="border-bottom:1px solid #1e293b">
+      <td style="padding:.35rem .4rem">${TIPO_LABEL[c.tipo] || esc(c.tipo)}</td>
+      <td style="padding:.35rem .4rem;color:#94a3b8">${fmtDate(c.data_inicio)}</td>
+      <td style="padding:.35rem .4rem;color:${c.data_fim ? '#f59e0b' : '#34d399'}">${c.data_fim ? fmtDate(c.data_fim) : 'Sem termo'}</td>
+      <td style="padding:.35rem .4rem;text-align:center">${c.file_path ? `<a href="/api/rh/files/${encodeURIComponent(c.file_path)}" target="_blank" style="color:#60a5fa;font-size:.78rem">📄 PDF</a>` : '—'}</td>
+      <td style="padding:.35rem .4rem;text-align:center">
+        <button onclick="deleteRhContract(${c.id})" style="background:#ef444422;color:#ef4444;border:1px solid #ef444444;padding:.15rem .4rem;border-radius:3px;cursor:pointer;font-size:.72rem">🗑</button>
+      </td>
+    </tr>`).join('') + '</tbody></table>';
+}
+
+function renderRhDocs(docs) {
+  const el = document.getElementById('rh-docs-list');
+  if (!el) return;
+  if (!docs.length) {
+    el.innerHTML = '<div style="color:#64748b;font-size:.85rem">Nenhum documento.</div>';
+    return;
+  }
+  const TIPO_LABEL = { id: 'Identificação', contrato: 'Contrato', iban: 'IBAN', certificado: 'Certificado', outro: 'Outro' };
+  el.innerHTML = '<table style="width:100%;font-size:.82rem;border-collapse:collapse">' +
+    '<thead><tr style="color:#64748b;font-size:.78rem">' +
+    '<th style="text-align:left;padding:.3rem .4rem">Tipo</th>' +
+    '<th style="text-align:left;padding:.3rem .4rem">Descrição</th>' +
+    '<th style="text-align:left;padding:.3rem .4rem">Data</th>' +
+    '<th style="padding:.3rem .4rem">Ficheiro</th>' +
+    '<th style="padding:.3rem .4rem"></th></tr></thead><tbody>' +
+    docs.map(d => `<tr style="border-bottom:1px solid #1e293b">
+      <td style="padding:.35rem .4rem">${TIPO_LABEL[d.tipo] || esc(d.tipo)}</td>
+      <td style="padding:.35rem .4rem;color:#94a3b8">${esc(d.descricao||'—')}</td>
+      <td style="padding:.35rem .4rem;color:#94a3b8">${fmtDate(d.uploaded_at)}</td>
+      <td style="padding:.35rem .4rem;text-align:center">
+        <a href="/api/rh/files/${encodeURIComponent(d.file_path)}" target="_blank" style="color:#60a5fa;font-size:.78rem">📄 PDF</a>
+      </td>
+      <td style="padding:.35rem .4rem;text-align:center">
+        <button onclick="deleteRhDoc(${d.id})" style="background:#ef444422;color:#ef4444;border:1px solid #ef444444;padding:.15rem .4rem;border-radius:3px;cursor:pointer;font-size:.72rem">🗑</button>
+      </td>
+    </tr>`).join('') + '</tbody></table>';
+}
+
+async function savePersonExtra() {
+  if (!_rhCurrentPersonId) return;
+  const body = {
+    iban:               document.getElementById('rh-ed-iban')?.value.trim(),
+    niss:               document.getElementById('rh-ed-niss')?.value.trim(),
+    data_nascimento:    document.getElementById('rh-ed-nasc')?.value || undefined,
+    data_admissao:      document.getElementById('rh-ed-adm')?.value  || undefined,
+    morada:             document.getElementById('rh-ed-morada')?.value.trim(),
+    tipo_contrato_atual: document.getElementById('rh-ed-tipo')?.value || undefined,
+  };
+  // Remove empty strings
+  Object.keys(body).forEach(k => { if (body[k] === '' || body[k] === undefined) delete body[k]; });
+  try {
+    const r = await api(`/api/rh/persons/${_rhCurrentPersonId}/extra`, {
+      method: 'PUT',
+      body: JSON.stringify(body)
+    });
+    showToast(r.ok ? 'Dados guardados' : (r.error || 'Erro'), r.ok ? 'ok' : 'err');
+    if (r.ok) loadRh();
+  } catch(e) { showToast('Erro ao guardar', 'err'); }
+}
+
+function showRhContractModal() {
+  document.getElementById('rh-contract-modal').style.display = '';
+  document.getElementById('rh-doc-modal').style.display = 'none';
+}
+
+function showRhDocModal() {
+  document.getElementById('rh-doc-modal').style.display = '';
+  document.getElementById('rh-contract-modal').style.display = 'none';
+}
+
+async function addRhContract() {
+  if (!_rhCurrentPersonId) return;
+  const tipo      = document.getElementById('rh-cm-tipo')?.value;
+  const inicio    = document.getElementById('rh-cm-inicio')?.value;
+  if (!tipo || !inicio) { showToast('Tipo e data início obrigatórios', 'err'); return; }
+
+  const formData = new FormData();
+  formData.append('tipo',       tipo);
+  formData.append('data_inicio', inicio);
+  const fim   = document.getElementById('rh-cm-fim')?.value;
+  const notas = document.getElementById('rh-cm-notas')?.value;
+  if (fim)   formData.append('data_fim', fim);
+  if (notas) formData.append('notas', notas);
+  const fileEl = document.getElementById('rh-cm-file');
+  if (fileEl?.files[0]) formData.append('file', fileEl.files[0]);
+
+  try {
+    const res = await fetch(`/api/rh/persons/${_rhCurrentPersonId}/contracts`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + TOKEN },
+      body: formData
+    });
+    const r = await res.json();
+    if (r.ok) {
+      showToast('Contrato adicionado');
+      document.getElementById('rh-contract-modal').style.display = 'none';
+      await openRhDetail(_rhCurrentPersonId);
+      loadRh();
+    } else { showToast(r.error || 'Erro', 'err'); }
+  } catch(e) { showToast('Erro ao adicionar contrato', 'err'); }
+}
+
+async function uploadRhDoc() {
+  if (!_rhCurrentPersonId) return;
+  const tipo     = document.getElementById('rh-dm-tipo')?.value;
+  const fileEl   = document.getElementById('rh-dm-file');
+  if (!tipo)          { showToast('Tipo obrigatório', 'err'); return; }
+  if (!fileEl?.files[0]) { showToast('Ficheiro obrigatório', 'err'); return; }
+
+  const formData = new FormData();
+  formData.append('tipo', tipo);
+  const desc = document.getElementById('rh-dm-descricao')?.value;
+  if (desc) formData.append('descricao', desc);
+  formData.append('file', fileEl.files[0]);
+
+  try {
+    const res = await fetch(`/api/rh/persons/${_rhCurrentPersonId}/documents`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + TOKEN },
+      body: formData
+    });
+    const r = await res.json();
+    if (r.ok) {
+      showToast('Documento enviado');
+      document.getElementById('rh-doc-modal').style.display = 'none';
+      await openRhDetail(_rhCurrentPersonId);
+      loadRh();
+    } else { showToast(r.error || 'Erro', 'err'); }
+  } catch(e) { showToast('Erro ao enviar documento', 'err'); }
+}
+
+async function deleteRhContract(id) {
+  if (!confirm('Apagar este contrato?')) return;
+  try {
+    const r = await api(`/api/rh/contracts/${id}`, { method: 'DELETE' });
+    showToast(r.ok ? 'Contrato apagado' : (r.error || 'Erro'), r.ok ? 'ok' : 'err');
+    if (r.ok && _rhCurrentPersonId) await openRhDetail(_rhCurrentPersonId);
+  } catch(e) { showToast('Erro', 'err'); }
+}
+
+async function deleteRhDoc(id) {
+  if (!confirm('Apagar este documento?')) return;
+  try {
+    const r = await api(`/api/rh/documents/${id}`, { method: 'DELETE' });
+    showToast(r.ok ? 'Documento apagado' : (r.error || 'Erro'), r.ok ? 'ok' : 'err');
+    if (r.ok && _rhCurrentPersonId) await openRhDetail(_rhCurrentPersonId);
+  } catch(e) { showToast('Erro', 'err'); }
+}
 
 // ── Seguros ───────────────────────────────────────────────────────────────────
 

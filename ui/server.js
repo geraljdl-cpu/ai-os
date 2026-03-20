@@ -3207,4 +3207,142 @@ app.get('/api/client/monthly', requireClientAccess, async (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
 });
 
+// ── RH Module ──────────────────────────────────────────────────────────────────
+
+const _hrDocsDir = path.join('/home/jdl/ai-os/runtime/hr_docs');
+if (!fs.existsSync(_hrDocsDir)) fs.mkdirSync(_hrDocsDir, { recursive: true });
+
+const _hrUpload = multer ? multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, _hrDocsDir),
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname) || '.pdf';
+      cb(null, `${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, /pdf|image\//i.test(file.mimetype) || file.originalname.endsWith('.pdf')),
+}) : null;
+
+const _rhExec = (args) => {
+  const { execFileSync } = require('child_process');
+  const out = execFileSync('python3', ['/home/jdl/ai-os/bin/rh_engine.py', ...args],
+    { timeout: 12000, encoding: 'utf8' });
+  return JSON.parse(out);
+};
+
+app.get('/api/rh/persons', requireRole('operator'), (req, res) => {
+  try { res.json(_rhExec(['list_persons'])); }
+  catch(e) { res.status(500).json({ ok: false, error: String(e.message||e).slice(0,300) }); }
+});
+
+app.get('/api/rh/persons/:id', requireRole('operator'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    res.json(_rhExec(['get_person', String(id)]));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message||e).slice(0,300) }); }
+});
+
+app.put('/api/rh/persons/:id/extra', requireRole('operator'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    const b = req.body || {};
+    const args = ['upsert_extra', String(id)];
+    if (b.iban)                args.push('--iban',                 String(b.iban).slice(0,50));
+    if (b.niss)                args.push('--niss',                 String(b.niss).slice(0,20));
+    if (b.data_nascimento)     args.push('--data-nascimento',      String(b.data_nascimento).slice(0,10));
+    if (b.morada)              args.push('--morada',               String(b.morada).slice(0,500));
+    if (b.data_admissao)       args.push('--data-admissao',        String(b.data_admissao).slice(0,10));
+    if (b.tipo_contrato_atual) args.push('--tipo-contrato-atual',  String(b.tipo_contrato_atual).slice(0,30));
+    res.json(_rhExec(args));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message||e).slice(0,300) }); }
+});
+
+app.get('/api/rh/persons/:id/contracts', requireRole('operator'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    res.json(_rhExec(['list_contracts', String(id)]));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message||e).slice(0,300) }); }
+});
+
+app.post('/api/rh/persons/:id/contracts', requireRole('operator'),
+  ...(_hrUpload ? [_hrUpload.single('file')] : [(req, res, next) => next()]),
+  (req, res) => {
+    try {
+      const personId = parseInt(req.params.id);
+      if (!personId) return res.status(400).json({ error: 'id inválido' });
+      const b = req.body || {};
+      if (!b.tipo || !b.data_inicio)
+        return res.status(400).json({ ok: false, error: 'tipo e data_inicio obrigatórios' });
+      const args = ['add_contract', String(personId),
+        '--tipo',        String(b.tipo).slice(0,30),
+        '--data-inicio', String(b.data_inicio).slice(0,10)];
+      if (b.data_fim) args.push('--data-fim', String(b.data_fim).slice(0,10));
+      if (b.notas)    args.push('--notas',    String(b.notas).slice(0,500));
+      if (req.file)   args.push('--file-path', req.file.filename);
+      res.json(_rhExec(args));
+    } catch(e) { res.status(500).json({ ok: false, error: String(e.message||e).slice(0,300) }); }
+  }
+);
+
+app.delete('/api/rh/contracts/:id', requireRole('admin'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    res.json(_rhExec(['delete_contract', String(id)]));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message||e).slice(0,300) }); }
+});
+
+app.get('/api/rh/persons/:id/documents', requireRole('operator'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    res.json(_rhExec(['list_documents', String(id)]));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message||e).slice(0,300) }); }
+});
+
+app.post('/api/rh/persons/:id/documents', requireRole('operator'),
+  ...(_hrUpload ? [_hrUpload.single('file')] : [(req, res, next) => next()]),
+  (req, res) => {
+    try {
+      const personId = parseInt(req.params.id);
+      if (!personId) return res.status(400).json({ error: 'id inválido' });
+      if (!req.file) return res.status(400).json({ ok: false, error: 'ficheiro obrigatório' });
+      const b = req.body || {};
+      if (!b.tipo) return res.status(400).json({ ok: false, error: 'tipo obrigatório' });
+      const args = ['add_document', String(personId),
+        '--tipo',      String(b.tipo).slice(0,20),
+        '--file-path', req.file.filename];
+      if (b.descricao) args.push('--descricao', String(b.descricao).slice(0,200));
+      res.json(_rhExec(args));
+    } catch(e) { res.status(500).json({ ok: false, error: String(e.message||e).slice(0,300) }); }
+  }
+);
+
+app.delete('/api/rh/documents/:id', requireRole('admin'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    res.json(_rhExec(['delete_document', String(id)]));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message||e).slice(0,300) }); }
+});
+
+app.get('/api/rh/files/:filename', requireRole('operator'), (req, res) => {
+  try {
+    const fn = path.basename(req.params.filename); // strip traversal
+    const fp = path.join(_hrDocsDir, fn);
+    if (!fs.existsSync(fp)) return res.status(404).json({ error: 'ficheiro não encontrado' });
+    res.setHeader('Content-Disposition', `inline; filename="${fn}"`);
+    res.sendFile(fp);
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message||e).slice(0,200) }); }
+});
+
+app.get('/api/rh/stats', requireRole('operator'), (req, res) => {
+  try { res.json(_rhExec(['get_stats'])); }
+  catch(e) { res.status(500).json({ ok: false, error: String(e.message||e).slice(0,300) }); }
+});
+
 app.listen(3000, () => console.log("UI http://localhost:3000"));
