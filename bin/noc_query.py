@@ -357,7 +357,7 @@ def cmd_autonomia_approve(args):
     with engine.begin() as c:
         c.execute(text("""
             UPDATE public.worker_jobs
-            SET status = 'queued', approved_by = :approver, updated_at = NOW()
+            SET status = 'queued', approved_by = :approver
             WHERE id = :id AND status = 'blocked_review'
         """), {"id": job_id, "approver": approver})
     print(json.dumps({"ok": True, "job_id": job_id, "approved_by": approver}))
@@ -374,8 +374,7 @@ def cmd_autonomia_reject(args):
             UPDATE public.worker_jobs
             SET status = 'failed',
                 result = '{"error":"rejeitado pelo operador"}',
-                ts_done = NOW(),
-                updated_at = NOW()
+                ts_done = NOW()
             WHERE id = :id AND status = 'blocked_review'
         """), {"id": job_id})
     print(json.dumps({"ok": True, "job_id": job_id}))
