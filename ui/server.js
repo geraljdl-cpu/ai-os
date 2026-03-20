@@ -2561,7 +2561,7 @@ app.post('/api/admin/payouts/:id/mark-paid', requireRole('finance'), async (req,
 
 // ── Admin Clients (lookup) ────────────────────────────────────────────────────
 
-app.get('/api/admin/clients', requireRole('operator'), async (req, res) => {
+app.get('/api/admin/clients', requireRole('viewer'), async (req, res) => {
   try {
     const rows = await _pgQuery(
       `SELECT id, name FROM public.clients ORDER BY name`, []);

@@ -2399,7 +2399,6 @@ async function loadPlaneamento() {
       </div>`;
     }).join('');
 
-    // Populate client selector for create form
     _fillPlanClientSelect();
     _loadPlanWorkers();
   } catch(e) { listEl.innerHTML = `<span style="color:#ef4444;font-size:.82rem">Erro: ${esc(String(e))}</span>`; }
@@ -2408,19 +2407,20 @@ async function loadPlaneamento() {
 async function _fillPlanClientSelect() {
   const sel = document.getElementById('plan-client');
   if (!sel) return;
-  try {
-    const r = await api('/api/admin/clients');
-    const clients = r.clients || [];
-    if (!clients.length) {
-      sel.innerHTML = '<option value="">Sem clientes registados</option>';
-      return;
-    }
-    _planClients = clients;
-    sel.innerHTML = '<option value="">— Seleccionar cliente —</option>' +
-      clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
-  } catch(e) {
-    sel.innerHTML = '<option value="">Erro ao carregar clientes</option>';
+  sel.innerHTML = '<option value="">A carregar...</option>';
+  const r = await api('/api/admin/clients').catch(e => ({ ok: false, error: String(e) }));
+  if (!r.ok) {
+    sel.innerHTML = `<option value="">Erro: ${esc(r.error||'desconhecido')}</option>`;
+    return;
   }
+  const clients = r.clients || [];
+  if (!clients.length) {
+    sel.innerHTML = '<option value="">Sem clientes registados</option>';
+    return;
+  }
+  _planClients = clients;
+  sel.innerHTML = '<option value="">— Seleccionar cliente —</option>' +
+    clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
 }
 
 async function _loadPlanWorkers() {
