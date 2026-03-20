@@ -2559,6 +2559,16 @@ app.post('/api/admin/payouts/:id/mark-paid', requireRole('finance'), async (req,
   } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
 });
 
+// ── Admin Clients (lookup) ────────────────────────────────────────────────────
+
+app.get('/api/admin/clients', requireRole('operator'), async (req, res) => {
+  try {
+    const rows = await _pgQuery(
+      `SELECT id, name FROM public.clients ORDER BY name`, []);
+    res.json({ ok: true, clients: rows });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
 // ── Admin Planeamento / Escalas ───────────────────────────────────────────────
 
 app.get('/api/admin/jobs', requireRole('operator'), async (req, res) => {

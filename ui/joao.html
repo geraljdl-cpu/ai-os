@@ -2400,47 +2400,27 @@ async function loadPlaneamento() {
     }).join('');
 
     // Populate client selector for create form
-    if (!_planClients.length) {
-      const rc = await api('/api/persons').catch(() => ({}));  // fallback
-      // Actually we need clients not persons for job create
-    }
-    _loadPlanClients();
+    _fillPlanClientSelect();
     _loadPlanWorkers();
   } catch(e) { listEl.innerHTML = `<span style="color:#ef4444;font-size:.82rem">Erro: ${esc(String(e))}</span>`; }
-}
-
-async function _loadPlanClients() {
-  if (_planClients.length) return;
-  try {
-    const r = await _pgFetch('/api/admin/jobs', null);  // no direct clients endpoint here
-    // Use the persons API as fallback — pull clients from DB via overview
-    const rc = await api('/api/client/overview').catch(() => null);
-  } catch(e) {}
-  // Populate via direct query through existing endpoint
-  _fillPlanClientSelect();
 }
 
 async function _fillPlanClientSelect() {
   const sel = document.getElementById('plan-client');
   if (!sel) return;
   try {
-    // Fetch clients list from admin invoices (has client names)
-    const r = await api('/api/admin/invoices?status=invoice_draft');
-    const seen = new Map();
-    (r.invoices||[]).forEach(i => { if (i.client_id && !seen.has(i.client_id)) seen.set(i.client_id, i.client_name||i.client_id); });
-    if (!seen.size) {
-      // Fallback: fetch from payouts which also have client info
-      const r2 = await api('/api/admin/payouts');
-      (r2.payouts||[]).forEach(p => { if (p.client_id && !seen.has(+p.client_id)) seen.set(+p.client_id, p.client_name||p.client_id); });
+    const r = await api('/api/admin/clients');
+    const clients = r.clients || [];
+    if (!clients.length) {
+      sel.innerHTML = '<option value="">Sem clientes registados</option>';
+      return;
     }
+    _planClients = clients;
     sel.innerHTML = '<option value="">— Seleccionar cliente —</option>' +
-      [...seen.entries()].map(([id, name]) => `<option value="${id}">${esc(String(name))}</option>`).join('');
-    // Also load job list clients
-    const rj = await api('/api/admin/jobs');
-    (rj.jobs||[]).forEach(j => { if (j.client_id && !seen.has(+j.client_id)) seen.set(+j.client_id, j.client_name||j.client_id); });
-    sel.innerHTML = '<option value="">— Seleccionar cliente —</option>' +
-      [...seen.entries()].map(([id, name]) => `<option value="${id}">${esc(String(name))}</option>`).join('');
-  } catch(e) {}
+      clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  } catch(e) {
+    sel.innerHTML = '<option value="">Erro ao carregar clientes</option>';
+  }
 }
 
 async function _loadPlanWorkers() {
