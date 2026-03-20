@@ -106,11 +106,13 @@ def submit_service_log(conn, person_id: int, log_date: str, hours: float,
             INSERT INTO public.event_timesheets
               (worker_id, event_name, start_time, hours, status,
                log_date, days_equivalent, location, car_used, client_id,
-               validation_token, worker_pay, invoice_net, invoice_vat, invoice_total,
+               validation_token, token_expires_at,
+               worker_pay, invoice_net, invoice_vat, invoice_total,
                people_id)
             VALUES (%s, %s, NOW(), %s, 'submitted',
                     %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s,
+                    %s, NOW() + INTERVAL '30 days',
+                    %s, %s, %s, %s,
                     %s)
             RETURNING id
         """, (
@@ -118,7 +120,8 @@ def submit_service_log(conn, person_id: int, log_date: str, hours: float,
             f"Serviço {log_date}",
             hours,
             log_date, calc["days"], location, car_used, client_id,
-            token, calc["worker_pay"], calc["invoice_net"], calc["invoice_vat"], calc["invoice_total"],
+            token,
+            calc["worker_pay"], calc["invoice_net"], calc["invoice_vat"], calc["invoice_total"],
             person_id,
         ))
         ts_id = cur.fetchone()["id"]
@@ -142,6 +145,29 @@ def submit_service_log(conn, person_id: int, log_date: str, hours: float,
     }
 
 
+def _compute_validation_status(ts: dict) -> str:
+    """Mapeia status DB + flags para os 5 estados explícitos do fluxo de validação."""
+    status = ts.get("status", "")
+    validated_statuses = ("approved_client", "adjusted_client", "validated", "invoiced_mock")
+    if status in validated_statuses:
+        if ts.get("needs_revalidation"):
+            return "needs_review"
+        return "validated"
+    if status in ("rejected_client", "rejected"):
+        return "rejected"
+    if status == "submitted":
+        expires = ts.get("token_expires_at")
+        if expires:
+            if isinstance(expires, str):
+                expires = dt.datetime.fromisoformat(expires.replace("Z", "+00:00"))
+            if not expires.tzinfo:
+                expires = expires.replace(tzinfo=dt.timezone.utc)
+            if expires < dt.datetime.now(dt.timezone.utc):
+                return "expired"
+        return "pending_validation"
+    return status
+
+
 def get_by_token(conn, token: str) -> dict:
     row = q1(conn, """
         SELECT ts.*, p.name AS person_name, p.nif AS person_nif
@@ -155,6 +181,7 @@ def get_by_token(conn, token: str) -> dict:
     for k, v in row.items():
         if hasattr(v, 'isoformat'):
             row[k] = v.isoformat()
+    row["validation_status"] = _compute_validation_status(row)
     return row
 
 
@@ -248,13 +275,66 @@ def mark_reimbursed(conn, token: str, expense_id: int) -> dict:
 
 
 def validate_service_log(conn, token: str, approved: bool, note: str = "",
+                         rejection_reason: str = "",
                          adjusted_days: float = None, extras: list = None,
                          expense_decisions: dict = None, remote_ip: str = "") -> dict:
-    ts = get_by_token(conn, token)
-    if not ts:
-        raise ValueError(f"Token não encontrado: {token}")
-    if ts["status"] not in ("submitted", "pending", "approved_client", "adjusted_client"):
-        raise ValueError(f"Registo já processado: status={ts['status']}")
+    # ── Fetch com FOR UPDATE para eliminar race condition ──────────────────────
+    row = q1(conn, """
+        SELECT ts.*, p.name AS person_name, p.nif AS person_nif
+        FROM public.event_timesheets ts
+        LEFT JOIN public.persons p ON p.id = ts.people_id
+        WHERE ts.validation_token = %s
+        FOR UPDATE OF ts
+    """, (token,))
+    if not row:
+        raise ValueError("Token não encontrado")
+    for k, v in row.items():
+        if hasattr(v, 'isoformat'):
+            row[k] = v.isoformat()
+    ts = row
+    ts["validation_status"] = _compute_validation_status(ts)
+
+    vs = ts["validation_status"]
+
+    def _audit_attempt(reason: str):
+        try:
+            ex(conn, """
+                INSERT INTO public.events (ts, level, source, kind, entity_id, message, data)
+                VALUES (NOW(), 'warn', 'service_billing', 'service_log_validation_attempt',
+                        %s, %s, %s::jsonb)
+            """, (ts["id"], f"Tentativa bloqueada: {reason}",
+                  json.dumps({"ts_id": ts["id"], "reason": reason, "remote_ip": remote_ip or None,
+                              "validation_status": vs})))
+        except Exception:
+            pass
+
+    # ── Guards de estado ───────────────────────────────────────────────────────
+    if vs == "validated":
+        _audit_attempt("already_validated")
+        conn.rollback()
+        raise ValueError("Registo já validado")
+    if vs == "rejected":
+        _audit_attempt("already_rejected")
+        conn.rollback()
+        raise ValueError("Registo já rejeitado")
+    if vs == "expired":
+        _audit_attempt("token_expired")
+        conn.rollback()
+        raise ValueError("Link de validação expirado (>30 dias)")
+
+    # ── Rejection reason obrigatório ───────────────────────────────────────────
+    if not approved and not (rejection_reason or "").strip():
+        conn.rollback()
+        raise ValueError("Motivo de rejeição obrigatório")
+
+    # ── needs_review automático ────────────────────────────────────────────────
+    now_utc      = dt.datetime.now(dt.timezone.utc)
+    review_flags = []
+    if now_utc.hour < 6 or now_utc.hour >= 23:
+        review_flags.append(f"validação fora de horário ({now_utc.hour}h UTC)")
+    hours_worked = float(ts.get("hours") or 0)
+    if hours_worked > 16:
+        review_flags.append(f"horas elevadas ({hours_worked}h)")
 
     ts_id = ts["id"]
     extras = extras or []
@@ -281,21 +361,35 @@ def validate_service_log(conn, token: str, approved: bool, note: str = "",
                 SET status=%s, validator_note=%s, validated_at=NOW(),
                     adjusted_days=%s, adjusted_invoice_net=%s,
                     adjusted_invoice_vat=%s, adjusted_invoice_total=%s,
-                    client_extras=%s::jsonb, approved_by=%s, updated_at=NOW()
+                    client_extras=%s::jsonb, approved_by=%s,
+                    token_used_at=NOW(),
+                    rejection_reason=%s,
+                    requires_review = (requires_review OR %s),
+                    updated_at=NOW()
                 WHERE id=%s
             """, (new_status, note or None,
                   eff_days if adjusted_days else None,
                   net if adjusted_days else None,
                   vat if adjusted_days else None,
                   (net + vat) if adjusted_days else None,
-                  json.dumps(extras), remote_ip or None, ts_id))
+                  json.dumps(extras), remote_ip or None,
+                  rejection_reason or None,
+                  bool(review_flags),
+                  ts_id))
         else:
             cur.execute("""
                 UPDATE public.event_timesheets
                 SET status=%s, validator_note=%s, validated_at=NOW(),
-                    approved_by=%s, updated_at=NOW()
+                    approved_by=%s,
+                    token_used_at=NOW(),
+                    rejection_reason=%s,
+                    requires_review = (requires_review OR %s),
+                    updated_at=NOW()
                 WHERE id=%s
-            """, (new_status, note or None, remote_ip or None, ts_id))
+            """, (new_status, note or None, remote_ip or None,
+                  rejection_reason or None,
+                  bool(review_flags),
+                  ts_id))
 
     # Process expense decisions from client
     for eid_str, decision in expense_decisions.items():
@@ -338,10 +432,10 @@ def validate_service_log(conn, token: str, approved: bool, note: str = "",
         level = "info"
     else:
         ex(conn, """
-            INSERT INTO public.incidents (source, kind, severity, status, title, data)
-            VALUES ('service_billing', 'service_rejected', 'warn', 'open', %s, %s::jsonb)
+            INSERT INTO public.incidents (source, kind, severity, status, title, details)
+            VALUES ('service_billing', 'service_rejected', 'warn', 'open', %s, %s)
         """, (f"Servico rejeitado: {ts.get('worker_id','?')} · {ts.get('log_date','?')}",
-              json.dumps({"ts_id": ts_id, "note": note})))
+              note or rejection_reason or None))
         ex(conn, """
             INSERT INTO public.agent_suggestions (kind, title, details, score)
             VALUES ('alert', %s, %s, 8)
@@ -354,10 +448,16 @@ def validate_service_log(conn, token: str, approved: bool, note: str = "",
         INSERT INTO public.events (ts, level, source, kind, entity_id, message, data)
         VALUES (NOW(), %s, 'service_billing', 'service_log_validated', %s, %s, %s::jsonb)
     """, (level, ts_id, msg,
-          json.dumps({"ts_id": ts_id, "action": new_status, "note": note,
+          json.dumps({"ts_id": ts_id, "action": new_status,
+                      "validation_status": "validated" if approved else "rejected",
+                      "note": note,
+                      "rejection_reason": rejection_reason or None,
                       "adjusted_days": adjusted_days, "extras_count": len(extras),
                       "expenses_decided": len(expense_decisions),
-                      "payout_id": payout_id, "invoice_id": invoice_id})))
+                      "payout_id": payout_id, "invoice_id": invoice_id,
+                      "requires_review": bool(review_flags),
+                      "review_flags": review_flags,
+                      "remote_ip": remote_ip or None})))
     conn.commit()
 
     # Auto-gerar mock invoice + email se validado
@@ -373,8 +473,10 @@ def validate_service_log(conn, token: str, approved: bool, note: str = "",
             pass
 
     return {"ok": True, "ts_id": ts_id, "action": new_status,
+            "validation_status": "validated" if approved else "rejected",
             "effective_days": eff_days, "final_total": final_total,
-            "payout_id": payout_id, "invoice_id": invoice_id}
+            "payout_id": payout_id, "invoice_id": invoice_id,
+            "requires_review": bool(review_flags)}
 
 
 def generate_payout(conn, ts_id: int, ts: dict) -> int:
@@ -688,6 +790,31 @@ def get_stats(conn) -> dict:
     }
 
 
+def mark_revalidation(conn, ts_id: int, reason: str = "") -> dict:
+    """Marca registo já validado para revalidação (alteração material posterior)."""
+    ts = q1(conn, "SELECT id, status, worker_id, log_date FROM public.event_timesheets WHERE id=%s",
+            (ts_id,))
+    if not ts:
+        raise ValueError(f"Timesheet #{ts_id} não encontrado")
+    validated_statuses = ("approved_client", "adjusted_client", "validated", "invoiced_mock")
+    if ts["status"] not in validated_statuses:
+        raise ValueError(f"Só registos validados podem ser marcados (status={ts['status']})")
+    ex(conn, """
+        UPDATE public.event_timesheets
+        SET needs_revalidation=true, revalidation_reason=%s, updated_at=NOW()
+        WHERE id=%s
+    """, (reason or None, ts_id))
+    ex(conn, """
+        INSERT INTO public.events (ts, level, source, kind, entity_id, message, data)
+        VALUES (NOW(), 'warn', 'service_billing', 'service_log_revalidation_marked',
+                %s, %s, %s::jsonb)
+    """, (ts_id,
+          f"Revalidação marcada: #{ts_id} {ts.get('worker_id', '')} {ts.get('log_date', '')}",
+          json.dumps({"ts_id": ts_id, "reason": reason or None})))
+    conn.commit()
+    return {"ok": True, "ts_id": ts_id, "needs_revalidation": True}
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -708,6 +835,7 @@ if __name__ == "__main__":
     g.add_argument("--approve", action="store_true")
     g.add_argument("--reject",  action="store_true")
     p_val.add_argument("--note", default="")
+    p_val.add_argument("--rejection-reason", default="")
     p_val.add_argument("--adjusted-days", type=float, default=None)
     p_val.add_argument("--extras", default="[]",
                        help='JSON array: [{"description":"X","amount":10}]')
@@ -763,6 +891,10 @@ if __name__ == "__main__":
     p_promote = sub.add_parser("promote")  # draft → submitted
     p_promote.add_argument("ts_id", type=int)
 
+    p_mrv = sub.add_parser("mark_revalidation")
+    p_mrv.add_argument("ts_id", type=int)
+    p_mrv.add_argument("--reason", default="")
+
     sub.add_parser("stats")
 
     args = parser.parse_args()
@@ -779,10 +911,11 @@ if __name__ == "__main__":
             print(json.dumps(result, ensure_ascii=False, default=str))
 
         elif args.cmd == "validate":
-            extras           = json.loads(args.extras)
+            extras            = json.loads(args.extras)
             expense_decisions = json.loads(args.expense_decisions)
             result = validate_service_log(
                 conn, args.token, args.approve, args.note,
+                rejection_reason=args.rejection_reason,
                 adjusted_days=args.adjusted_days,
                 extras=extras, expense_decisions=expense_decisions,
                 remote_ip=args.ip,
@@ -849,6 +982,10 @@ if __name__ == "__main__":
                                  ensure_ascii=False))
             else:
                 print(json.dumps({"ok": False, "error": f"Timesheet {args.ts_id} nao encontrado ou nao em draft"}))
+
+        elif args.cmd == "mark_revalidation":
+            result = mark_revalidation(conn, args.ts_id, args.reason)
+            print(json.dumps(result, ensure_ascii=False, default=str))
 
         elif args.cmd == "stats":
             result = get_stats(conn)

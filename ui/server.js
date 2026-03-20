@@ -1483,23 +1483,34 @@ app.get('/api/service/validate/:token', (req, res) => {
 // Public API: validate (approve/reject) — supports adjusted_days, extras, expense_decisions
 app.post('/api/service/validate/:token', express.json(), (req, res) => {
   try {
-    const token    = req.params.token.replace(/[^a-zA-Z0-9\-]/g, '');
-    const approved = req.body?.approved ? true : false;
-    const note     = String(req.body?.note || '').slice(0, 500);
-    const flag     = approved ? '--approve' : '--reject';
-    const ip       = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || '';
-    const args     = [
+    const token            = req.params.token.replace(/[^a-zA-Z0-9\-]/g, '');
+    const approved         = req.body?.approved ? true : false;
+    const note             = String(req.body?.note || '').slice(0, 500);
+    const rejection_reason = String(req.body?.rejection_reason || '').trim().slice(0, 500);
+    // Rejection reason obrigatório no lado do servidor
+    if (!approved && !rejection_reason)
+      return res.status(400).json({ ok: false, error: 'Motivo de rejeição obrigatório' });
+    const flag = approved ? '--approve' : '--reject';
+    const ip   = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || '';
+    const args = [
       'python3', '/home/jdl/ai-os/bin/service_billing.py',
       'validate', token, flag,
       '--note', note, '--ip', ip,
     ];
-    if (req.body?.adjusted_days) args.push('--adjusted-days', String(parseFloat(req.body.adjusted_days)));
-    if (req.body?.extras)             args.push('--extras', JSON.stringify(req.body.extras));
-    if (req.body?.expense_decisions)  args.push('--expense-decisions', JSON.stringify(req.body.expense_decisions));
+    if (!approved && rejection_reason) args.push('--rejection-reason', rejection_reason);
+    if (req.body?.adjusted_days)       args.push('--adjusted-days', String(parseFloat(req.body.adjusted_days)));
+    if (req.body?.extras)              args.push('--extras', JSON.stringify(req.body.extras));
+    if (req.body?.expense_decisions)   args.push('--expense-decisions', JSON.stringify(req.body.expense_decisions));
     const { execFileSync } = require('child_process');
     const out = execFileSync(args[0], args.slice(1), { timeout: 20000, encoding: 'utf8' });
     res.json(JSON.parse(out));
-  } catch(e) { res.status(500).json({ ok: false, error: String(e) }); }
+  } catch(e) {
+    // Extract clean ValueError message from Python traceback
+    const pyErr = String(e.stderr || e.message || e);
+    const match = pyErr.match(/ValueError:\s*(.+)$/m);
+    const errMsg = match ? match[1].trim() : pyErr.split('\n').filter(Boolean).pop() || 'Erro interno';
+    res.status(400).json({ ok: false, error: errMsg });
+  }
 });
 
 // Public: mark expense reimbursed via token
@@ -1565,6 +1576,20 @@ app.get('/api/service/validate/:token/expenses', (req, res) => {
     const d = JSON.parse(out);
     res.json(d.expenses || []);
   } catch(e) { res.status(500).json({ error: String(e) }); }
+});
+
+// Authenticated: mark validated timesheet for revalidation (material change after validation)
+app.post('/api/service/timesheets/:id/mark-revalidation', requireRole('operator'), express.json(), (req, res) => {
+  try {
+    const id     = parseInt(req.params.id, 10);
+    const reason = String(req.body?.reason || '').trim().slice(0, 500);
+    if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+    const { execFileSync } = require('child_process');
+    const args = ['python3', '/home/jdl/ai-os/bin/service_billing.py', 'mark_revalidation', String(id)];
+    if (reason) args.push('--reason', reason);
+    const out = execFileSync(args[0], args.slice(1), { timeout: 10000, encoding: 'utf8' });
+    res.json(JSON.parse(out));
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message || String(e)) }); }
 });
 
 // Authenticated: add expense to a timesheet

@@ -103,11 +103,19 @@ textarea:focus{outline:none;border-color:var(--blue)}
 .btn-reject:hover{background:var(--red-bg)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 
-.status-ok,.status-err{text-align:center;padding:2rem 0}
-.status-ok .icon,.status-err .icon{font-size:2.5rem;margin-bottom:.75rem}
+.status-ok,.status-err,.status-warn,.status-info{text-align:center;padding:2rem 0}
+.status-ok .icon,.status-err .icon,.status-warn .icon,.status-info .icon{font-size:2.5rem;margin-bottom:.75rem}
 .status-ok h2{color:var(--green)}
 .status-err h2{color:var(--red)}
+.status-warn h2{color:var(--yellow)}
+.status-info h2{color:var(--blue)}
 .muted{color:var(--ink2);font-size:.875rem;margin-top:.5rem}
+.review-banner{background:var(--yellow-bg);border:1px solid #fde68a;border-radius:8px;padding:.75rem 1rem;
+  font-size:.8rem;color:#92400e;margin-bottom:1rem}
+.rejection-reason-wrap{margin-bottom:.75rem}
+.rejection-reason-wrap label{display:block;font-size:.78rem;color:var(--red);font-weight:600;
+  text-transform:uppercase;letter-spacing:.04em;margin-bottom:.4rem}
+.rejection-reason-wrap textarea{border-color:var(--red-border);background:var(--red-bg);min-height:72px}
 
 .loading{text-align:center;padding:2rem;color:var(--ink3)}
 </style>
@@ -170,21 +178,46 @@ async function load(){
 
 // ── Render ────────────────────────────────────────────────────────────────────
 function renderForm(d){
-  const alreadyDone = ['approved_client','adjusted_client','validated','invoiced_mock'].includes(d.status);
-  const rejected    = ['rejected_client','rejected'].includes(d.status);
-  if(alreadyDone){
+  // Usar validation_status (novo) ou inferir do status (retrocompat)
+  const vs = d.validation_status || (() => {
+    if(['approved_client','adjusted_client','validated','invoiced_mock'].includes(d.status)) return 'validated';
+    if(['rejected_client','rejected'].includes(d.status)) return 'rejected';
+    return 'pending_validation';
+  })();
+
+  if(vs === 'validated'){
     document.getElementById('root').innerHTML = `
       <div class="section status-ok">
         <div class="icon">✅</div><h2>Já validado</h2>
         <p class="muted">Este registo foi aprovado anteriormente. Obrigado.</p>
+        ${d.validated_at?`<p class="muted" style="margin-top:.25rem">Validado em ${fmtDate(d.validated_at)}</p>`:''}
       </div>`;
     return;
   }
-  if(rejected){
+  if(vs === 'rejected'){
     document.getElementById('root').innerHTML = `
       <div class="section status-err">
         <div class="icon">❌</div><h2>Já rejeitado</h2>
         <p class="muted">Este registo foi rejeitado anteriormente.</p>
+        ${d.rejection_reason?`<p class="muted" style="margin-top:.5rem"><b>Motivo:</b> ${esc(d.rejection_reason)}</p>`:''}
+      </div>`;
+    return;
+  }
+  if(vs === 'expired'){
+    document.getElementById('root').innerHTML = `
+      <div class="section status-err">
+        <div class="icon">⏰</div><h2>Link expirado</h2>
+        <p class="muted">Este link de validação expirou (válido 30 dias).</p>
+        <p class="muted" style="margin-top:.5rem">Contacte a nossa equipa para obter um novo link.</p>
+      </div>`;
+    return;
+  }
+  if(vs === 'needs_review'){
+    document.getElementById('root').innerHTML = `
+      <div class="section status-warn">
+        <div class="icon">🔍</div><h2>Em revisão</h2>
+        <p class="muted">Este registo está a ser revisto pela nossa equipa.</p>
+        ${d.revalidation_reason?`<p class="muted" style="margin-top:.5rem"><b>Motivo:</b> ${esc(d.revalidation_reason)}</p>`:''}
       </div>`;
     return;
   }
@@ -239,9 +272,15 @@ function renderForm(d){
     <div class="section">
       <div class="section-title">Resumo de faturação</div>
       <div class="billing" id="billing-preview"></div>
-      <textarea id="client-note" placeholder="Nota opcional..."></textarea>
+      <textarea id="client-note" placeholder="Nota opcional..." style="margin-top:.75rem"></textarea>
       <button class="btn btn-approve" id="btn-approve" onclick="submitValidation(true)">✅ Aprovar e Confirmar</button>
-      <button class="btn btn-reject" id="btn-reject" onclick="submitValidation(false)">❌ Rejeitar</button>
+      <hr style="border:none;border-top:1px solid var(--border);margin:.5rem 0">
+      <div class="rejection-reason-wrap">
+        <label for="rejection-reason">Motivo de rejeição *</label>
+        <textarea id="rejection-reason" placeholder="Descreva o motivo da rejeição (mínimo 10 caracteres)..."
+          oninput="updateRejectBtn()"></textarea>
+      </div>
+      <button class="btn btn-reject" id="btn-reject" onclick="submitValidation(false)" disabled>❌ Rejeitar</button>
     </div>
   `;
 
@@ -390,9 +429,24 @@ function updatePreview(){
     <div class="billing-row billing-total"><span>Total a pagar</span><span>${fmt(total)} €</span></div>`;
 }
 
+// ── Reject button guard ───────────────────────────────────────────────────────
+function updateRejectBtn(){
+  const v = (document.getElementById('rejection-reason')?.value||'').trim();
+  const btn = document.getElementById('btn-reject');
+  if(btn) btn.disabled = v.length < 10;
+}
+
 // ── Submit ────────────────────────────────────────────────────────────────────
 async function submitValidation(approved){
-  // Collect rejection reasons
+  if(!approved){
+    const rejReason = (document.getElementById('rejection-reason')?.value||'').trim();
+    if(rejReason.length < 10){
+      alert('Motivo de rejeição obrigatório (mínimo 10 caracteres).');
+      return;
+    }
+  }
+
+  // Collect expense rejection reasons
   for(const eid of Object.keys(expenseDecisions)){
     if(expenseDecisions[eid].status==='rejected_client'){
       const r = document.getElementById(`reason-${eid}`)?.value||'';
@@ -406,6 +460,9 @@ async function submitValidation(approved){
   const note = document.getElementById('client-note')?.value||'';
 
   const payload = { approved, note };
+  if(!approved){
+    payload.rejection_reason = (document.getElementById('rejection-reason')?.value||'').trim();
+  }
   if(approved){
     if(days !== origDays) payload.adjusted_days = days;
     if(extrasValid.length) payload.extras = extrasValid.map(e=>({description:e.description,amount:parseFloat(e.amount)}));
