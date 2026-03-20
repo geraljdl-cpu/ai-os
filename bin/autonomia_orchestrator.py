@@ -59,11 +59,10 @@ def retry_failed_jobs(engine, text) -> list:
     with engine.begin() as conn:
         rows = conn.execute(text("""
             UPDATE public.worker_jobs
-            SET status       = 'queued',
-                retry_count  = retry_count + 1,
-                ts_assigned  = NULL,
-                ts_done      = NULL,
-                updated_at   = NOW()
+            SET status      = 'queued',
+                retry_count = retry_count + 1,
+                ts_assigned = NULL,
+                ts_done     = NULL
             WHERE status = 'failed'
               AND retry_count < max_retries
               AND ts_done > NOW() - INTERVAL ':window minutes'
@@ -80,17 +79,17 @@ def detect_zombies(engine, text) -> list:
     Jobs running há mais de ZOMBIE_THRESHOLD minutos → failed (timeout watchdog).
     Devolve lista de ids marcados como zombie.
     """
+    zombie_result = '{"error":"timeout watchdog","zombie":true}'
     with engine.begin() as conn:
         rows = conn.execute(text("""
             UPDATE public.worker_jobs
-            SET status     = 'failed',
-                result     = '{"error":"timeout watchdog","zombie":true}',
-                ts_done    = NOW(),
-                updated_at = NOW()
+            SET status  = 'failed',
+                result  = :zresult,
+                ts_done = NOW()
             WHERE status = 'running'
               AND ts_assigned < NOW() - INTERVAL ':threshold minutes'
             RETURNING id, kind, assigned_worker_id
-        """.replace(':threshold', str(ZOMBIE_THRESHOLD)))).mappings().all()
+        """.replace(':threshold', str(ZOMBIE_THRESHOLD))), {"zresult": zombie_result}).mappings().all()
     zombies = [dict(r) for r in rows]
     for z in zombies:
         log.warning(f"Zombie job #{z['id']} ({z['kind']}) worker={z['assigned_worker_id']} → failed")
