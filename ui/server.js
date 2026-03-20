@@ -2601,6 +2601,7 @@ app.post('/api/admin/marketplace/jobs', requireRole('operator'), async (req, res
       RETURNING id
     `, [client_id, title, location||null, starts_at, ends_at, needed_workers,
         role_required||null, billing_model, notes||null]);
+    await _mkAudit('marketplace_job_created', row.id, { title, client_id });
     console.log(JSON.stringify({ event: 'marketplace_job_created', job_id: row.id, title, client_id }));
     res.json({ ok: true, job_id: row.id });
   } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
@@ -2636,7 +2637,8 @@ app.post('/api/admin/marketplace/jobs/:id/invite', requireRole('operator'), asyn
     const [job] = await _pgQuery(
       `SELECT id, starts_at, ends_at, status FROM public.marketplace_jobs WHERE id=$1`, [req.params.id]);
     if (!job) return res.status(404).json({ ok: false, error: 'job not found' });
-    if (job.status === 'cancelled') return res.status(400).json({ ok: false, error: 'job cancelado' });
+    if (job.status !== 'open')
+      return res.status(400).json({ ok: false, error: `job não está aberto (status=${job.status})` });
 
     // Conflito: worker já convidado/selecionado neste job
     const [dup] = await _pgQuery(`
@@ -2665,6 +2667,8 @@ app.post('/api/admin/marketplace/jobs/:id/invite', requireRole('operator'), asyn
       VALUES ($1,$2,$3) RETURNING id
     `, [req.params.id, worker_id, notes||null]);
 
+    await _mkAudit('marketplace_invite_sent', parseInt(req.params.id),
+      { worker_id, application_id: row.id });
     console.log(JSON.stringify({ event: 'marketplace_invites_sent',
       job_id: req.params.id, worker_id, application_id: row.id }));
 
@@ -2682,54 +2686,106 @@ app.post('/api/admin/marketplace/jobs/:id/invite', requireRole('operator'), asyn
 });
 
 app.post('/api/admin/marketplace/applications/:id/select', requireRole('operator'), async (req, res) => {
+  if (!_pgClient) return res.status(500).json({ ok: false, error: 'pg not available' });
+  const client = await _pgClient.connect();
   try {
-    const [app] = await _pgQuery(`
-      SELECT ma.*, mj.title, mj.starts_at, mj.ends_at, mj.client_id,
-             mj.needed_workers, mj.location, mj.service_job_id
+    await client.query('BEGIN');
+
+    // Lock application + join job in one shot
+    const appR = await client.query(`
+      SELECT ma.id, ma.job_id, ma.worker_id, ma.status,
+             mj.title, mj.starts_at, mj.ends_at, mj.client_id,
+             mj.needed_workers, mj.location, mj.service_job_id, mj.status AS job_status
       FROM public.marketplace_applications ma
       JOIN public.marketplace_jobs mj ON mj.id = ma.job_id
-      WHERE ma.id=$1
+      WHERE ma.id=$1 FOR UPDATE OF ma
     `, [req.params.id]);
-    if (!app) return res.status(404).json({ ok: false, error: 'not found' });
-    if (!['invited','accepted'].includes(app.status))
-      return res.status(400).json({ ok: false, error: `status é ${app.status}` });
+    const app = appR.rows[0];
 
-    // Criar ou reutilizar service_job (ponte para o fluxo normal)
-    let serviceJobId = app.service_job_id ? parseInt(app.service_job_id) : null;
+    if (!app) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'not found' });
+    }
+    if (!['invited','accepted'].includes(app.status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: `status é ${app.status}` });
+    }
+    if (app.job_status === 'matched') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, error: 'vaga já preenchida' });
+    }
+    if (['closed','cancelled'].includes(app.job_status)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, error: `job ${app.job_status}` });
+    }
+
+    // Over-selection guard (recount inside transaction)
+    const selR = await client.query(
+      `SELECT COUNT(*) AS n FROM public.marketplace_applications WHERE job_id=$1 AND status='selected'`,
+      [app.job_id]);
+    if (parseInt(selR.rows[0].n) >= parseInt(app.needed_workers)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, error: 'vagas já preenchidas' });
+    }
+
+    // Lock marketplace_jobs row to prevent concurrent bridge creation
+    const mjR = await client.query(
+      `SELECT service_job_id FROM public.marketplace_jobs WHERE id=$1 FOR UPDATE`,
+      [app.job_id]);
+    let serviceJobId = mjR.rows[0]?.service_job_id ? parseInt(mjR.rows[0].service_job_id) : null;
+
     if (!serviceJobId) {
-      const [sj] = await _pgQuery(`
+      const sjR = await client.query(`
         INSERT INTO public.service_jobs (client_id, title, location, starts_at, ends_at, needed_workers, status)
         VALUES ($1,$2,$3,$4,$5,$6,'in_progress') RETURNING id
       `, [app.client_id, app.title, app.location||null, app.starts_at, app.ends_at, app.needed_workers]);
-      serviceJobId = sj.id;
-      await _pgQuery(`UPDATE public.marketplace_jobs SET service_job_id=$1 WHERE id=$2`,
+      serviceJobId = sjR.rows[0].id;
+      await client.query(`UPDATE public.marketplace_jobs SET service_job_id=$1 WHERE id=$2`,
         [serviceJobId, app.job_id]);
     }
 
-    // Criar job_assignment normal
-    const [asgRow] = await _pgQuery(`
-      INSERT INTO public.job_assignments (job_id, worker_id, status)
-      VALUES ($1,$2,'confirmed') RETURNING id
-    `, [serviceJobId, app.worker_id]);
-
-    // Marcar application como selected
-    await _pgQuery(`UPDATE public.marketplace_applications SET status='selected', response_at=now() WHERE id=$1`,
-      [req.params.id]);
-
-    // Verificar se marketplace_job está matched
-    const [selCount] = await _pgQuery(`
-      SELECT COUNT(*) AS n FROM public.marketplace_applications
-      WHERE job_id=$1 AND status='selected'
-    `, [app.job_id]);
-    if (parseInt(selCount.n) >= app.needed_workers) {
-      await _pgQuery(`UPDATE public.marketplace_jobs SET status='matched' WHERE id=$1`, [app.job_id]);
+    // Idempotency: skip duplicate assignment
+    const dupR = await client.query(
+      `SELECT id FROM public.job_assignments WHERE job_id=$1 AND worker_id=$2 AND status!='cancelled' LIMIT 1`,
+      [serviceJobId, app.worker_id]);
+    let assignmentId;
+    if (dupR.rows.length > 0) {
+      assignmentId = dupR.rows[0].id;
+    } else {
+      const asgR = await client.query(`
+        INSERT INTO public.job_assignments (job_id, worker_id, status)
+        VALUES ($1,$2,'confirmed') RETURNING id
+      `, [serviceJobId, app.worker_id]);
+      assignmentId = asgR.rows[0].id;
     }
 
+    // Mark selected
+    await client.query(
+      `UPDATE public.marketplace_applications SET status='selected', response_at=now() WHERE id=$1`,
+      [req.params.id]);
+
+    // Promote job to matched if needed_workers reached
+    const newSelR = await client.query(
+      `SELECT COUNT(*) AS n FROM public.marketplace_applications WHERE job_id=$1 AND status='selected'`,
+      [app.job_id]);
+    if (parseInt(newSelR.rows[0].n) >= parseInt(app.needed_workers)) {
+      await client.query(`UPDATE public.marketplace_jobs SET status='matched' WHERE id=$1`, [app.job_id]);
+    }
+
+    await client.query('COMMIT');
+
+    await _mkAudit('marketplace_worker_selected', parseInt(req.params.id),
+      { worker_id: app.worker_id, job_id: app.job_id, service_job_id: serviceJobId, assignment_id: assignmentId });
     console.log(JSON.stringify({ event: 'marketplace_worker_selected',
       application_id: req.params.id, worker_id: app.worker_id,
-      job_id: app.job_id, service_job_id: serviceJobId, assignment_id: asgRow.id }));
-    res.json({ ok: true, service_job_id: serviceJobId, assignment_id: asgRow.id });
-  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+      job_id: app.job_id, service_job_id: serviceJobId, assignment_id: assignmentId }));
+    res.json({ ok: true, service_job_id: serviceJobId, assignment_id: assignmentId });
+  } catch(e) {
+    try { await client.query('ROLLBACK'); } catch(_) {}
+    res.status(500).json({ ok: false, error: String(e.message) });
+  } finally {
+    client.release();
+  }
 });
 
 app.post('/api/admin/marketplace/applications/:id/reject', requireRole('operator'), async (req, res) => {
@@ -2741,9 +2797,35 @@ app.post('/api/admin/marketplace/applications/:id/reject', requireRole('operator
       return res.status(400).json({ ok: false, error: `não pode rejeitar status=${app.status}` });
     await _pgQuery(`UPDATE public.marketplace_applications SET status='rejected', response_at=now() WHERE id=$1`,
       [req.params.id]);
+    await _mkAudit('marketplace_worker_rejected', parseInt(req.params.id), { job_id: app.job_id });
     console.log(JSON.stringify({ event: 'marketplace_worker_rejected',
       application_id: req.params.id, job_id: app.job_id }));
     res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.post('/api/admin/marketplace/jobs/:id/close', requireRole('operator'), async (req, res) => {
+  try {
+    const { action = 'close', reason } = req.body;
+    if (!['close','cancel'].includes(action))
+      return res.status(400).json({ ok: false, error: 'action deve ser close ou cancel' });
+    const newStatus = action === 'cancel' ? 'cancelled' : 'closed';
+    const [row] = await _pgQuery(
+      `UPDATE public.marketplace_jobs SET status=$1
+       WHERE id=$2 AND status NOT IN ('closed','cancelled') RETURNING id`,
+      [newStatus, req.params.id]);
+    if (!row) return res.status(409).json({ ok: false, error: 'job já fechado/cancelado ou não existe' });
+    // Expire pending invitations when cancelling
+    if (newStatus === 'cancelled') {
+      await _pgQuery(
+        `UPDATE public.marketplace_applications SET status='expired'
+         WHERE job_id=$1 AND status IN ('invited','accepted')`,
+        [req.params.id]);
+    }
+    const evtName = action === 'cancel' ? 'marketplace_job_cancelled' : 'marketplace_job_closed';
+    await _mkAudit(evtName, parseInt(req.params.id), { reason: reason || null });
+    console.log(JSON.stringify({ event: evtName, job_id: req.params.id, reason }));
+    res.json({ ok: true, status: newStatus });
   } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
 });
 
@@ -2926,6 +3008,16 @@ async function _pgQuery(sql, params) {
   if (!_pgClient) throw new Error('pg module not available');
   const r = await _pgClient.query(sql, params);
   return r.rows;
+}
+
+async function _mkAudit(kind, entity_id, data) {
+  try {
+    await _pgQuery(
+      `INSERT INTO public.events (source, kind, entity_id, message, data, level)
+       VALUES ('marketplace', $1, $2, $3, $4::jsonb, 'info')`,
+      [kind, entity_id || null, kind.replace(/_/g, ' '), JSON.stringify(data || {})]
+    );
+  } catch(_) { /* audit must never break main flow */ }
 }
 
 // Overview
