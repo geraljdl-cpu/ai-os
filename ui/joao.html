@@ -235,6 +235,10 @@ header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
     <div class="sidebar-item" data-view="servicos" onclick="setView('servicos')">
       <span class="icon">🔧</span> Serviços <span id="badge-servicos" style="margin-left:auto;background:#f59e0b;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;display:none"></span>
     </div>
+    <div class="sidebar-item" data-view="planeamento" onclick="setView('planeamento')">
+      <span class="icon">📋</span> Planeamento
+      <span id="badge-planeamento" style="margin-left:auto;background:#ef4444;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;display:none"></span>
+    </div>
     <div class="sidebar-item" data-view="calendario" onclick="setView('calendario')">
       <span class="icon">📅</span> Calendário RH
     </div>
@@ -604,6 +608,73 @@ header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
       </div>
     </div>
 
+    <!-- VIEW: Planeamento / Escalas -->
+    <div id="view-planeamento" style="display:none">
+      <div class="section-header">
+        <div class="section-title">Planeamento de Serviços</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadPlaneamento()">↺</button>
+      </div>
+
+      <!-- KPIs -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1rem">
+        <div class="card"><div class="card-title">📋 Esta semana</div><div id="plan-kpi-week" class="big-num">—</div></div>
+        <div class="card"><div class="card-title">✅ Prontos</div><div id="plan-kpi-ready" class="big-num" style="color:#34d399">—</div></div>
+        <div class="card"><div class="card-title">⚠️ Incompletos</div><div id="plan-kpi-incomplete" class="big-num" style="color:#f59e0b">—</div></div>
+        <div class="card"><div class="card-title">🔴 Sem worker</div><div id="plan-kpi-empty" class="big-num" style="color:#ef4444">—</div></div>
+      </div>
+
+      <!-- Novo Job -->
+      <div class="card" style="margin-bottom:1rem">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+          ➕ Novo Serviço
+          <button onclick="togglePlanForm()" id="plan-form-toggle" class="btn btn-ghost btn-sm">Expandir</button>
+        </div>
+        <div id="plan-new-form" style="display:none;margin-top:.75rem">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.5rem">
+            <div>
+              <div style="font-size:.75rem;color:#94a3b8;margin-bottom:.2rem">Cliente</div>
+              <select id="plan-client" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.35rem .5rem;font-size:.83rem">
+                <option value="">A carregar...</option>
+              </select>
+            </div>
+            <div>
+              <div style="font-size:.75rem;color:#94a3b8;margin-bottom:.2rem">Título</div>
+              <input id="plan-title" placeholder="Ex: Evento XPTO" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.35rem .5rem;font-size:.83rem;box-sizing:border-box">
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:.5rem;margin-bottom:.5rem">
+            <div>
+              <div style="font-size:.75rem;color:#94a3b8;margin-bottom:.2rem">Início</div>
+              <input id="plan-starts" type="datetime-local" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.35rem .5rem;font-size:.83rem;box-sizing:border-box">
+            </div>
+            <div>
+              <div style="font-size:.75rem;color:#94a3b8;margin-bottom:.2rem">Fim</div>
+              <input id="plan-ends" type="datetime-local" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.35rem .5rem;font-size:.83rem;box-sizing:border-box">
+            </div>
+            <div>
+              <div style="font-size:.75rem;color:#94a3b8;margin-bottom:.2rem">Local</div>
+              <input id="plan-location" placeholder="Localização" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.35rem .5rem;font-size:.83rem;box-sizing:border-box">
+            </div>
+            <div>
+              <div style="font-size:.75rem;color:#94a3b8;margin-bottom:.2rem">Nº workers</div>
+              <input id="plan-needed" type="number" min="1" value="1" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.35rem .5rem;font-size:.83rem;box-sizing:border-box">
+            </div>
+          </div>
+          <div style="display:flex;gap:.75rem;align-items:center">
+            <input id="plan-notes" placeholder="Observações (opcional)" style="flex:1;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.35rem .5rem;font-size:.83rem">
+            <button onclick="createJob()" style="background:#3b82f6;color:#fff;border:none;border-radius:4px;padding:.4rem 1.2rem;cursor:pointer;font-size:.83rem;font-weight:600">Criar</button>
+            <div id="plan-form-result" style="font-size:.8rem;color:#94a3b8"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lista de jobs -->
+      <div class="card">
+        <div class="card-title">Serviços Planeados</div>
+        <div id="plan-jobs-list"><div class="loading"><span class="spinner"></span></div></div>
+      </div>
+    </div>
+
     <!-- VIEW: Calendário RH -->
     <div id="view-calendario" style="display:none">
       <div class="section-header">
@@ -900,8 +971,9 @@ function setView(v) {
   if (v === 'radar')     loadRadar();
   if (v === 'finance')   loadFinance();
   if (v === 'ops')       loadOps();
-  if (v === 'servicos')    loadServicos();
-  if (v === 'calendario')   loadCalendario();
+  if (v === 'servicos')      loadServicos();
+  if (v === 'planeamento')   loadPlaneamento();
+  if (v === 'calendario')    loadCalendario();
   if (v === 'historico')    loadHistorico();
   if (v === 'config')       loadConfig();
   if (v === 'agent-inbox') loadAgentInbox();
@@ -2253,6 +2325,262 @@ async function loadDocs() {
   } catch(e) {
     document.getElementById('docs-critical').innerHTML = '<div class="loading">Erro ao carregar</div>';
   }
+}
+
+// ── planeamento ───────────────────────────────────────────────────────────────
+
+let _planWorkers = [];   // cache persons for assign dropdown
+let _planClients = [];   // cache clients for create form
+
+async function loadPlaneamento() {
+  const listEl = document.getElementById('plan-jobs-list');
+  listEl.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  try {
+    const now = new Date().toISOString();
+    const r = await api(`/api/admin/jobs?from=${encodeURIComponent(now.slice(0,10))}`);
+    const jobs = r.jobs || [];
+
+    // KPIs
+    const thisWeekEnd = new Date(); thisWeekEnd.setDate(thisWeekEnd.getDate() + 7);
+    const weekJobs    = jobs.filter(j => new Date(j.starts_at) <= thisWeekEnd);
+    const ready       = jobs.filter(j => j.status === 'ready');
+    const incomplete  = jobs.filter(j => j.status === 'planned' && parseInt(j.confirmed_count||0) < parseInt(j.needed_workers) && parseInt(j.assigned_count||0) > 0);
+    const empty       = jobs.filter(j => j.status === 'planned' && parseInt(j.assigned_count||0) === 0);
+
+    document.getElementById('plan-kpi-week').textContent       = weekJobs.length;
+    document.getElementById('plan-kpi-ready').textContent      = ready.length;
+    document.getElementById('plan-kpi-incomplete').textContent = incomplete.length;
+    document.getElementById('plan-kpi-empty').textContent      = empty.length;
+
+    const badge = document.getElementById('badge-planeamento');
+    const alerts = incomplete.length + empty.length;
+    badge.textContent = alerts;
+    badge.style.display = alerts > 0 ? '' : 'none';
+
+    if (!jobs.length) {
+      listEl.innerHTML = '<div style="color:#475569;font-size:.83rem;padding:.5rem 0">Sem serviços planeados</div>';
+      return;
+    }
+
+    const stColor = { planned:'#f59e0b', ready:'#34d399', in_progress:'#60a5fa', completed:'#94a3b8', cancelled:'#475569' };
+    listEl.innerHTML = jobs.map(j => {
+      const assigned   = parseInt(j.assigned_count||0);
+      const confirmed  = parseInt(j.confirmed_count||0);
+      const needed     = parseInt(j.needed_workers);
+      const okColor    = confirmed >= needed ? '#34d399' : assigned >= needed ? '#f59e0b' : '#ef4444';
+      const ds = new Date(j.starts_at);
+      const de = new Date(j.ends_at);
+      const fmtDt = d => d.toLocaleDateString('pt-PT', {day:'2-digit',month:'2-digit',year:'2-digit'}) + ' ' +
+                         d.toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'});
+      return `<div class="card" style="margin-bottom:.75rem;border-left:3px solid ${stColor[j.status]||'#334155'}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.5rem">
+          <div>
+            <span style="font-weight:700;color:#f8fafc">${esc(j.title)}</span>
+            <span style="font-size:.75rem;color:#94a3b8;margin-left:.5rem">${esc(j.client_name||'')}</span>
+            ${j.location ? `<span style="font-size:.73rem;color:#64748b;margin-left:.4rem">📍 ${esc(j.location)}</span>` : ''}
+          </div>
+          <span style="font-size:.7rem;font-weight:700;color:${stColor[j.status]};text-transform:uppercase">${j.status}</span>
+        </div>
+        <div style="font-size:.78rem;color:#94a3b8;margin-bottom:.6rem">${fmtDt(ds)} → ${fmtDt(de)}</div>
+        <div style="display:flex;align-items:center;gap:1rem">
+          <span style="font-size:.8rem;color:${okColor};font-weight:600">
+            ${confirmed}/${needed} confirmados · ${assigned} atribuídos
+          </span>
+          <button onclick="openAssignModal(${j.id},'${esc(j.title).replace(/'/g,"\\'")}',${needed})"
+            style="background:#1e3a5f;color:#60a5fa;border:1px solid #2563eb;border-radius:4px;padding:.2rem .6rem;font-size:.75rem;cursor:pointer">
+            + Atribuir worker
+          </button>
+          <button onclick="loadJobDetail(${j.id})"
+            style="background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:4px;padding:.2rem .6rem;font-size:.75rem;cursor:pointer">
+            Detalhes
+          </button>
+        </div>
+        <div id="job-detail-${j.id}" style="display:none;margin-top:.75rem;border-top:1px solid #1e293b;padding-top:.75rem"></div>
+      </div>`;
+    }).join('');
+
+    // Populate client selector for create form
+    if (!_planClients.length) {
+      const rc = await api('/api/persons').catch(() => ({}));  // fallback
+      // Actually we need clients not persons for job create
+    }
+    _loadPlanClients();
+    _loadPlanWorkers();
+  } catch(e) { listEl.innerHTML = `<span style="color:#ef4444;font-size:.82rem">Erro: ${esc(String(e))}</span>`; }
+}
+
+async function _loadPlanClients() {
+  if (_planClients.length) return;
+  try {
+    const r = await _pgFetch('/api/admin/jobs', null);  // no direct clients endpoint here
+    // Use the persons API as fallback — pull clients from DB via overview
+    const rc = await api('/api/client/overview').catch(() => null);
+  } catch(e) {}
+  // Populate via direct query through existing endpoint
+  _fillPlanClientSelect();
+}
+
+async function _fillPlanClientSelect() {
+  const sel = document.getElementById('plan-client');
+  if (!sel) return;
+  try {
+    // Fetch clients list from admin invoices (has client names)
+    const r = await api('/api/admin/invoices?status=invoice_draft');
+    const seen = new Map();
+    (r.invoices||[]).forEach(i => { if (i.client_id && !seen.has(i.client_id)) seen.set(i.client_id, i.client_name||i.client_id); });
+    if (!seen.size) {
+      // Fallback: fetch from payouts which also have client info
+      const r2 = await api('/api/admin/payouts');
+      (r2.payouts||[]).forEach(p => { if (p.client_id && !seen.has(+p.client_id)) seen.set(+p.client_id, p.client_name||p.client_id); });
+    }
+    sel.innerHTML = '<option value="">— Seleccionar cliente —</option>' +
+      [...seen.entries()].map(([id, name]) => `<option value="${id}">${esc(String(name))}</option>`).join('');
+    // Also load job list clients
+    const rj = await api('/api/admin/jobs');
+    (rj.jobs||[]).forEach(j => { if (j.client_id && !seen.has(+j.client_id)) seen.set(+j.client_id, j.client_name||j.client_id); });
+    sel.innerHTML = '<option value="">— Seleccionar cliente —</option>' +
+      [...seen.entries()].map(([id, name]) => `<option value="${id}">${esc(String(name))}</option>`).join('');
+  } catch(e) {}
+}
+
+async function _loadPlanWorkers() {
+  if (_planWorkers.length) return;
+  try {
+    const r = await api('/api/persons?limit=100');
+    // person_list returns array directly
+    const arr = Array.isArray(r) ? r : (r.persons || r.data || []);
+    _planWorkers = arr.filter(p => p.status !== 'inactive');
+  } catch(e) { _planWorkers = []; }
+}
+
+function togglePlanForm() {
+  const f = document.getElementById('plan-new-form');
+  const b = document.getElementById('plan-form-toggle');
+  if (f.style.display === 'none') { f.style.display=''; b.textContent='Colapsar'; _fillPlanClientSelect(); }
+  else                            { f.style.display='none'; b.textContent='Expandir'; }
+}
+
+async function createJob() {
+  const client_id      = document.getElementById('plan-client').value;
+  const title          = document.getElementById('plan-title').value.trim();
+  const starts_at      = document.getElementById('plan-starts').value;
+  const ends_at        = document.getElementById('plan-ends').value;
+  const location       = document.getElementById('plan-location').value.trim();
+  const needed_workers = parseInt(document.getElementById('plan-needed').value||'1');
+  const notes          = document.getElementById('plan-notes').value.trim();
+  const res            = document.getElementById('plan-form-result');
+  if (!client_id || !title || !starts_at || !ends_at) { res.textContent='Preencher cliente, título, início e fim'; res.style.color='#f87171'; return; }
+  res.textContent = 'A criar...'; res.style.color='#94a3b8';
+  try {
+    const r = await api('/api/admin/jobs', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ client_id: parseInt(client_id), title, location:location||null, starts_at, ends_at, needed_workers, notes:notes||null }) });
+    if (r.ok) {
+      res.textContent = `Serviço #${r.job_id} criado ✅`; res.style.color='#34d399';
+      document.getElementById('plan-title').value = '';
+      loadPlaneamento();
+    } else { res.textContent = r.error || 'Erro'; res.style.color='#f87171'; }
+  } catch(e) { res.textContent = 'Erro de rede'; res.style.color='#f87171'; }
+}
+
+async function openAssignModal(jobId, jobTitle, needed) {
+  await _loadPlanWorkers();
+  const workerOpts = _planWorkers.map(p =>
+    `<option value="${p.id}">${esc(p.name)}${p.role ? ' ('+esc(p.role)+')' : ''}</option>`).join('');
+  if (!workerOpts) { alert('Sem colaboradores disponíveis (carregar /api/persons)'); return; }
+  const mid = 'assign-modal-overlay';
+  document.getElementById(mid)?.remove();
+  const div = document.createElement('div');
+  div.id = mid;
+  div.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center';
+  div.innerHTML = `
+    <div style="background:#1e293b;border:1px solid #334155;border-radius:.75rem;padding:1.5rem;width:420px;max-width:95vw">
+      <h3 style="margin-bottom:1rem;color:#f8fafc;font-size:1rem">Atribuir Worker — <span style="color:#60a5fa">${esc(jobTitle)}</span></h3>
+      <div style="margin-bottom:.75rem">
+        <div style="font-size:.75rem;color:#94a3b8;margin-bottom:.3rem">Colaborador</div>
+        <select id="assign-worker-sel" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.35rem .5rem;font-size:.83rem">
+          <option value="">— Seleccionar —</option>${workerOpts}
+        </select>
+      </div>
+      <div style="margin-bottom:.75rem">
+        <div style="font-size:.75rem;color:#94a3b8;margin-bottom:.3rem">Função (opcional)</div>
+        <input id="assign-role-inp" placeholder="Ex: Segurança, Promotor..." style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:.35rem .5rem;font-size:.83rem;box-sizing:border-box">
+      </div>
+      <div id="assign-conflict-msg" style="display:none;background:#450a0a;color:#fca5a5;border:1px solid #7f1d1d;border-radius:4px;padding:.5rem .75rem;font-size:.8rem;margin-bottom:.75rem"></div>
+      <div style="display:flex;gap:.75rem;justify-content:flex-end">
+        <button onclick="document.getElementById('${mid}').remove()" style="background:#334155;color:#94a3b8;border:none;border-radius:4px;padding:.4rem 1rem;cursor:pointer;font-size:.83rem">Cancelar</button>
+        <button onclick="submitAssign(${jobId},'${mid}')" style="background:#3b82f6;color:#fff;border:none;border-radius:4px;padding:.4rem 1.2rem;cursor:pointer;font-size:.83rem;font-weight:600">Atribuir</button>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+}
+
+async function submitAssign(jobId, mid) {
+  const worker_id = document.getElementById('assign-worker-sel').value;
+  const role      = document.getElementById('assign-role-inp').value.trim();
+  const conflEl   = document.getElementById('assign-conflict-msg');
+  if (!worker_id) { conflEl.textContent='Seleccionar colaborador'; conflEl.style.display=''; return; }
+  conflEl.style.display = 'none';
+  try {
+    const r = await api(`/api/admin/jobs/${jobId}/assign`, { method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ worker_id: parseInt(worker_id), role: role||null }) });
+    if (r.ok) {
+      document.getElementById(mid)?.remove();
+      showToast('Worker atribuído ✅');
+      loadPlaneamento();
+    } else if (r.conflict) {
+      const c = r.conflict;
+      const ds = new Date(c.starts_at).toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+      conflEl.innerHTML = `⚠️ Conflito: já atribuído a <b>${esc(c.title)}</b> em ${ds}`;
+      conflEl.style.display = '';
+    } else {
+      conflEl.textContent = r.error || 'Erro'; conflEl.style.display = '';
+    }
+  } catch(e) { conflEl.textContent = 'Erro de rede'; conflEl.style.display = ''; }
+}
+
+async function loadJobDetail(jobId) {
+  const el = document.getElementById(`job-detail-${jobId}`);
+  if (!el) return;
+  if (el.style.display !== 'none') { el.style.display='none'; return; }
+  el.style.display = '';
+  el.innerHTML = '<span style="color:#94a3b8;font-size:.8rem">A carregar...</span>';
+  try {
+    const r = await api(`/api/admin/jobs/${jobId}`);
+    const asgList = (r.assignments||[]);
+    const stColor = { assigned:'#f59e0b', confirmed:'#34d399', checked_in:'#60a5fa', completed:'#94a3b8', cancelled:'#475569' };
+    el.innerHTML = asgList.length
+      ? asgList.map(a => `
+          <div style="display:flex;align-items:center;gap:.75rem;padding:.35rem 0;border-bottom:1px solid #1e293b;font-size:.82rem">
+            <span style="font-weight:600;color:#e2e8f0;min-width:120px">${esc(a.worker_name||'?')}</span>
+            ${a.role ? `<span style="color:#64748b">${esc(a.role)}</span>` : ''}
+            <span style="color:${stColor[a.status]||'#94a3b8'};font-weight:700;text-transform:uppercase;font-size:.7rem">${a.status}</span>
+            ${a.status === 'assigned'
+              ? `<button onclick="confirmAssignment(${a.id},${jobId})" style="background:#14532d;color:#86efac;border:1px solid #166534;border-radius:3px;padding:.1rem .45rem;font-size:.72rem;cursor:pointer">Confirmar</button>`
+              : ''}
+            ${!['completed','cancelled'].includes(a.status)
+              ? `<button onclick="cancelAssignment(${a.id},${jobId})" style="background:#450a0a;color:#fca5a5;border:1px solid #7f1d1d;border-radius:3px;padding:.1rem .45rem;font-size:.72rem;cursor:pointer">Cancelar</button>`
+              : ''}
+          </div>`).join('')
+      : '<span style="color:#475569;font-size:.8rem">Sem atribuições</span>';
+  } catch(e) { el.innerHTML = `<span style="color:#ef4444;font-size:.8rem">Erro ao carregar</span>`; }
+}
+
+async function confirmAssignment(asgId, jobId) {
+  try {
+    const r = await api(`/api/admin/assignments/${asgId}/confirm`, { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+    if (r.ok) { showToast('Confirmado ✅'); loadJobDetail(jobId); loadPlaneamento(); }
+    else alert(r.error || 'Erro');
+  } catch(e) { alert('Erro de rede'); }
+}
+
+async function cancelAssignment(asgId, jobId) {
+  if (!confirm('Cancelar esta atribuição?')) return;
+  try {
+    const r = await api(`/api/admin/assignments/${asgId}/cancel`, { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+    if (r.ok) { showToast('Atribuição cancelada'); loadJobDetail(jobId); loadPlaneamento(); }
+    else alert(r.error || 'Erro');
+  } catch(e) { alert('Erro de rede'); }
 }
 
 // ── serviços ──────────────────────────────────────────────────────────────────

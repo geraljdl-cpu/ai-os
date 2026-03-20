@@ -2559,6 +2559,157 @@ app.post('/api/admin/payouts/:id/mark-paid', requireRole('finance'), async (req,
   } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
 });
 
+// ── Admin Planeamento / Escalas ───────────────────────────────────────────────
+
+app.get('/api/admin/jobs', requireRole('operator'), async (req, res) => {
+  try {
+    const { status, from } = req.query;
+    const params = [];
+    let where = 'WHERE 1=1';
+    if (status) { params.push(status); where += ` AND sj.status=$${params.length}`; }
+    if (from)   { params.push(from);   where += ` AND sj.starts_at>=$${params.length}`; }
+    const rows = await _pgQuery(`
+      SELECT sj.id, sj.title, sj.location, sj.starts_at, sj.ends_at,
+             sj.needed_workers, sj.status, sj.notes, sj.created_at,
+             c.name AS client_name,
+             COUNT(ja.id) FILTER (WHERE ja.status != 'cancelled')           AS assigned_count,
+             COUNT(ja.id) FILTER (WHERE ja.status = 'confirmed')            AS confirmed_count,
+             COUNT(ja.id) FILTER (WHERE ja.status IN ('confirmed','checked_in','completed')) AS ready_count
+      FROM public.service_jobs sj
+      LEFT JOIN public.clients c ON c.id = sj.client_id
+      LEFT JOIN public.job_assignments ja ON ja.job_id = sj.id
+      ${where}
+      GROUP BY sj.id, c.name
+      ORDER BY sj.starts_at ASC LIMIT 200
+    `, params);
+    res.json({ ok: true, jobs: rows });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.post('/api/admin/jobs', requireRole('operator'), async (req, res) => {
+  try {
+    const { client_id, title, location, starts_at, ends_at, needed_workers = 1, notes } = req.body;
+    if (!client_id || !title || !starts_at || !ends_at)
+      return res.status(400).json({ ok: false, error: 'client_id, title, starts_at, ends_at obrigatórios' });
+    if (new Date(ends_at) <= new Date(starts_at))
+      return res.status(400).json({ ok: false, error: 'ends_at deve ser posterior a starts_at' });
+    const [row] = await _pgQuery(`
+      INSERT INTO public.service_jobs (client_id, title, location, starts_at, ends_at, needed_workers, notes)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      RETURNING id
+    `, [client_id, title, location || null, starts_at, ends_at, needed_workers, notes || null]);
+    console.log(JSON.stringify({ event: 'service_job_created', job_id: row.id, title, client_id, user: req.user?.sub }));
+    res.json({ ok: true, job_id: row.id });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.get('/api/admin/jobs/:id', requireRole('operator'), async (req, res) => {
+  try {
+    const [job, assignments] = await Promise.all([
+      _pgQuery(`
+        SELECT sj.*, c.name AS client_name
+        FROM public.service_jobs sj
+        LEFT JOIN public.clients c ON c.id = sj.client_id
+        WHERE sj.id=$1
+      `, [req.params.id]),
+      _pgQuery(`
+        SELECT ja.*, p.name AS worker_name
+        FROM public.job_assignments ja
+        JOIN public.persons p ON p.id = ja.worker_id
+        WHERE ja.job_id=$1
+        ORDER BY ja.assigned_at
+      `, [req.params.id]),
+    ]);
+    if (!job.length) return res.status(404).json({ ok: false, error: 'not found' });
+    res.json({ ok: true, job: job[0], assignments });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.post('/api/admin/jobs/:id/assign', requireRole('operator'), async (req, res) => {
+  try {
+    const { worker_id, role, notes } = req.body;
+    if (!worker_id) return res.status(400).json({ ok: false, error: 'worker_id obrigatório' });
+    const [job] = await _pgQuery(
+      `SELECT id, starts_at, ends_at, status FROM public.service_jobs WHERE id=$1`, [req.params.id]);
+    if (!job) return res.status(404).json({ ok: false, error: 'job not found' });
+    if (job.status === 'cancelled') return res.status(400).json({ ok: false, error: 'job cancelado' });
+
+    // Conflict check: worker already assigned to overlapping job
+    const [conflict] = await _pgQuery(`
+      SELECT sj.id AS conflict_job_id, sj.title AS conflict_title,
+             sj.starts_at, sj.ends_at
+      FROM public.job_assignments ja
+      JOIN public.service_jobs sj ON sj.id = ja.job_id
+      WHERE ja.worker_id = $1
+        AND ja.status NOT IN ('cancelled')
+        AND ja.job_id != $2
+        AND sj.status NOT IN ('cancelled','completed')
+        AND sj.starts_at < $4
+        AND sj.ends_at   > $3
+      LIMIT 1
+    `, [worker_id, req.params.id, job.starts_at, job.ends_at]);
+
+    if (conflict) {
+      console.log(JSON.stringify({
+        event: 'worker_assignment_conflict', job_id: req.params.id, worker_id,
+        conflict_job_id: conflict.conflict_job_id,
+      }));
+      return res.status(409).json({
+        ok: false, error: 'conflito de horário',
+        conflict: { job_id: conflict.conflict_job_id, title: conflict.conflict_title,
+                    starts_at: conflict.starts_at, ends_at: conflict.ends_at },
+      });
+    }
+
+    const [row] = await _pgQuery(`
+      INSERT INTO public.job_assignments (job_id, worker_id, role, notes)
+      VALUES ($1,$2,$3,$4) RETURNING id
+    `, [req.params.id, worker_id, role || null, notes || null]);
+    console.log(JSON.stringify({ event: 'worker_assigned', job_id: req.params.id, worker_id, assignment_id: row.id }));
+    res.json({ ok: true, assignment_id: row.id });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.post('/api/admin/assignments/:id/confirm', requireRole('operator'), async (req, res) => {
+  try {
+    const [asg] = await _pgQuery(
+      `SELECT id, job_id, status FROM public.job_assignments WHERE id=$1`, [req.params.id]);
+    if (!asg) return res.status(404).json({ ok: false, error: 'not found' });
+    if (asg.status !== 'assigned') return res.status(400).json({ ok: false, error: `status é ${asg.status}` });
+    await _pgQuery(`
+      UPDATE public.job_assignments SET status='confirmed', confirmed_at=now() WHERE id=$1
+    `, [req.params.id]);
+    // Promover job para 'ready' se confirmados >= needed_workers
+    await _pgQuery(`
+      UPDATE public.service_jobs SET status='ready'
+      WHERE id=$1 AND status='planned'
+        AND (SELECT COUNT(*) FROM public.job_assignments
+             WHERE job_id=$1 AND status='confirmed') >= needed_workers
+    `, [asg.job_id]);
+    console.log(JSON.stringify({ event: 'worker_assignment_confirmed', assignment_id: req.params.id, job_id: asg.job_id }));
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.post('/api/admin/assignments/:id/cancel', requireRole('operator'), async (req, res) => {
+  try {
+    const [asg] = await _pgQuery(
+      `SELECT id, job_id FROM public.job_assignments WHERE id=$1`, [req.params.id]);
+    if (!asg) return res.status(404).json({ ok: false, error: 'not found' });
+    await _pgQuery(`
+      UPDATE public.job_assignments SET status='cancelled' WHERE id=$1
+    `, [req.params.id]);
+    // Reverter job para 'planned' se já não tem confirmados suficientes
+    await _pgQuery(`
+      UPDATE public.service_jobs SET status='planned'
+      WHERE id=$1 AND status='ready'
+        AND (SELECT COUNT(*) FROM public.job_assignments
+             WHERE job_id=$1 AND status='confirmed') < needed_workers
+    `, [asg.job_id]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
 // All endpoints: requireClientAccess → filters by req.user.client_id (or all if admin)
 
 function _clientId(req) {
