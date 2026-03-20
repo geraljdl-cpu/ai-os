@@ -2559,6 +2559,194 @@ app.post('/api/admin/payouts/:id/mark-paid', requireRole('finance'), async (req,
   } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
 });
 
+// ── Admin Marketplace ─────────────────────────────────────────────────────────
+
+app.get('/api/admin/marketplace/jobs', requireRole('operator'), async (req, res) => {
+  try {
+    const { status } = req.query;
+    const params = [];
+    let where = 'WHERE 1=1';
+    if (status) { params.push(status); where += ` AND mj.status=$${params.length}`; }
+    const rows = await _pgQuery(`
+      SELECT mj.id, mj.title, mj.location, mj.starts_at, mj.ends_at,
+             mj.needed_workers, mj.role_required, mj.billing_model, mj.status, mj.notes,
+             mj.service_job_id, mj.created_at, c.name AS client_name,
+             COUNT(ma.id) FILTER (WHERE ma.status != 'expired')                      AS total_apps,
+             COUNT(ma.id) FILTER (WHERE ma.status IN ('invited'))                    AS invited_count,
+             COUNT(ma.id) FILTER (WHERE ma.status = 'accepted')                      AS accepted_count,
+             COUNT(ma.id) FILTER (WHERE ma.status = 'selected')                      AS selected_count
+      FROM public.marketplace_jobs mj
+      LEFT JOIN public.clients c ON c.id = mj.client_id
+      LEFT JOIN public.marketplace_applications ma ON ma.job_id = mj.id
+      ${where}
+      GROUP BY mj.id, c.name
+      ORDER BY mj.starts_at ASC LIMIT 200
+    `, params);
+    res.json({ ok: true, jobs: rows });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.post('/api/admin/marketplace/jobs', requireRole('operator'), async (req, res) => {
+  try {
+    const { client_id, title, location, starts_at, ends_at,
+            needed_workers = 1, role_required, billing_model = 'marketplace_direct', notes } = req.body;
+    if (!client_id || !title || !starts_at || !ends_at)
+      return res.status(400).json({ ok: false, error: 'client_id, title, starts_at, ends_at obrigatórios' });
+    if (new Date(ends_at) <= new Date(starts_at))
+      return res.status(400).json({ ok: false, error: 'ends_at deve ser posterior a starts_at' });
+    const [row] = await _pgQuery(`
+      INSERT INTO public.marketplace_jobs
+        (client_id, title, location, starts_at, ends_at, needed_workers, role_required, billing_model, notes)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING id
+    `, [client_id, title, location||null, starts_at, ends_at, needed_workers,
+        role_required||null, billing_model, notes||null]);
+    console.log(JSON.stringify({ event: 'marketplace_job_created', job_id: row.id, title, client_id }));
+    res.json({ ok: true, job_id: row.id });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.get('/api/admin/marketplace/jobs/:id', requireRole('operator'), async (req, res) => {
+  try {
+    const [job, apps] = await Promise.all([
+      _pgQuery(`
+        SELECT mj.*, c.name AS client_name
+        FROM public.marketplace_jobs mj
+        LEFT JOIN public.clients c ON c.id = mj.client_id
+        WHERE mj.id=$1
+      `, [req.params.id]),
+      _pgQuery(`
+        SELECT ma.*, p.name AS worker_name, mwp.whatsapp_phone, mwp.rating
+        FROM public.marketplace_applications ma
+        JOIN public.persons p ON p.id = ma.worker_id
+        LEFT JOIN public.marketplace_worker_profiles mwp ON mwp.worker_id = ma.worker_id
+        WHERE ma.job_id=$1
+        ORDER BY ma.score DESC, ma.created_at
+      `, [req.params.id]),
+    ]);
+    if (!job.length) return res.status(404).json({ ok: false, error: 'not found' });
+    res.json({ ok: true, job: job[0], applications: apps });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.post('/api/admin/marketplace/jobs/:id/invite', requireRole('operator'), async (req, res) => {
+  try {
+    const { worker_id, notes, send_whatsapp = false } = req.body;
+    if (!worker_id) return res.status(400).json({ ok: false, error: 'worker_id obrigatório' });
+    const [job] = await _pgQuery(
+      `SELECT id, starts_at, ends_at, status FROM public.marketplace_jobs WHERE id=$1`, [req.params.id]);
+    if (!job) return res.status(404).json({ ok: false, error: 'job not found' });
+    if (job.status === 'cancelled') return res.status(400).json({ ok: false, error: 'job cancelado' });
+
+    // Conflito: worker já convidado/selecionado neste job
+    const [dup] = await _pgQuery(`
+      SELECT id FROM public.marketplace_applications
+      WHERE job_id=$1 AND worker_id=$2 AND status NOT IN ('declined','rejected','expired')
+    `, [req.params.id, worker_id]);
+    if (dup) return res.status(409).json({ ok: false, error: 'worker já convidado para este job' });
+
+    // Conflito de horário com service_jobs existente
+    const [sjConflict] = await _pgQuery(`
+      SELECT sj.id, sj.title FROM public.job_assignments ja
+      JOIN public.service_jobs sj ON sj.id = ja.job_id
+      WHERE ja.worker_id=$1 AND ja.status NOT IN ('cancelled')
+        AND sj.status NOT IN ('cancelled','completed')
+        AND sj.starts_at < $3 AND sj.ends_at > $2
+      LIMIT 1
+    `, [worker_id, job.starts_at, job.ends_at]);
+    if (sjConflict) return res.status(409).json({
+      ok: false, error: 'conflito com serviço confirmado',
+      conflict: { type: 'service_job', id: sjConflict.id, title: sjConflict.title },
+    });
+
+    // Criar application
+    const [row] = await _pgQuery(`
+      INSERT INTO public.marketplace_applications (job_id, worker_id, notes)
+      VALUES ($1,$2,$3) RETURNING id
+    `, [req.params.id, worker_id, notes||null]);
+
+    console.log(JSON.stringify({ event: 'marketplace_invites_sent',
+      job_id: req.params.id, worker_id, application_id: row.id }));
+
+    // Enviar WhatsApp se solicitado
+    if (send_whatsapp) {
+      const { execSync } = require('child_process');
+      try {
+        execSync(`python3 /home/jdl/ai-os/bin/marketplace_invite.py --job-id ${req.params.id} --worker-id ${worker_id}`,
+          { timeout: 15000 });
+      } catch(e) { /* log mas não falha a resposta */ }
+    }
+
+    res.json({ ok: true, application_id: row.id });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.post('/api/admin/marketplace/applications/:id/select', requireRole('operator'), async (req, res) => {
+  try {
+    const [app] = await _pgQuery(`
+      SELECT ma.*, mj.title, mj.starts_at, mj.ends_at, mj.client_id,
+             mj.needed_workers, mj.location, mj.service_job_id
+      FROM public.marketplace_applications ma
+      JOIN public.marketplace_jobs mj ON mj.id = ma.job_id
+      WHERE ma.id=$1
+    `, [req.params.id]);
+    if (!app) return res.status(404).json({ ok: false, error: 'not found' });
+    if (!['invited','accepted'].includes(app.status))
+      return res.status(400).json({ ok: false, error: `status é ${app.status}` });
+
+    // Criar ou reutilizar service_job (ponte para o fluxo normal)
+    let serviceJobId = app.service_job_id ? parseInt(app.service_job_id) : null;
+    if (!serviceJobId) {
+      const [sj] = await _pgQuery(`
+        INSERT INTO public.service_jobs (client_id, title, location, starts_at, ends_at, needed_workers, status)
+        VALUES ($1,$2,$3,$4,$5,$6,'in_progress') RETURNING id
+      `, [app.client_id, app.title, app.location||null, app.starts_at, app.ends_at, app.needed_workers]);
+      serviceJobId = sj.id;
+      await _pgQuery(`UPDATE public.marketplace_jobs SET service_job_id=$1 WHERE id=$2`,
+        [serviceJobId, app.job_id]);
+    }
+
+    // Criar job_assignment normal
+    const [asgRow] = await _pgQuery(`
+      INSERT INTO public.job_assignments (job_id, worker_id, status)
+      VALUES ($1,$2,'confirmed') RETURNING id
+    `, [serviceJobId, app.worker_id]);
+
+    // Marcar application como selected
+    await _pgQuery(`UPDATE public.marketplace_applications SET status='selected', response_at=now() WHERE id=$1`,
+      [req.params.id]);
+
+    // Verificar se marketplace_job está matched
+    const [selCount] = await _pgQuery(`
+      SELECT COUNT(*) AS n FROM public.marketplace_applications
+      WHERE job_id=$1 AND status='selected'
+    `, [app.job_id]);
+    if (parseInt(selCount.n) >= app.needed_workers) {
+      await _pgQuery(`UPDATE public.marketplace_jobs SET status='matched' WHERE id=$1`, [app.job_id]);
+    }
+
+    console.log(JSON.stringify({ event: 'marketplace_worker_selected',
+      application_id: req.params.id, worker_id: app.worker_id,
+      job_id: app.job_id, service_job_id: serviceJobId, assignment_id: asgRow.id }));
+    res.json({ ok: true, service_job_id: serviceJobId, assignment_id: asgRow.id });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
+app.post('/api/admin/marketplace/applications/:id/reject', requireRole('operator'), async (req, res) => {
+  try {
+    const [app] = await _pgQuery(
+      `SELECT id, job_id, status FROM public.marketplace_applications WHERE id=$1`, [req.params.id]);
+    if (!app) return res.status(404).json({ ok: false, error: 'not found' });
+    if (['selected','expired'].includes(app.status))
+      return res.status(400).json({ ok: false, error: `não pode rejeitar status=${app.status}` });
+    await _pgQuery(`UPDATE public.marketplace_applications SET status='rejected', response_at=now() WHERE id=$1`,
+      [req.params.id]);
+    console.log(JSON.stringify({ event: 'marketplace_worker_rejected',
+      application_id: req.params.id, job_id: app.job_id }));
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ ok: false, error: String(e.message) }); }
+});
+
 // ── Admin Clients (lookup) ────────────────────────────────────────────────────
 
 app.get('/api/admin/clients', requireRole('viewer'), async (req, res) => {
