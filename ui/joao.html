@@ -275,6 +275,7 @@ header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
     </div>
     <div class="sidebar-item" data-view="autonomia" onclick="setView('autonomia')">
       <span class="icon">🤖</span> Autonomia
+      <span id="badge-autonomia" style="margin-left:auto;background:#ef4444;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;display:none"></span>
     </div>
     <div class="sidebar-item" data-view="workspace" onclick="setView('workspace')">
       <span class="icon">💬</span> Workspace
@@ -532,6 +533,39 @@ header .subtitle{font-size:.8rem;color:#64748b;margin-top:2px}
           <div class="card-title">🤖 Agentes</div>
           <div id="aut-agents"></div>
         </div>
+      </div>
+
+      <!-- Jobs Activos + Falhas 24h -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">
+        <div class="card">
+          <div class="card-title">▶ Jobs Activos</div>
+          <div id="aut-active-jobs"><div style="font-size:.8rem;color:#64748b">—</div></div>
+        </div>
+        <div class="card">
+          <div class="card-title">❌ Falhas 24h</div>
+          <div id="aut-failures"><div style="font-size:.8rem;color:#64748b">—</div></div>
+        </div>
+      </div>
+
+      <!-- Retry Queue + Blocked Review -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">
+        <div class="card">
+          <div class="card-title">🔄 Retry Queue</div>
+          <div id="aut-retry-queue"><div style="font-size:.8rem;color:#64748b">—</div></div>
+        </div>
+        <div class="card">
+          <div class="card-title" style="display:flex;align-items:center;gap:.5rem">
+            🔒 Blocked Review
+            <span id="aut-blocked-count" style="background:#ef4444;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;display:none"></span>
+          </div>
+          <div id="aut-blocked-jobs"><div style="font-size:.8rem;color:#64748b">—</div></div>
+        </div>
+      </div>
+
+      <!-- Worker Heartbeat -->
+      <div class="card" style="margin-top:1rem">
+        <div class="card-title">💓 Worker Heartbeat</div>
+        <div id="aut-heartbeat"><div style="font-size:.8rem;color:#64748b">—</div></div>
       </div>
     </div>
 
@@ -4062,25 +4096,41 @@ async function loadInbox() {
 
 // ── autonomia ─────────────────────────────────────────────────────────────────
 
+function _autAge(isoStr) {
+  if (!isoStr) return '?';
+  const secs = Math.floor((Date.now() - new Date(isoStr)) / 1000);
+  if (secs < 60)  return secs + 's';
+  if (secs < 3600) return Math.floor(secs/60) + 'm';
+  return Math.floor(secs/3600) + 'h';
+}
+
 async function loadAutonomia() {
+  clearTimeout(window._autRefreshTimer);
   try {
-    const [overview, inbox, docSummary, autonomy] = await Promise.all([
+    const [overview, inbox, docSummary, autonomy, workers, allJobs, blocked] = await Promise.all([
       api('/api/control/overview'),
       api('/api/inbox/pending'),
       api('/api/docs/summary'),
       api('/api/system/autonomy').catch(() => ({})),
+      api('/api/workers').catch(() => []),
+      api('/api/worker_jobs?limit=50').catch(() => []),
+      api('/api/autonomia/blocked').catch(() => []),
     ]);
 
-    // Timers
+    const jobs = Array.isArray(allJobs) ? allJobs : (allJobs.jobs || []);
+
+    // ── KPI: Timers ──
     const timers = (overview.health?.timers || []).filter(t => t.last > 0);
     const jobsPending = autonomy.jobs_pending ?? 0;
     const jobsRunning = autonomy.jobs_running ?? 0;
     const jobsFailed  = autonomy.jobs_failed_24h ?? 0;
+    const blockedCnt  = autonomy.blocked_review ?? blocked.length ?? 0;
     document.getElementById('aut-timers').innerHTML =
       `<div style="display:flex;gap:1rem;margin-bottom:.5rem">
-         <div><div style="font-size:1.2rem;font-weight:700;color:${jobsPending>0?'#fbbf24':'#34d399'}">${jobsPending}</div><div style="font-size:.75rem;color:#94a3b8">pending</div></div>
+         <div><div style="font-size:1.2rem;font-weight:700;color:${jobsPending>0?'#fbbf24':'#34d399'}">${jobsPending}</div><div style="font-size:.75rem;color:#94a3b8">queued</div></div>
          <div><div style="font-size:1.2rem;font-weight:700;color:#60a5fa">${jobsRunning}</div><div style="font-size:.75rem;color:#94a3b8">running</div></div>
          <div><div style="font-size:1.2rem;font-weight:700;color:${jobsFailed>0?'#f87171':'#34d399'}">${jobsFailed}</div><div style="font-size:.75rem;color:#94a3b8">falhas 24h</div></div>
+         <div><div style="font-size:1.2rem;font-weight:700;color:${blockedCnt>0?'#f87171':'#34d399'}">${blockedCnt}</div><div style="font-size:.75rem;color:#94a3b8">blocked</div></div>
        </div>` +
       (timers.length
         ? timers.slice(0,4).map(t => {
@@ -4089,7 +4139,7 @@ async function loadAutonomia() {
           }).join('')
         : '<div style="font-size:.75rem;color:#64748b">Sem timers</div>');
 
-    // Incidents
+    // ── KPI: Incidents ──
     const inboxCrit = autonomy.incidents_critical_24h ?? 0;
     const crits = (overview.incidents || []).filter(i => i.status==='open' && i.severity==='crit');
     const warns = (overview.incidents || []).filter(i => i.status==='open' && i.severity==='warn');
@@ -4097,13 +4147,13 @@ async function loadAutonomia() {
       `<div style="font-size:1.4rem;font-weight:700;color:${(crits.length||inboxCrit)?'#f87171':'#34d399'}">${Math.max(crits.length, inboxCrit)}</div>
        <div style="font-size:.8rem;color:#94a3b8">${crits.length} críticos · ${warns.length} avisos</div>`;
 
-    // Approvals
+    // ── KPI: Approvals ──
     const approvPend = autonomy.approvals_pending ?? (inbox.items || []).length;
     document.getElementById('aut-approvals').innerHTML =
       `<div style="font-size:1.4rem;font-weight:700;color:${approvPend?'#fbbf24':'#34d399'}">${approvPend}</div>
        <div style="font-size:.8rem;color:#94a3b8">pendentes</div>`;
 
-    // Docs
+    // ── KPI: Docs ──
     const docsExpired  = autonomy.docs_expired ?? 0;
     const docsExpiring = autonomy.docs_expiring_30d ?? 0;
     const dc = docSummary.doc_counts || {};
@@ -4114,7 +4164,7 @@ async function loadAutonomia() {
          <div><div style="font-size:1.2rem;font-weight:700;color:#34d399">${dc.valid||0}</div><div style="font-size:.75rem;color:#94a3b8">válidos</div></div>
        </div>`;
 
-    // Radar
+    // ── KPI: Radar ──
     const radarOpps = autonomy.radar_opportunities ?? 0;
     const tenders = (overview.tenders || []).filter(t => t.status === 'active');
     document.getElementById('aut-radar').innerHTML =
@@ -4122,7 +4172,7 @@ async function loadAutonomia() {
        <div style="font-size:.8rem;color:#94a3b8">oportunidades score≥70</div>
        <div style="font-size:.75rem;color:#64748b">${tenders.length} concursos activos</div>`;
 
-    // Agents
+    // ── KPI: Agents ──
     const agentInbox = autonomy.agent_inbox_pending ?? 0;
     const agents = (overview.agent_status || []);
     const onlineA = agents.filter(a => a.status !== 'offline').length;
@@ -4131,9 +4181,156 @@ async function loadAutonomia() {
        <div style="font-size:.8rem;color:#94a3b8">online</div>
        <div style="font-size:.75rem;color:${agentInbox?'#fbbf24':'#64748b'}">inbox: ${agentInbox} pendentes</div>`;
 
+    // ── Jobs Activos (running + queued) ──
+    const activeJobs = jobs.filter(j => j.status === 'running' || j.status === 'queued').slice(0, 12);
+    const _statusColor = s => s === 'running' ? '#60a5fa' : '#fbbf24';
+    document.getElementById('aut-active-jobs').innerHTML = activeJobs.length
+      ? `<table style="width:100%;font-size:.75rem;border-collapse:collapse">
+           <thead><tr style="color:#64748b">
+             <th style="text-align:left;padding:.2rem .4rem">#</th>
+             <th style="text-align:left;padding:.2rem .4rem">kind</th>
+             <th style="text-align:left;padding:.2rem .4rem">node</th>
+             <th style="text-align:left;padding:.2rem .4rem">age</th>
+             <th style="text-align:left;padding:.2rem .4rem">status</th>
+           </tr></thead>
+           <tbody>${activeJobs.map(j =>
+             `<tr style="border-top:1px solid #1e293b">
+                <td style="padding:.2rem .4rem;color:#94a3b8">${j.id}</td>
+                <td style="padding:.2rem .4rem">${esc(j.kind||'?')}</td>
+                <td style="padding:.2rem .4rem;color:#64748b">${esc(j.assigned_worker_id||j.target_worker_id||'—')}</td>
+                <td style="padding:.2rem .4rem;color:#64748b">${_autAge(j.ts_assigned||j.ts_created)}</td>
+                <td style="padding:.2rem .4rem"><span style="color:${_statusColor(j.status)}">${j.status}</span></td>
+              </tr>`
+           ).join('')}</tbody>
+         </table>`
+      : '<div style="font-size:.8rem;color:#64748b">Sem jobs activos</div>';
+
+    // ── Falhas 24h ──
+    const cutoff24h = Date.now() - 86400000;
+    const failedJobs = jobs.filter(j => j.status === 'failed' && j.ts_done && new Date(j.ts_done) > cutoff24h).slice(0, 10);
+    document.getElementById('aut-failures').innerHTML = failedJobs.length
+      ? `<table style="width:100%;font-size:.75rem;border-collapse:collapse">
+           <thead><tr style="color:#64748b">
+             <th style="text-align:left;padding:.2rem .4rem">#</th>
+             <th style="text-align:left;padding:.2rem .4rem">kind</th>
+             <th style="text-align:left;padding:.2rem .4rem">erro</th>
+             <th style="text-align:left;padding:.2rem .4rem">retry</th>
+           </tr></thead>
+           <tbody>${failedJobs.map(j => {
+             let errSnippet = '?';
+             try { const r = typeof j.result === 'string' ? JSON.parse(j.result) : (j.result||{}); errSnippet = r.error || JSON.stringify(r).slice(0,40); } catch {}
+             const retry = `${j.retry_count||0}/${j.max_retries||0}`;
+             return `<tr style="border-top:1px solid #1e293b">
+               <td style="padding:.2rem .4rem;color:#94a3b8">${j.id}</td>
+               <td style="padding:.2rem .4rem">${esc(j.kind||'?')}</td>
+               <td style="padding:.2rem .4rem;color:#f87171;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(errSnippet)}</td>
+               <td style="padding:.2rem .4rem;color:#64748b">${retry}</td>
+             </tr>`;
+           }).join('')}</tbody>
+         </table>`
+      : '<div style="font-size:.8rem;color:#64748b">Sem falhas</div>';
+
+    // ── Retry Queue (queued com retry_count > 0) ──
+    const retryJobs = jobs.filter(j => j.status === 'queued' && (j.retry_count || 0) > 0).slice(0, 8);
+    document.getElementById('aut-retry-queue').innerHTML = retryJobs.length
+      ? `<table style="width:100%;font-size:.75rem;border-collapse:collapse">
+           <thead><tr style="color:#64748b">
+             <th style="text-align:left;padding:.2rem .4rem">#</th>
+             <th style="text-align:left;padding:.2rem .4rem">kind</th>
+             <th style="text-align:left;padding:.2rem .4rem">tentativa</th>
+           </tr></thead>
+           <tbody>${retryJobs.map(j =>
+             `<tr style="border-top:1px solid #1e293b">
+                <td style="padding:.2rem .4rem;color:#94a3b8">${j.id}</td>
+                <td style="padding:.2rem .4rem">${esc(j.kind||'?')}</td>
+                <td style="padding:.2rem .4rem;color:#fbbf24">${j.retry_count}/${j.max_retries||'?'}</td>
+              </tr>`
+           ).join('')}</tbody>
+         </table>`
+      : '<div style="font-size:.8rem;color:#64748b">Sem retries pendentes</div>';
+
+    // ── Blocked Review ──
+    const blockedArr = Array.isArray(blocked) ? blocked : [];
+    const bdg = document.getElementById('aut-blocked-count');
+    const sidebarBdg = document.getElementById('badge-autonomia');
+    if (blockedArr.length > 0) {
+      bdg.textContent = blockedArr.length; bdg.style.display = '';
+      sidebarBdg.textContent = blockedArr.length; sidebarBdg.style.display = '';
+    } else {
+      bdg.style.display = 'none';
+      sidebarBdg.style.display = 'none';
+    }
+    document.getElementById('aut-blocked-jobs').innerHTML = blockedArr.length
+      ? `<table style="width:100%;font-size:.75rem;border-collapse:collapse">
+           <thead><tr style="color:#64748b">
+             <th style="text-align:left;padding:.2rem .4rem">#</th>
+             <th style="text-align:left;padding:.2rem .4rem">kind</th>
+             <th style="text-align:left;padding:.2rem .4rem">payload</th>
+             <th style="text-align:left;padding:.2rem .4rem">acções</th>
+           </tr></thead>
+           <tbody>${blockedArr.map(j => {
+             let preview = '';
+             try { const p = typeof j.payload === 'string' ? JSON.parse(j.payload) : (j.payload||{}); preview = p.cmd || p.script || JSON.stringify(p).slice(0,40); } catch { preview = String(j.payload||'').slice(0,40); }
+             return `<tr style="border-top:1px solid #1e293b">
+               <td style="padding:.2rem .4rem;color:#94a3b8">${j.id}</td>
+               <td style="padding:.2rem .4rem">${esc(j.kind||'?')}</td>
+               <td style="padding:.2rem .4rem;color:#fbbf24;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(preview)}</td>
+               <td style="padding:.2rem .4rem;white-space:nowrap">
+                 <button class="btn btn-sm" style="background:#22c55e;color:#000;padding:.1rem .5rem;font-size:.7rem" onclick="_autApprove(${j.id})">✓</button>
+                 <button class="btn btn-sm" style="background:#ef4444;color:#fff;padding:.1rem .5rem;font-size:.7rem;margin-left:.25rem" onclick="_autReject(${j.id})">✗</button>
+               </td>
+             </tr>`;
+           }).join('')}</tbody>
+         </table>`
+      : '<div style="font-size:.8rem;color:#64748b">Sem jobs bloqueados</div>';
+
+    // ── Worker Heartbeat ──
+    const wList = Array.isArray(workers) ? workers : (workers.workers || []);
+    document.getElementById('aut-heartbeat').innerHTML = wList.length
+      ? `<table style="width:100%;font-size:.75rem;border-collapse:collapse">
+           <thead><tr style="color:#64748b">
+             <th style="text-align:left;padding:.2rem .5rem">node</th>
+             <th style="text-align:left;padding:.2rem .5rem">role</th>
+             <th style="text-align:left;padding:.2rem .5rem">status</th>
+             <th style="text-align:left;padding:.2rem .5rem">last seen</th>
+             <th style="text-align:left;padding:.2rem .5rem">age</th>
+           </tr></thead>
+           <tbody>${wList.map(w => {
+             const age = w.age_secs != null ? (w.age_secs < 60 ? w.age_secs+'s' : Math.floor(w.age_secs/60)+'m') : '?';
+             const stale = (w.age_secs || 0) > 120;
+             const col = stale ? '#f87171' : '#34d399';
+             return `<tr style="border-top:1px solid #1e293b">
+               <td style="padding:.2rem .5rem;font-weight:500">${esc(w.hostname||w.id||'?')}</td>
+               <td style="padding:.2rem .5rem;color:#64748b">${esc(w.role||'?')}</td>
+               <td style="padding:.2rem .5rem"><span style="color:${col}">${esc(w.status||'?')}</span></td>
+               <td style="padding:.2rem .5rem;color:#64748b">${w.last_seen ? new Date(w.last_seen).toLocaleTimeString('pt-PT') : '?'}</td>
+               <td style="padding:.2rem .5rem;color:${col}">${age}</td>
+             </tr>`;
+           }).join('')}</tbody>
+         </table>`
+      : '<div style="font-size:.8rem;color:#64748b">Sem workers registados</div>';
+
   } catch(e) {
     document.getElementById('aut-timers').innerHTML = `<div style="color:#f87171">Erro: ${e.message}</div>`;
   }
+
+  // auto-refresh 30s enquanto a view está activa
+  if (currentView === 'autonomia') {
+    window._autRefreshTimer = setTimeout(loadAutonomia, 30000);
+  }
+}
+
+async function _autApprove(id) {
+  const r = await api(`/api/autonomia/jobs/${id}/approve`, { method: 'POST' });
+  if (r.ok) loadAutonomia();
+  else alert('Erro ao aprovar: ' + (r.error || JSON.stringify(r)));
+}
+
+async function _autReject(id) {
+  if (!confirm(`Rejeitar job #${id}?`)) return;
+  const r = await api(`/api/autonomia/jobs/${id}/reject`, { method: 'POST' });
+  if (r.ok) loadAutonomia();
+  else alert('Erro ao rejeitar: ' + (r.error || JSON.stringify(r)));
 }
 
 function exportExcel(type) {

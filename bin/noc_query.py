@@ -289,20 +289,95 @@ def cmd_syshealth(_args):
 
 # ── worker_jobs_enqueue ───────────────────────────────────────────────────────
 
+def _check_guardrails(engine, text, kind: str, payload_str: str) -> bool:
+    """Retorna True se o job deve ficar blocked_review (guardrail match)."""
+    try:
+        with engine.connect() as c:
+            rows = c.execute(text("""
+                SELECT pattern, action FROM public.autonomia_guardrails
+                WHERE active = true AND (kind = :kind OR kind = '*')
+            """), {"kind": kind}).mappings().all()
+    except Exception:
+        return False  # tabela não existe ainda → não bloquear
+    payload_lower = payload_str.lower()
+    for g in rows:
+        pat = g["pattern"]
+        if pat == "requires_approval":
+            if '"requires_approval": true' in payload_str or "'requires_approval': true" in payload_str:
+                return True
+        elif pat.lower() in payload_lower:
+            return True
+    return False
+
+
 def cmd_worker_jobs_enqueue(args):
     """Enfileira job. Args: <kind> <payload_json> [target_worker_id|-]"""
     if len(args) < 2:
         raise ValueError("usage: worker_jobs_enqueue <kind> <payload_json> [target_worker_id]")
-    kind    = args[0]
-    payload = json.loads(args[1])
-    target  = args[2] if len(args) > 2 and args[2] != "-" else None
+    kind        = args[0]
+    payload     = json.loads(args[1])
+    target      = args[2] if len(args) > 2 and args[2] != "-" else None
+    payload_str = json.dumps(payload)
     engine, text = _conn()
+    blocked = _check_guardrails(engine, text, kind, payload_str)
+    status  = "blocked_review" if blocked else "queued"
     with engine.begin() as c:
         row = c.execute(text(
             "INSERT INTO public.worker_jobs (ts_created, status, kind, payload, target_worker_id) "
-            "VALUES (NOW(), 'queued', :kind, :payload, :target) RETURNING id"
-        ), {"kind": kind, "payload": json.dumps(payload), "target": target})
+            "VALUES (NOW(), :status, :kind, :payload, :target) RETURNING id"
+        ), {"status": status, "kind": kind, "payload": payload_str, "target": target})
         job_id = row.scalar()
+    print(json.dumps({"ok": True, "job_id": job_id, "status": status, "blocked": blocked}))
+
+
+# ── autonomia_blocked / approve / reject ──────────────────────────────────────
+
+def cmd_autonomia_blocked(args):
+    """Lista jobs blocked_review. Args: [limit=20]"""
+    limit = int(args[0]) if args else 20
+    engine, text = _conn()
+    with engine.connect() as c:
+        rows = c.execute(text("""
+            SELECT id, kind, payload, status, ts_created, approved_by
+            FROM public.worker_jobs
+            WHERE status = 'blocked_review'
+            ORDER BY ts_created ASC
+            LIMIT :n
+        """), {"n": limit}).mappings().all()
+    print(json.dumps([_row(r) for r in rows], ensure_ascii=False))
+
+
+def cmd_autonomia_approve(args):
+    """Aprova job blocked_review. Args: <job_id> <approver>"""
+    if len(args) < 2:
+        raise ValueError("usage: autonomia_approve <job_id> <approver>")
+    job_id   = int(args[0])
+    approver = args[1]
+    engine, text = _conn()
+    with engine.begin() as c:
+        c.execute(text("""
+            UPDATE public.worker_jobs
+            SET status = 'queued', approved_by = :approver, updated_at = NOW()
+            WHERE id = :id AND status = 'blocked_review'
+        """), {"id": job_id, "approver": approver})
+    print(json.dumps({"ok": True, "job_id": job_id, "approved_by": approver}))
+
+
+def cmd_autonomia_reject(args):
+    """Rejeita job blocked_review. Args: <job_id>"""
+    if not args:
+        raise ValueError("usage: autonomia_reject <job_id>")
+    job_id = int(args[0])
+    engine, text = _conn()
+    with engine.begin() as c:
+        c.execute(text("""
+            UPDATE public.worker_jobs
+            SET status = 'failed',
+                result = '{"error":"rejeitado pelo operador"}',
+                ts_done = NOW(),
+                updated_at = NOW()
+            WHERE id = :id AND status = 'blocked_review'
+        """), {"id": job_id})
     print(json.dumps({"ok": True, "job_id": job_id}))
 
 
@@ -3265,6 +3340,10 @@ CMDS = {
     "insurance_doc_path":          cmd_insurance_doc_path,
     "insurance_alerts":            cmd_insurance_alerts,
     "insurance_stats":             cmd_insurance_stats,
+    # Autonomia guardrails + approve/reject
+    "autonomia_blocked":           cmd_autonomia_blocked,
+    "autonomia_approve":           cmd_autonomia_approve,
+    "autonomia_reject":            cmd_autonomia_reject,
 }
 
 if __name__ == "__main__":

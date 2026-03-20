@@ -2131,6 +2131,22 @@ app.patch('/api/agent-inbox/:id', requireRole('operator'), express.json(), (req,
   } catch(e) { res.json({ ok: false, error: String(e) }); }
 });
 
+// ── Autonomia: blocked review, approve, reject ────────────────────────────────
+app.get('/api/autonomia/blocked', requireRole('operator'), (req, res) => {
+  res.json(nocExec('autonomia_blocked 20'));
+});
+
+app.post('/api/autonomia/jobs/:id/approve', requireRole('operator'), (req, res) => {
+  const id       = parseInt(req.params.id);
+  const approver = String(req.user?.username || req.user?.sub || 'operator').replace(/[^a-zA-Z0-9_\-.]/g, '');
+  res.json(nocExec(`autonomia_approve ${id} ${approver}`));
+});
+
+app.post('/api/autonomia/jobs/:id/reject', requireRole('operator'), (req, res) => {
+  const id = parseInt(req.params.id);
+  res.json(nocExec(`autonomia_reject ${id}`));
+});
+
 // ── Council (AI Council) ──────────────────────────────────────────────────────
 app.get('/api/council', requireRole('viewer'), (req, res) => {
   try {

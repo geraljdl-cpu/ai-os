@@ -1,0 +1,12 @@
+[Unit]
+Description=AIOS Autonomia Orchestrator — retry, zombie detection, stats
+After=network.target
+
+[Service]
+Type=oneshot
+User=jdl
+WorkingDirectory=/home/jdl/ai-os
+EnvironmentFile=/etc/aios.env
+ExecStart=/usr/bin/python3 /home/jdl/ai-os/bin/autonomia_orchestrator.py
+StandardOutput=journal
+StandardError=journal
