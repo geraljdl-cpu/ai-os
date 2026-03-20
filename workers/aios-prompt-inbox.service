@@ -1,0 +1,12 @@
+[Unit]
+Description=AIOS Prompt Inbox Worker
+After=network.target
+
+[Service]
+Type=oneshot
+User=jdl
+WorkingDirectory=/home/jdl/ai-os
+EnvironmentFile=/etc/aios.env
+ExecStart=/usr/bin/python3 /home/jdl/ai-os/bin/prompt_inbox_worker.py
+StandardOutput=journal
+StandardError=journal

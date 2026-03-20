@@ -2110,7 +2110,11 @@ app.post('/api/agent-inbox', requireRole('operator'), express.json(), (req, res)
       `python3 /home/jdl/ai-os/bin/noc_query.py agent_inbox_add "${safeBody}" "${safeTarget}" "${safeSrc}" "${safeSender}"`,
       { timeout: 10000, encoding: 'utf8' }
     );
-    res.json(JSON.parse(out));
+    const result = JSON.parse(out);
+    // Fire-and-forget: processar imediatamente sem esperar pelo timer (30s)
+    if (safeTarget === 'claude')
+      require('child_process').exec('python3 /home/jdl/ai-os/bin/prompt_inbox_worker.py');
+    res.json(result);
   } catch(e) { res.json({ ok: false, error: String(e) }); }
 });
 

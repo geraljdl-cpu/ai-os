@@ -1,0 +1,9 @@
+[Unit]
+Description=AIOS Prompt Inbox — processa pendentes a cada 30s
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=30s
+
+[Install]
+WantedBy=timers.target
