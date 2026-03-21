@@ -2642,7 +2642,7 @@ def cmd_agent_inbox_add(args):
     if not args:
         raise ValueError("body required")
     body   = args[0]
-    target = args[1] if len(args) > 1 else "claude"
+    target = args[1] if len(args) > 1 else "local"
     source = args[2] if len(args) > 2 else "api"
     sender = args[3] if len(args) > 3 else None
     title  = body[:80] + ("..." if len(body) > 80 else "")

@@ -2101,7 +2101,7 @@ app.get('/api/agent-inbox', requireRole('viewer'), (req, res) => {
 
 app.post('/api/agent-inbox', requireRole('operator'), express.json(), (req, res) => {
   try {
-    const { body, target = 'claude', source = 'ui', sender = '' } = req.body || {};
+    const { body, target = 'local', source = 'ui', sender = '' } = req.body || {};
     if (!body) return res.status(400).json({ ok: false, error: 'body required' });
     const safeBody   = String(body).slice(0, 2000).replace(/"/g, '\\"');
     const safeTarget = String(target).replace(/[^a-z]/g, '');
