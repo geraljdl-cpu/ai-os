@@ -1,18 +1,29 @@
 #!/usr/bin/env python3
 """
-AI-OS Model Router
-Decide qual provider LLM usar: Claude (Anthropic) ou Ollama (local).
+AI-OS Model Router — Hybrid Tier v2
+Decide qual provider LLM usar: Claude | Ollama asus_gpu | Ollama cluster_cpu.
 
 decide_model(job, env, system_state) -> dict
-  provider: "claude" | "ollama" | None
+  provider: "claude" | "asus_gpu" | "cluster_cpu" | None
+  ollama_url: endpoint Ollama (se provider != "claude")
   model:    nome do modelo
   reason:   string curta
   fallback_allowed: bool
 """
-import os, json, pathlib, datetime
+import os, json, pathlib, datetime, urllib.request, urllib.error
 
 AIOS_ROOT     = pathlib.Path(os.environ.get("AIOS_ROOT", os.path.expanduser("~/ai-os")))
 OVERRIDE_FILE = AIOS_ROOT / "runtime" / "model_override.json"
+
+# ── Provider Registry ───────────────────────────────────────────────────────────
+# Cada entry: url, model, tier (1=asus_gpu, 2=cluster_cpu), tag
+PROVIDERS = [
+    {"name": "asus_gpu",   "url": "http://localhost:11434",     "model": "qwen2.5-coder:7b", "tier": 1},
+    {"name": "node1_cpu",  "url": "http://localhost:11435",     "model": "qwen2.5-coder:7b", "tier": 2},
+    {"name": "node2_cpu",  "url": "http://192.168.1.112:11434", "model": "qwen2.5-coder:7b", "tier": 2},
+    {"name": "node4_cpu",  "url": "http://192.168.1.122:11434", "model": "qwen2.5-coder:7b", "tier": 2},
+    {"name": "node3_cpu",  "url": "http://192.168.1.121:11434", "model": "qwen2.5-coder:7b", "tier": 2},
+]
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -24,16 +35,40 @@ def get_config():
         "hybrid_mode":  _env("HYBRID_MODE",  "true").lower() == "true",
         "force_model":  _env("FORCE_MODEL",  "").lower().strip(),
         "ollama_url":   _env("OLLAMA_URL",   "http://localhost:11434"),
-        "ollama_model": _env("OLLAMA_MODEL", "qwen2.5:14b"),
+        "ollama_model": _env("OLLAMA_MODEL", "qwen2.5-coder:7b"),
         "claude_model": _env("CLAUDE_MODEL", "claude-sonnet-4-6"),
     }
 
+# ── Healthcheck ─────────────────────────────────────────────────────────────────
+
+def check_provider_health(url: str, timeout: int = 2) -> bool:
+    """Verifica se endpoint Ollama está up via /api/tags."""
+    try:
+        req = urllib.request.Request(f"{url}/api/tags")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+def get_healthy_providers(tier: int = None) -> list:
+    """Retorna lista de providers saudáveis, opcionalmente filtrado por tier."""
+    result = []
+    for p in PROVIDERS:
+        if tier is not None and p["tier"] != tier:
+            continue
+        if check_provider_health(p["url"]):
+            result.append(p)
+    return result
+
 # ── Heurística ─────────────────────────────────────────────────────────────────
 
-# Tipos de task que mapeiam para Claude (complexo / alto impacto)
+# Tipos de task → Claude (complexo / alto impacto)
 _CLAUDE_TYPES = {"DEV_TASK", "ARCH_TASK", "REFACTOR", "CODE_GEN", "MULTI_FILE"}
 
-# Keywords no goal/description que indicam complexidade → Claude
+# Tipos de task → asus_gpu (coding assist local, rápido)
+_ASUS_TYPES = {"CODING", "CODE_REVIEW", "DEBUG", "EXPLAIN", "PATCH"}
+
+# Keywords → Claude
 _CLAUDE_KEYWORDS = [
     "refactor", "arquitetura", "architecture", "multi-file", "design",
     "implement", "implementar", "create module", "criar módulo",
@@ -42,48 +77,54 @@ _CLAUDE_KEYWORDS = [
     "integra", "migra", "migration", "database schema", "api design",
 ]
 
-# Tipos de task que mapeiam para Ollama (simples / rotina)
-_OLLAMA_TYPES = {"OPS", "MONITORING", "CLASSIFY", "TRIAGE", "ROUTINE", "REPORT"}
+# Keywords → asus_gpu (coding local)
+_ASUS_KEYWORDS = [
+    "code", "código", "function", "função", "fix bug", "debug",
+    "review", "patch", "diff", "rename", "refactor small",
+    "write test", "escrever teste", "docstring",
+]
 
-# Keywords que indicam tarefa simples → Ollama
-_OLLAMA_KEYWORDS = [
+# Keywords → cluster_cpu (simples / rotina / batch)
+_CLUSTER_KEYWORDS = [
     "monitoring", "monitorização", "classify", "classificar",
     "triage", "triagem", "status", "estado", "rotina", "routine",
     "alert", "alerta", "log", "check", "verificar", "summary", "resumo",
     "health", "saúde", "report", "relatório", "listar", "list",
-    "ping", "temperatura", "pressão", "rpm",
+    "ping", "temperatura", "pressão", "rpm", "inbox", "classificar",
 ]
+
+_CLUSTER_TYPES = {"OPS", "MONITORING", "CLASSIFY", "TRIAGE", "ROUTINE", "REPORT"}
 
 
 def _heuristic(job: dict) -> tuple[str, str]:
-    """Retorna (provider, reason) com base no tipo/conteúdo da task."""
+    """Retorna (provider_name, reason): 'claude' | 'asus_gpu' | 'cluster_cpu'."""
     task_type = (job.get("task_type") or job.get("type") or "").upper().strip()
     goal      = (job.get("goal") or job.get("title") or job.get("description") or "").lower()
     priority  = int(job.get("priority") or job.get("p") or 5)
 
-    # Tipo explícito → Claude
     if task_type in _CLAUDE_TYPES:
         return "claude", f"task_type={task_type}"
+    if task_type in _ASUS_TYPES:
+        return "asus_gpu", f"task_type={task_type}"
+    if task_type in _CLUSTER_TYPES:
+        return "cluster_cpu", f"task_type={task_type}"
 
-    # Tipo explícito → Ollama
-    if task_type in _OLLAMA_TYPES:
-        return "ollama", f"task_type={task_type}"
-
-    # Prioridade alta → Claude (impacto estrutural)
     if priority >= 8:
         return "claude", f"high_priority={priority}"
 
-    # Análise por keywords do goal
     for kw in _CLAUDE_KEYWORDS:
         if kw in goal:
             return "claude", f"keyword={kw}"
 
-    for kw in _OLLAMA_KEYWORDS:
+    for kw in _ASUS_KEYWORDS:
         if kw in goal:
-            return "ollama", f"keyword={kw}"
+            return "asus_gpu", f"keyword={kw}"
 
-    # Default: Ollama (mais económico e rápido para tarefas genéricas)
-    return "ollama", "default_simple"
+    for kw in _CLUSTER_KEYWORDS:
+        if kw in goal:
+            return "cluster_cpu", f"keyword={kw}"
+
+    return "cluster_cpu", "default_simple"
 
 
 # ── Decide ─────────────────────────────────────────────────────────────────────
@@ -91,7 +132,8 @@ def _heuristic(job: dict) -> tuple[str, str]:
 def decide_model(job: dict = None, env: dict = None, system_state: dict = None) -> dict:
     """
     Retorna dict com:
-      provider:         "claude" | "ollama" | None
+      provider:         "claude" | "asus_gpu" | "cluster_cpu" | None
+      ollama_url:       endpoint (se Ollama)
       model:            nome do modelo
       reason:           string curta
       fallback_allowed: bool
@@ -102,83 +144,81 @@ def decide_model(job: dict = None, env: dict = None, system_state: dict = None) 
 
     cfg = get_config()
 
-    # 1. FORCE_MODEL — env var tem prioridade sobre override de runtime
+    # 1. FORCE_MODEL override
     force = cfg["force_model"] or _get_runtime_override()
-    if force in ("claude", "ollama"):
-        model = cfg["claude_model"] if force == "claude" else cfg["ollama_model"]
-        return {
-            "provider":         force,
-            "model":            model,
-            "reason":           f"FORCE_MODEL={force}",
-            "fallback_allowed": False,
-        }
+    if force in ("claude", "asus_gpu", "cluster_cpu", "ollama"):
+        if force == "ollama":
+            force = "asus_gpu"  # backward compat
+        if force == "claude":
+            return {"provider": "claude", "model": cfg["claude_model"],
+                    "reason": f"FORCE_MODEL={force}", "fallback_allowed": False}
+        # For Ollama tiers, pick first healthy provider of that tier
+        tier = 1 if force == "asus_gpu" else 2
+        providers = get_healthy_providers(tier)
+        if providers:
+            p = providers[0]
+            return {"provider": force, "ollama_url": p["url"], "model": p["model"],
+                    "reason": f"FORCE_MODEL={force}", "fallback_allowed": False}
+        return {"provider": None, "model": None, "reason": f"FORCE_MODEL={force}_unavailable",
+                "fallback_allowed": False, "error": f"Nenhum provider {force} disponível"}
 
-    # 2. HYBRID_MODE=false → só Claude, sem fallback
+    # 2. HYBRID_MODE=false → só Claude
     if not cfg["hybrid_mode"]:
-        return {
-            "provider":         "claude",
-            "model":            cfg["claude_model"],
-            "reason":           "HYBRID_MODE=false",
-            "fallback_allowed": False,
-        }
+        return {"provider": "claude", "model": cfg["claude_model"],
+                "reason": "HYBRID_MODE=false", "fallback_allowed": False}
 
-    # 3. Saúde dos providers (injetada ou assumida como true se não disponível)
-    claude_ok = system_state.get("claude_available", True)
-    ollama_ok = system_state.get("ollama_available", True)
-
-    # 4. Heurística
+    # 3. Heurística → preferred provider
     preferred, reason = _heuristic(job)
 
-    # 5. Aplicar disponibilidade
-    if preferred == "claude" and not claude_ok:
-        if ollama_ok:
-            return {
-                "provider":          "ollama",
-                "model":             cfg["ollama_model"],
-                "reason":            f"fallback:claude_unavailable (original: {reason})",
-                "fallback_allowed":  True,
-                "original_provider": "claude",
-                "original_reason":   reason,
-            }
-        return {
-            "provider":         None,
-            "model":            None,
-            "reason":           "all_providers_unavailable",
-            "fallback_allowed": False,
-            "error":            "Nenhum provider disponível",
-        }
+    # 4. Healthcheck e fallback
+    def _pick_ollama(tier: int):
+        providers = get_healthy_providers(tier)
+        if providers:
+            p = providers[0]
+            return {"provider": "asus_gpu" if tier == 1 else "cluster_cpu",
+                    "ollama_url": p["url"], "model": p["model"]}
+        return None
 
-    if preferred == "ollama" and not ollama_ok:
-        if claude_ok:
-            return {
-                "provider":          "claude",
-                "model":             cfg["claude_model"],
-                "reason":            f"fallback:ollama_unavailable (original: {reason})",
-                "fallback_allowed":  True,
-                "original_provider": "ollama",
-                "original_reason":   reason,
-            }
-        return {
-            "provider":         None,
-            "model":            None,
-            "reason":           "all_providers_unavailable",
-            "fallback_allowed": False,
-            "error":            "Nenhum provider disponível",
-        }
+    if preferred == "claude":
+        claude_ok = system_state.get("claude_available", True)
+        if not claude_ok:
+            # fallback → asus_gpu → cluster_cpu
+            r = _pick_ollama(1) or _pick_ollama(2)
+            if r:
+                return {**r, "reason": f"fallback:claude_unavailable ({reason})",
+                        "fallback_allowed": True, "original_provider": "claude"}
+            return {"provider": None, "model": None, "reason": "all_unavailable",
+                    "fallback_allowed": False, "error": "Nenhum provider disponível"}
+        return {"provider": "claude", "model": cfg["claude_model"],
+                "reason": reason, "fallback_allowed": True}
 
-    model = cfg["claude_model"] if preferred == "claude" else cfg["ollama_model"]
-    return {
-        "provider":         preferred,
-        "model":            model,
-        "reason":           reason,
-        "fallback_allowed": True,
-    }
+    # asus_gpu or cluster_cpu
+    target_tier = 1 if preferred == "asus_gpu" else 2
+    r = _pick_ollama(target_tier)
+    if r:
+        return {**r, "reason": reason, "fallback_allowed": True}
+
+    # tier unavailable → try other tier
+    alt_tier = 2 if target_tier == 1 else 1
+    r = _pick_ollama(alt_tier)
+    if r:
+        return {**r, "reason": f"fallback:tier{target_tier}_unavailable ({reason})",
+                "fallback_allowed": True, "original_provider": preferred}
+
+    # all Ollama down → claude
+    claude_ok = system_state.get("claude_available", True)
+    if claude_ok:
+        return {"provider": "claude", "model": cfg["claude_model"],
+                "reason": f"fallback:ollama_unavailable ({reason})",
+                "fallback_allowed": True, "original_provider": preferred}
+
+    return {"provider": None, "model": None, "reason": "all_unavailable",
+            "fallback_allowed": False, "error": "Nenhum provider disponível"}
 
 
 # ── Runtime override (UI toggle) ───────────────────────────────────────────────
 
 def _get_runtime_override() -> str:
-    """Lê FORCE_MODEL do arquivo de override de runtime (definido pela UI)."""
     try:
         if OVERRIDE_FILE.exists():
             data = json.loads(OVERRIDE_FILE.read_text())
@@ -189,7 +229,6 @@ def _get_runtime_override() -> str:
 
 
 def set_runtime_override(force_model: str):
-    """Define ou limpa o override de FORCE_MODEL em runtime."""
     OVERRIDE_FILE.parent.mkdir(parents=True, exist_ok=True)
     OVERRIDE_FILE.write_text(json.dumps({
         "force_model": force_model.lower().strip() if force_model else "",
@@ -198,7 +237,6 @@ def set_runtime_override(force_model: str):
 
 
 def get_runtime_override() -> str:
-    """Exposta para uso externo."""
     return _get_runtime_override()
 
 
@@ -206,12 +244,31 @@ def get_runtime_override() -> str:
 
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) > 1 and sys.argv[1] == "set_override":
         val = sys.argv[2] if len(sys.argv) > 2 else ""
         set_runtime_override(val)
         print(json.dumps({"ok": True, "force_model": val or "(cleared)"}))
+
     elif len(sys.argv) > 1 and sys.argv[1] == "get_override":
         print(json.dumps({"force_model": _get_runtime_override() or "(none)"}))
+
+    elif len(sys.argv) > 1 and sys.argv[1] == "health":
+        result = {}
+        for p in PROVIDERS:
+            result[p["name"]] = {"url": p["url"], "up": check_provider_health(p["url"]),
+                                  "tier": p["tier"], "model": p["model"]}
+        print(json.dumps(result, indent=2))
+
+    elif len(sys.argv) > 1 and sys.argv[1] == "status":
+        healthy_1 = get_healthy_providers(1)
+        healthy_2 = get_healthy_providers(2)
+        print(json.dumps({
+            "asus_gpu":   [p["name"] for p in healthy_1],
+            "cluster_cpu": [p["name"] for p in healthy_2],
+            "total_up": len(healthy_1) + len(healthy_2),
+        }, indent=2))
+
     else:
         job   = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}
         state = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}

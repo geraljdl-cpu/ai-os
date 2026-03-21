@@ -1,0 +1,15 @@
+[Unit]
+Description=Ollama cluster node (NFS shared models)
+After=network.target
+
+[Service]
+Type=simple
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+Environment="OLLAMA_MODELS=/cluster/d1/ollama/models"
+Environment="OLLAMA_NUM_THREAD=4"
+ExecStart=/cluster/d1/ollama/bin/ollama serve
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

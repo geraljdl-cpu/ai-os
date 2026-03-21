@@ -37,6 +37,9 @@ MAX_TOKENS    = 1024
 MAX_BODY_CHARS = 3000   # Truncar prompts muito longos
 BATCH_SIZE    = 5       # Itens por execução
 
+# Targets que usam Ollama local em vez de Claude
+LOCAL_TARGETS = {"local", "asus_gpu", "cluster_cpu"}
+
 SYSTEM_PROMPT = """És um assistente pessoal de João Diogo Lopes, gerente da empresa JOAO DIOGO LOPES UNIP LDA (Lisboa, Portugal).
 
 Contexto do sistema:
@@ -58,6 +61,30 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
+# ── Ollama helper ─────────────────────────────────────────────────────────────
+
+def _call_ollama(url: str, model: str, system: str, prompt: str) -> str:
+    """Chama Ollama API (compatível com OpenAI /v1/chat/completions)."""
+    import urllib.request
+    payload = json.dumps({
+        "model": model,
+        "stream": False,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user",   "content": prompt},
+        ],
+        "options": {"num_predict": MAX_TOKENS},
+    }).encode()
+    req = urllib.request.Request(
+        f"{url}/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=120) as r:
+        result = json.loads(r.read())
+    return result["message"]["content"]
+
+
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 def _conn():
@@ -70,22 +97,25 @@ def _conn():
 
 def process_pending() -> dict:
     """Processa até BATCH_SIZE itens pending de agent_inbox. Devolve stats."""
-    if not ANTHROPIC_KEY:
-        log.error("ANTHROPIC_API_KEY não configurada — a sair")
-        return {"processed": 0, "error": "no api key"}
-
     import anthropic
-    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+    claude_client = anthropic.Anthropic(api_key=ANTHROPIC_KEY) if ANTHROPIC_KEY else None
+
+    # Import model_router para seleccionar endpoint Ollama
+    import importlib.util, pathlib
+    _mr_path = pathlib.Path(__file__).parent / "model_router.py"
+    _spec = importlib.util.spec_from_file_location("model_router", _mr_path)
+    _mr = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_mr)
 
     engine, text = _conn()
     processed = done = errors = 0
 
     with engine.begin() as conn:
-        # Buscar pending com lock (evita double-processing)
+        # Buscar pending com lock — claude E local targets
         rows = conn.execute(text("""
-            SELECT id, body, source, sender
+            SELECT id, body, source, sender, target
             FROM public.agent_inbox
-            WHERE status = 'pending' AND target = 'claude'
+            WHERE status = 'pending' AND target IN ('claude','local','asus_gpu','cluster_cpu')
             ORDER BY created_at ASC
             LIMIT :limit
             FOR UPDATE SKIP LOCKED
@@ -105,21 +135,43 @@ def process_pending() -> dict:
 
     # Processar cada item (fora da transação de lock)
     for row in rows:
-        item_id, body, source, sender = row[0], row[1], row[2], row[3]
+        item_id, body, source, sender, target = row[0], row[1], row[2], row[3], row[4]
         processed += 1
-        log.info(f"Processando item #{item_id} (source={source}, sender={sender})")
+        log.info(f"Processando item #{item_id} (source={source}, target={target})")
 
         try:
-            # Truncar prompt se necessário
             prompt = str(body)[:MAX_BODY_CHARS]
 
-            msg = client.messages.create(
-                model=MODEL,
-                max_tokens=MAX_TOKENS,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            result_text = msg.content[0].text
+            if target in LOCAL_TARGETS:
+                # Ollama local (asus_gpu → cluster_cpu → fallback claude)
+                tier = 1 if target == "asus_gpu" else (2 if target == "cluster_cpu" else None)
+                providers = _mr.get_healthy_providers(tier) if tier else (
+                    _mr.get_healthy_providers(1) or _mr.get_healthy_providers(2)
+                )
+                if providers:
+                    p = providers[0]
+                    result_text = _call_ollama(p["url"], p["model"], SYSTEM_PROMPT, prompt)
+                    log.info(f"Item #{item_id} via Ollama {p['name']} ({len(result_text)} chars)")
+                elif claude_client:
+                    log.warning(f"Item #{item_id}: Ollama indisponível, fallback Claude")
+                    msg = claude_client.messages.create(
+                        model=MODEL, max_tokens=MAX_TOKENS,
+                        system=SYSTEM_PROMPT,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    result_text = msg.content[0].text
+                else:
+                    raise RuntimeError("Nenhum provider disponível (Ollama down, sem chave Claude)")
+            else:
+                # Claude directo
+                if not claude_client:
+                    raise RuntimeError("ANTHROPIC_API_KEY não configurada")
+                msg = claude_client.messages.create(
+                    model=MODEL, max_tokens=MAX_TOKENS,
+                    system=SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                result_text = msg.content[0].text
             log.info(f"Item #{item_id} processado ({len(result_text)} chars)")
 
             with engine.begin() as conn:
