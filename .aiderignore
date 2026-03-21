@@ -1,0 +1,22 @@
+# Dependências e dados — contexto desnecessário + pesado
+data/
+pylib/
+node_modules/
+tools/node_modules/
+
+# Runtime — estado volátil
+runtime/
+*.log
+*.sqlite
+*.db
+
+# Histórico Aider
+.aider.chat.history.md
+.aider.input.history
+
+# Assets binários
+*.pdf
+*.xlsx
+*.png
+*.jpg
+*.jpeg

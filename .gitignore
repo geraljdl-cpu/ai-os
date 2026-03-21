@@ -67,6 +67,7 @@ backlog/
 *_dashboard.html
 bin/autofill.py
 .aider*
+!.aiderignore
 .env
 .env
 .env
