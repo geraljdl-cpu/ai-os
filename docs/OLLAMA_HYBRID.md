@@ -19,10 +19,12 @@ Cluster nodes (via LAN)
 
 | Name       | URL                         | Tier | Model              | Speed  |
 |------------|-----------------------------|------|--------------------|--------|
-| asus_gpu   | http://localhost:11434      | 1    | qwen2.5-coder:7b   | ~30 tok/s |
-| node1_cpu  | http://localhost:11435      | 2    | qwen2.5-coder:7b   | ~5 tok/s  |
-| node2_cpu  | http://192.168.1.112:11434  | 2    | qwen2.5-coder:7b   | ~0.5 tok/s |
-| node4_cpu  | http://192.168.1.122:11434  | 2    | qwen2.5-coder:7b   | ~0.5 tok/s |
+| asus_gpu   | http://localhost:11434      | 1    | qwen2.5-coder:7b + 14b | ~33 tok/s (GPU) |
+| node1_cpu  | http://localhost:11435      | 2    | qwen2.5-coder:7b       | ~5.4 tok/s      |
+| node2_cpu  | http://192.168.1.112:11434  | 2    | qwen2.5-coder:7b       | ~0.5 tok/s      |
+| node4_cpu  | http://192.168.1.122:11434  | 2    | qwen2.5-coder:7b       | ~0.4 tok/s      |
+
+> cluster nodes têm apenas 7b (14b removido — demasiado lento em CPU, ocupava 8.4GB RAM)
 
 ## Routing Rules (model_router.py)
 
