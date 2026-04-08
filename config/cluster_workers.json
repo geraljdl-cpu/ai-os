@@ -9,13 +9,13 @@
     "node7": {"roles": ["watchdog", "light", "echo", "fallback"],"ip": "192.168.1.125", "agent": "Watchdog",    "agent_desc": "Saúde de infra e fallback"}
   },
   "db": {
-    "host": "192.168.1.101",
+    "host": "192.168.1.172",
     "port": 5432,
     "user": "aios_user",
     "pass": "jdl",
     "name": "aios"
   },
-  "ollama_url": "http://192.168.1.101:11434",
+  "ollama_url": "http://192.168.1.172:11434",
   "log_dir":    "/cluster/d1/ai-os/runtime/workers",
   "poll_sec":   5,
   "job_timeout_secs": 300

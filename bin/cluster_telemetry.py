@@ -23,7 +23,7 @@ import json, socket, time, pathlib
 NODE = os.environ.get("AIOS_NODE_NAME", socket.gethostname())
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "postgresql+pg8000://aios_user:jdl@192.168.1.101:5432/aios"
+    "postgresql+pg8000://aios_user:jdl@192.168.1.172:5432/aios"
 )
 
 # ── Load config ──────────────────────────────────────────────────────────────

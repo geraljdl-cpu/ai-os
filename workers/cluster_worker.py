@@ -55,7 +55,7 @@ DATABASE_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql+pg8000://{user}:{pass}@{host}:{port}/{name}".format(**_db)
 )
-OLLAMA_URL  = _CFG.get("ollama_url", "http://192.168.1.101:11434")
+OLLAMA_URL  = _CFG.get("ollama_url", "http://192.168.1.172:11434")
 POLL_SEC    = float(os.environ.get("AIOS_POLL_SEC", str(_CFG.get("poll_sec", 5))))
 JOB_TIMEOUT = int(_CFG.get("job_timeout_secs", 300))
 

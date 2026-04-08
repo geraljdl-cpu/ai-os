@@ -43,12 +43,12 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/cluster/ai-os
-Environment=AIOS_DB_HOST=192.168.1.101
+Environment=AIOS_DB_HOST=192.168.1.172
 Environment=AIOS_DB_PORT=5432
 Environment=AIOS_DB_USER=aios_user
 Environment=AIOS_DB_PASS=jdl
 Environment=AIOS_DB_NAME=aios
-Environment=AIOS_OLLAMA=http://192.168.1.101:11434
+Environment=AIOS_OLLAMA=http://192.168.1.172:11434
 Environment=AIOS_POLL_SEC=5
 Environment=AIOS_NODE_NAME=$NODE_NAME
 Environment=AIOS_NODE_ROLE=$ROLE

@@ -6,7 +6,7 @@ After=network-online.target
 Type=oneshot
 WorkingDirectory=/cluster/d1/ai-os
 Environment=AIOS_ROOT=/cluster/d1/ai-os
-Environment=DATABASE_URL=postgresql+pg8000://aios_user:jdl@192.168.1.101:5432/aios
+Environment=DATABASE_URL=postgresql+pg8000://aios_user:jdl@192.168.1.172:5432/aios
 Environment=PYTHONPATH=/cluster/d1/ai-os/pylib
 ExecStart=/usr/bin/python3 /cluster/d1/ai-os/bin/cluster_telemetry.py
 StandardOutput=journal
