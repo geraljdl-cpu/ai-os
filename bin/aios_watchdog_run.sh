@@ -74,11 +74,11 @@ fi
 
 # ── 4. aios-ui ─────────────────────────────────────────────────
 if ! curl -fsS -m 5 http://127.0.0.1:3000/health >/dev/null 2>&1; then
-  if ! systemctl is-active --quiet aios-ui.service; then
+  if ! systemctl --user is-active --quiet aios-ui.service; then
     echo "$LOG_PREFIX aios-ui DOWN — restart"
-    sudo systemctl restart aios-ui.service >/dev/null 2>&1 || true
+    systemctl --user restart aios-ui.service >/dev/null 2>&1 || true
     sleep 3
-    if systemctl is-active --quiet aios-ui.service; then
+    if systemctl --user is-active --quiet aios-ui.service; then
       echo "$LOG_PREFIX aios-ui RECOVERED"
       recovered+=("aios-ui")
     else
