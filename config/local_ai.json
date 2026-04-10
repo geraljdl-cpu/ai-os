@@ -1,19 +1,31 @@
 {
-  "_comment": "Configuração arquitectura IA local no cluster — preparação FASE 6",
-  "nodes": {
-    "node2": {"role": "llm_inference", "model": "llama3:8b", "backend": "ollama", "vram_gb": 8},
-    "node3": {"role": "embeddings", "model": "nomic-embed-text", "backend": "ollama", "vram_gb": 4},
-    "node4": {"role": "radar_llm", "model": "llama3:8b", "backend": "ollama", "vram_gb": 8},
-    "node5": {"role": "embeddings_secondary", "model": "nomic-embed-text", "backend": "ollama", "vram_gb": 4},
-    "node6": {"role": "automations", "model": null, "backend": null, "vram_gb": 0},
-    "node7": {"role": "watchdog_fallback", "model": "phi3:mini", "backend": "ollama", "vram_gb": 2}
+  "_comment": "Configuração IA local — nodegpu RTX3090 activo. Actualizado 2026-04-10.",
+  "nodegpu": {
+    "ip": "192.168.1.120",
+    "ollama_url": "http://192.168.1.120:11434",
+    "gpu": "RTX 3090",
+    "vram_gb": 24,
+    "models_installed": [
+      "qwen2.5-coder:14b",
+      "qwen2.5:14b",
+      "deepseek-r1:14b",
+      "mistral:7b",
+      "nomic-embed-text:latest"
+    ]
   },
   "routing": {
-    "default": "claude_api",
-    "local_threshold_tokens": 2000,
-    "local_roles": ["summarize", "classify", "embed"],
-    "cloud_roles": ["analyze", "council", "generate"]
+    "coding":    { "model": "qwen2.5-coder:14b", "node": "nodegpu", "use_for": ["engineer", "code_review", "refactor"] },
+    "reasoning": { "model": "deepseek-r1:14b",   "node": "nodegpu", "use_for": ["debug", "architecture", "reviewer"] },
+    "general":   { "model": "qwen2.5:14b",        "node": "nodegpu", "use_for": ["analysis", "summary", "planning"] },
+    "fast":      { "model": "mistral:7b",          "node": "nodegpu", "use_for": ["classify", "echo", "light"] }
   },
-  "ollama_base_url": "http://{node_ip}:11434",
-  "ready": false
+  "agent_pipeline": {
+    "engineer_model": "qwen2.5-coder:14b",
+    "reviewer_model": "qwen2.5:14b",
+    "ollama_url":     "http://192.168.1.120:11434",
+    "memory_dir":     "runtime/agent_memory",
+    "logs_dir":       "runtime/agent_logs",
+    "auto_approve_safe": true
+  },
+  "ready": true
 }
