@@ -1,0 +1,25 @@
+#!/bin/bash
+# ai-code — Local coding agent via Aider + Ollama (RTX 3090)
+# Instalar em nodegpu: cp bin/ai-code ~/.local/bin/ && chmod +x ~/.local/bin/ai-code
+#
+# Usage:
+#   ai-code [dir]                        # qwen2.5-coder:14b (default)
+#   ai-code --model ollama/qwen2.5:14b   # general/reasoning
+#   AIDER_MODEL=ollama/qwen2.5:14b ai-code
+
+export OLLAMA_API_BASE="http://localhost:11434"
+export AIDER_NO_AUTO_COMMITS=true
+
+# Optional directory argument
+if [[ -n "$1" && -d "$1" ]]; then
+  cd "$1" || exit 1
+  shift
+fi
+
+DEFAULT_MODEL="ollama/qwen2.5-coder:14b"
+
+exec /home/jdl/.local/bin/aider \
+  --model "${AIDER_MODEL:-$DEFAULT_MODEL}" \
+  --no-auto-commits \
+  --chat-language portuguese \
+  "$@"
