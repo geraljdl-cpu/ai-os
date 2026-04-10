@@ -339,7 +339,7 @@ def schedule_radar_gpu_analysis(conn):
             JOIN public.radar_normalized n ON n.id = s.normalized_id
             WHERE s.score >= 40
               AND s.priority IN ('high', 'critical')
-              AND n.published_at > CURRENT_DATE - INTERVAL '7 days'
+              AND n.published_at > CURRENT_DATE - INTERVAL '30 days'
               AND NOT EXISTS (
                     SELECT 1 FROM public.worker_jobs wj
                     WHERE wj.kind = 'llm_gpu'
