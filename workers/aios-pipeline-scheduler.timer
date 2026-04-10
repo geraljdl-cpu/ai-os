@@ -1,0 +1,9 @@
+[Unit]
+Description=AIOS Pipeline Scheduler — corre a cada 60s
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=60s
+
+[Install]
+WantedBy=timers.target

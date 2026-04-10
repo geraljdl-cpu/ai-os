@@ -35,13 +35,20 @@ def _conn():
     return psycopg2.connect(DSN)
 
 
-def enqueue(conn, kind, payload):
+def enqueue(conn, kind, payload, target_worker_id=None):
     with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO public.worker_jobs (ts_created, status, kind, payload) "
-            "VALUES (NOW(), 'queued', %s, %s) RETURNING id",
-            (kind, json.dumps(payload))
-        )
+        if target_worker_id:
+            cur.execute(
+                "INSERT INTO public.worker_jobs (ts_created, status, kind, payload, target_worker_id) "
+                "VALUES (NOW(), 'queued', %s, %s, %s) RETURNING id",
+                (kind, json.dumps(payload), target_worker_id)
+            )
+        else:
+            cur.execute(
+                "INSERT INTO public.worker_jobs (ts_created, status, kind, payload) "
+                "VALUES (NOW(), 'queued', %s, %s) RETURNING id",
+                (kind, json.dumps(payload))
+            )
         return cur.fetchone()[0]
 
 
@@ -314,6 +321,75 @@ def schedule_job_retry(conn):
     return stats if any(stats.values()) else None
 
 
+# ── Rule 10: radar GPU analysis — cada 4h por tender ─────────────────────────
+
+def schedule_radar_gpu_analysis(conn):
+    """
+    Top tenders (score≥40, últimos 7 dias) ainda sem análise GPU nas últimas 24h
+    → enqueue llm_gpu em nodegpu (máx 3 por tick).
+    """
+    import psycopg2.extras
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("""
+            SELECT n.id  AS normalized_id,
+                   n.title, n.entity_name, n.base_value,
+                   n.deadline, n.description,
+                   s.score, s.priority, s.group_name, s.score_reasons
+            FROM public.radar_scores s
+            JOIN public.radar_normalized n ON n.id = s.normalized_id
+            WHERE s.score >= 40
+              AND s.priority IN ('high', 'critical')
+              AND n.published_at > CURRENT_DATE - INTERVAL '7 days'
+              AND NOT EXISTS (
+                    SELECT 1 FROM public.worker_jobs wj
+                    WHERE wj.kind = 'llm_gpu'
+                      AND (wj.payload->>'normalized_id')::bigint = s.normalized_id
+                      AND (wj.status IN ('queued', 'running')
+                           OR (wj.status = 'done'
+                               AND wj.ts_done > NOW() - INTERVAL '24 hours'))
+                  )
+            ORDER BY s.score DESC, n.published_at DESC
+            LIMIT 3
+        """)
+        tenders = cur.fetchall()
+
+    if not tenders:
+        return None
+
+    enqueued = []
+    for t in tenders:
+        deadline_str = t["deadline"].strftime("%Y-%m-%d") if t["deadline"] else "não indicado"
+        value_str = f"{float(t['base_value']):,.0f}€" if t["base_value"] else "não indicado"
+        reasons = ", ".join(t["score_reasons"] or [])
+        desc = (t["description"] or "")[:400]
+
+        prompt = (
+            f"Analisa este concurso público e responde em português:\n\n"
+            f"Título: {t['title']}\n"
+            f"Entidade: {t['entity_name']}\n"
+            f"Valor base: {value_str}  |  Prazo: {deadline_str}\n"
+            f"Grupo: {t['group_name']}  Score: {t['score']}  Razões: {reasons}\n"
+            f"Descrição: {desc}\n\n"
+            f"Responde de forma concisa (máx 150 palavras):\n"
+            f"1. Relevância para empresa de gestão de resíduos/reciclagem (Alta/Média/Baixa)?\n"
+            f"2. Requisitos principais (3 pontos)?\n"
+            f"3. Acção recomendada?"
+        )
+
+        payload = {
+            "model": "qwen2.5:14b",
+            "prompt": prompt,
+            "normalized_id": t["normalized_id"],
+            "score": t["score"],
+            "title": t["title"][:100],
+        }
+        jid = enqueue(conn, "llm_gpu", payload, target_worker_id="nodegpu")
+        log.info(f"radar_gpu: normalized_id={t['normalized_id']} score={t['score']} → job_id={jid}")
+        enqueued.append({"normalized_id": t["normalized_id"], "job_id": jid})
+
+    return enqueued or None
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -330,6 +406,7 @@ def main():
             "briefing":          schedule_briefing(conn),
             "closing":           schedule_closing(conn),
             "job_retry":         schedule_job_retry(conn),
+            "radar_gpu":         schedule_radar_gpu_analysis(conn),
         }
         conn.commit()
         # log apenas resultados não-nulos

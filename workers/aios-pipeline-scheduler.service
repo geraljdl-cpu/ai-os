@@ -1,0 +1,11 @@
+[Unit]
+Description=AIOS Pipeline Scheduler — cria jobs (ideas, radar, incidents, finance, cases)
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/jdl/ai-os
+EnvironmentFile=/home/jdl/ai-os/config/aios.env
+ExecStart=/usr/bin/python3 /home/jdl/ai-os/bin/pipeline_scheduler.py
+StandardOutput=append:/home/jdl/ai-os/runtime/logs/pipeline_scheduler.log
+StandardError=append:/home/jdl/ai-os/runtime/logs/pipeline_scheduler.log
