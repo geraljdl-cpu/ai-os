@@ -9,10 +9,10 @@ ASUS/WSL2 (controller)
                                          TIER 2 cluster_cpu
 
 Cluster nodes (via LAN)
-  ├─ node1  192.168.1.111  24GB  Ollama snap → bound to 127.0.0.1 (via tunnel)
-  ├─ node2  192.168.1.112  16GB  Ollama NFS  → 0.0.0.0:11434  (~0.5 tok/s)
+  ├─ node1  192.168.1.210  24GB  Ollama snap → bound to 127.0.0.1 (via tunnel)
+  ├─ node2  192.168.1.211  16GB  Ollama NFS  → 0.0.0.0:11434  (~0.5 tok/s)
   ├─ node4  192.168.1.122  12GB  Ollama NFS  → 0.0.0.0:11434
-  └─ node3  192.168.1.121   8GB  not deployed (RAM tight)
+  └─ node3  192.168.1.212   8GB  not deployed (RAM tight)
 ```
 
 ## Providers
@@ -21,7 +21,7 @@ Cluster nodes (via LAN)
 |------------|-----------------------------|------|--------------------|--------|
 | asus_gpu   | http://localhost:11434      | 1    | qwen2.5-coder:7b + 14b | ~33 tok/s (GPU) |
 | node1_cpu  | http://localhost:11435      | 2    | qwen2.5-coder:7b       | ~5.4 tok/s      |
-| node2_cpu  | http://192.168.1.112:11434  | 2    | qwen2.5-coder:7b       | ~0.5 tok/s      |
+| node2_cpu  | http://192.168.1.211:11434  | 2    | qwen2.5-coder:7b       | ~0.5 tok/s      |
 | node4_cpu  | http://192.168.1.122:11434  | 2    | qwen2.5-coder:7b       | ~0.4 tok/s      |
 
 > cluster nodes têm apenas 7b (14b removido — demasiado lento em CPU, ocupava 8.4GB RAM)
@@ -78,16 +78,16 @@ OLLAMA_API_BASE=http://localhost:11435 aider --model ollama/qwen2.5-coder:7b --n
 
 ```bash
 # Start Ollama on node2 or node4
-ssh jdl@192.168.1.112 "XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user start aios-ollama.service"
+ssh jdl@192.168.1.211 "XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user start aios-ollama.service"
 
 # Check status on node
-ssh jdl@192.168.1.112 "XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user status aios-ollama.service"
+ssh jdl@192.168.1.211 "XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user status aios-ollama.service"
 
 # Stop Ollama on node
-ssh jdl@192.168.1.112 "XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user stop aios-ollama.service"
+ssh jdl@192.168.1.211 "XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user stop aios-ollama.service"
 
 # Restart all cluster Ollama nodes
-for ip in 192.168.1.112 192.168.1.122; do
+for ip in 192.168.1.211 192.168.1.122; do
   ssh jdl@$ip "XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user restart aios-ollama.service"
 done
 ```
@@ -102,14 +102,14 @@ systemctl --user status ollama-node1-tunnel.service
 systemctl --user restart ollama-node1-tunnel.service
 
 # Manual tunnel (if service down)
-ssh -f -N -L 11435:localhost:11434 jdl@192.168.1.111
+ssh -f -N -L 11435:localhost:11434 jdl@192.168.1.210
 ```
 
 ## Rollback
 
 ```bash
 # Stop cluster nodes
-for ip in 192.168.1.112 192.168.1.122; do
+for ip in 192.168.1.211 192.168.1.122; do
   ssh jdl@$ip "XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user stop aios-ollama.service"
 done
 

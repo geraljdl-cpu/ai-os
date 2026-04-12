@@ -5,7 +5,7 @@
 #        ./bin/model_sync.sh qwen2.5-coder:14b
 set -euo pipefail
 
-OLLAMA_URL="${OLLAMA_URL:-http://192.168.1.120:11434}"
+OLLAMA_URL="${OLLAMA_URL:-http://192.168.1.202:11434}"
 NAS_ARCHIVE="${NAS_ARCHIVE:-/cluster/models_archive}"
 FAST_MODELS="${FAST_MODELS:-/fast/models}"
 
@@ -18,7 +18,7 @@ echo ""
 # Verificar NAS acessível
 if [ ! -d "$NAS_ARCHIVE" ]; then
   echo "[WARN] NAS não montado em $NAS_ARCHIVE"
-  echo "       Montar com: sudo mount 192.168.1.118:/models $NAS_ARCHIVE"
+  echo "       Montar com: sudo mount 192.168.1.203:/models $NAS_ARCHIVE"
   echo "       Nada a sincronizar."
   exit 0
 fi

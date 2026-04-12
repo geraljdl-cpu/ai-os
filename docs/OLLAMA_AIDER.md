@@ -7,7 +7,7 @@ ASUS (WSL2 192.168.1.101)
   ├─ Docker Ollama  → localhost:11434  (qwen2.5-coder:14b, nomic-embed-text)
   └─ SSH tunnel     → localhost:11435  → node1:11434 (qwen2.5-coder:14b)
 
-node1 (192.168.1.111, i5/24GB)
+node1 (192.168.1.210, i5/24GB)
   └─ Snap Ollama    → 127.0.0.1:11434 (qwen2.5-coder:14b, qwen2.5-coder:7b)
 ```
 
@@ -31,7 +31,7 @@ OLLAMA_API_BASE=http://localhost:11434 aider \
 ### Contra node1 (tunnel activo)
 ```bash
 # 1. Abrir tunnel (se não estiver activo)
-ssh -f -N -L 11435:localhost:11434 jdl@192.168.1.111
+ssh -f -N -L 11435:localhost:11434 jdl@192.168.1.210
 
 # 2. Lançar Aider
 cd ~/ai-os
@@ -53,7 +53,7 @@ Description=SSH tunnel para Ollama node1
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/ssh -N -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes -L 11435:localhost:11434 jdl@192.168.1.111
+ExecStart=/usr/bin/ssh -N -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes -L 11435:localhost:11434 jdl@192.168.1.210
 Restart=always
 RestartSec=10
 
@@ -77,13 +77,13 @@ Ficheiro `~/ai-os/.aiderignore` exclui:
 
 ```bash
 # Ver modelos instalados
-ssh jdl@192.168.1.111 "ollama list"
+ssh jdl@192.168.1.210 "ollama list"
 
 # Pull de modelo novo
-ssh jdl@192.168.1.111 "ollama pull <modelo>"
+ssh jdl@192.168.1.210 "ollama pull <modelo>"
 
 # Estado do serviço snap
-ssh jdl@192.168.1.111 "snap services ollama"
+ssh jdl@192.168.1.210 "snap services ollama"
 ```
 
 ## Rollback

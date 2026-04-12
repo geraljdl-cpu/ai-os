@@ -3,7 +3,7 @@
 # Verifica: Ollama acessível, modelos presentes, Aider instalado, pipeline OK
 set -euo pipefail
 
-OLLAMA_URL="${OLLAMA_URL:-http://192.168.1.120:11434}"
+OLLAMA_URL="${OLLAMA_URL:-http://192.168.1.202:11434}"
 REQUIRED_MODELS=("qwen2.5-coder:14b" "qwen2.5:14b")
 AIDER_BIN="${AIDER_BIN:-aider}"
 AIOS_ROOT="${AIOS_ROOT:-$HOME/ai-os}"

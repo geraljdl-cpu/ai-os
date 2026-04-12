@@ -18,11 +18,9 @@ OVERRIDE_FILE = AIOS_ROOT / "runtime" / "model_override.json"
 # ── Provider Registry ───────────────────────────────────────────────────────────
 # Cada entry: url, model, tier (1=asus_gpu, 2=cluster_cpu), tag
 PROVIDERS = [
-    {"name": "asus_gpu",   "url": "http://localhost:11434",     "model": "qwen2.5-coder:7b", "tier": 1},
-    {"name": "node1_cpu",  "url": "http://localhost:11435",     "model": "qwen2.5-coder:7b", "tier": 2},
-    {"name": "node2_cpu",  "url": "http://192.168.1.112:11434", "model": "qwen2.5-coder:7b", "tier": 2},
-    {"name": "node4_cpu",  "url": "http://192.168.1.122:11434", "model": "qwen2.5-coder:7b", "tier": 2},
-    {"name": "node3_cpu",  "url": "http://192.168.1.121:11434", "model": "qwen2.5-coder:7b", "tier": 2},
+    {"name": "nodegpu",    "url": "http://192.168.1.202:11434", "model": "qwen2.5-coder:14b", "tier": 1},
+    {"name": "node1_cpu",  "url": "http://192.168.1.210:11434", "model": "qwen2.5-coder:7b",  "tier": 2},
+    {"name": "node2_cpu",  "url": "http://192.168.1.211:11434", "model": "qwen2.5-coder:7b",  "tier": 2},
 ]
 
 # ── Config ─────────────────────────────────────────────────────────────────────

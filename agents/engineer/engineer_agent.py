@@ -21,7 +21,7 @@ _CFG_FILE  = AIOS_ROOT / "config" / "local_ai.json"
 _CFG       = json.loads(_CFG_FILE.read_text()) if _CFG_FILE.exists() else {}
 _PIPELINE  = _CFG.get("agent_pipeline", {})
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", _PIPELINE.get("ollama_url", "http://192.168.1.120:11434"))
+OLLAMA_URL = os.environ.get("OLLAMA_URL", _PIPELINE.get("ollama_url", "http://192.168.1.202:11434"))
 MODEL      = os.environ.get("ENGINEER_MODEL", _PIPELINE.get("engineer_model", "qwen2.5-coder:14b"))
 AIDER_BIN  = os.environ.get("AIDER_BIN", "aider")
 

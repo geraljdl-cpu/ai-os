@@ -1,8 +1,8 @@
 {
   "_comment": "Configuração IA local — nodegpu RTX3090 activo. Actualizado 2026-04-10.",
   "nodegpu": {
-    "ip": "192.168.1.120",
-    "ollama_url": "http://192.168.1.120:11434",
+    "ip": "192.168.1.202",
+    "ollama_url": "http://192.168.1.202:11434",
     "gpu": "RTX 3090",
     "vram_gb": 24,
     "models_installed": [
@@ -22,7 +22,7 @@
   "agent_pipeline": {
     "engineer_model": "qwen2.5-coder:14b",
     "reviewer_model": "qwen2.5:14b",
-    "ollama_url":     "http://192.168.1.120:11434",
+    "ollama_url":     "http://192.168.1.202:11434",
     "memory_dir":     "runtime/agent_memory",
     "logs_dir":       "runtime/agent_logs",
     "auto_approve_safe": true

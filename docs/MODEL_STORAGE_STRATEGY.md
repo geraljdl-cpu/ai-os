@@ -6,7 +6,7 @@ Updated: 2026-04-10
 
 ## 1. Current State
 
-Ollama runs on nodegpu (192.168.1.120, RTX 3090, 24 GB VRAM).
+Ollama runs on nodegpu (192.168.1.202, RTX 3090, 24 GB VRAM).
 Models are stored in the Ollama data directory on the system disk.
 
 Disk layout (nodegpu):
@@ -22,7 +22,7 @@ Ollama is not running in Docker on nodegpu — it runs as a native service.
 Models are stored under the default Ollama data directory (`~/.ollama/models`
 or the configured `OLLAMA_MODELS` path).
 
-NAS (node-nas 192.168.1.118) is **currently offline**. The archive path
+NAS (node-nas 192.168.1.203) is **currently offline**. The archive path
 `/cluster/models_archive` is inaccessible until NAS is restored.
 
 ---
@@ -33,7 +33,7 @@ NAS (node-nas 192.168.1.118) is **currently offline**. The archive path
 |---|---|---|---|
 | Active (fast) | nodegpu `/` (SSD) | Implemented | Ollama native, full GPU speed |
 | Fast partition `/fast` | Not created | Planned | No separate SSD partition exists yet |
-| Archive (cold) | node-nas `/cluster/models_archive` | Offline | NAS at 192.168.1.118 unreachable |
+| Archive (cold) | node-nas `/cluster/models_archive` | Offline | NAS at 192.168.1.203 unreachable |
 
 There is no cold-storage tier in operation. Model archival is not possible
 until node-nas is restored.
@@ -114,5 +114,5 @@ Until then, `model_sync.sh` NAS→fast copy path is a no-op (NAS offline + no
 - Model pulls are done via `POST /api/pull` (setup_models.sh) or `ollama pull`
   on nodegpu. Each 14b model takes ~9 GB download.
 - After pulling a new model, no service restart required — Ollama hot-loads.
-- Disk usage check: `ssh jdl@192.168.1.120 "df -h /"`
-- Model list check: `curl -s http://192.168.1.120:11434/api/tags | python3 -c "import sys,json; [print(m['name'], round(m['size']/1e9,1),'GB') for m in json.load(sys.stdin)['models']]"`
+- Disk usage check: `ssh jdl@192.168.1.202 "df -h /"`
+- Model list check: `curl -s http://192.168.1.202:11434/api/tags | python3 -c "import sys,json; [print(m['name'], round(m['size']/1e9,1),'GB') for m in json.load(sys.stdin)['models']]"`

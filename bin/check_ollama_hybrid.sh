@@ -15,13 +15,11 @@ check() {
 
 echo "=== Ollama Hybrid Status ==="
 echo "TIER 1 — asus_gpu"
-check "asus_gpu"  "http://localhost:11434"     "1"
+check "nodegpu"   "http://192.168.1.202:11434" "1"
 
 echo "TIER 2 — cluster_cpu"
-check "node1_cpu" "http://localhost:11435"     "2"
-check "node2_cpu" "http://192.168.1.112:11434" "2"
-check "node4_cpu" "http://192.168.1.122:11434" "2"
-check "node3_cpu" "http://192.168.1.121:11434" "2"
+check "node1_cpu" "http://192.168.1.210:11434" "2"
+check "node2_cpu" "http://192.168.1.211:11434" "2"
 
 echo ""
 echo "Router:"

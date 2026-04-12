@@ -7,7 +7,7 @@ Root: `~/ai-os` | Stack: Postgres (docker), agent-router:5679, agent-core, redis
 ## Ollama Hybrid Architecture — activo 2026-03-21
 - ASUS Docker Ollama: GPU RTX 4050, 28 tok/s, localhost:11434 (nvidia-container-toolkit instalado)
 - TIER 1 asus_gpu: localhost:11434 → qwen2.5-coder:7b (GPU)
-- TIER 2 cluster_cpu: node1(tunnel:11435), node2(192.168.1.112:11434), node4(192.168.1.122:11434)
+- TIER 2 cluster_cpu: node1(tunnel:11435), node2(192.168.1.211:11434), node4(192.168.1.122:11434)
 - NFS models: /cluster/d1/ollama/models/ — partilhado entre nodes
 - NFS binary: /cluster/d1/ollama/bin/ollama — instalado via user systemd (aios-ollama.service)
 - model_router.py v2: PROVIDERS registry, healthcheck, routing, CLI `health`/`status`/`set_override`
@@ -97,9 +97,9 @@ Commit `2b85c3f` = Sprint RH + Prompt Inbox (branch aios/20260316_084144_c0deaab
 - WSL2 IP: `172.22.158.152`
 
 ### Nodes e roles
-- node1: 192.168.1.111 (control plane)
-- node2: 192.168.1.112 → `ai_analysis`
-- node3: 192.168.1.121 → `preprocess,general`
+- node1: 192.168.1.210 (control plane)
+- node2: 192.168.1.211 → `ai_analysis`
+- node3: 192.168.1.212 → `preprocess,general`
 - node4: 192.168.1.122 → `radar,automation,ai_analysis`
 - node5: 192.168.1.123 → `general`
 - node6: 192.168.1.124 → `general`

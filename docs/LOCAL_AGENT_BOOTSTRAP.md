@@ -58,14 +58,14 @@ All cluster nodes mount NFS. The codebase is shared; each node runs
 | Node | IP | Roles | Notes |
 |---|---|---|---|
 | control (WSL2) | 172.22.x.x | scheduler, DB, UI | pipeline_scheduler, autonomia_orchestrator |
-| nodegpu | 192.168.1.120 | llm_gpu, ai_analysis | RTX3090 24GB VRAM, Ollama |
-| nodecpu | 192.168.1.121 | preprocess, general | was node3 |
-| node2 | 192.168.1.112 | ai_analysis | Strategist — Claude API |
+| nodegpu | 192.168.1.202 | llm_gpu, ai_analysis | RTX3090 24GB VRAM, Ollama |
+| nodecpu | 192.168.1.212 | preprocess, general | was node3 |
+| node2 | 192.168.1.211 | ai_analysis | Strategist — Claude API |
 | node4 | 192.168.1.122 | radar, automation, ai_analysis | Operations |
 | node5 | 192.168.1.123 | general | Finance — phase-out pending |
 | node6 | 192.168.1.124 | general | Radar — phase-out pending |
 | node7 | 192.168.1.125 | watchdog, light, echo, fallback | Watchdog |
-| node-nas | 192.168.1.118 | NAS storage | Currently offline |
+| node-nas | 192.168.1.203 | NAS storage | Currently offline |
 
 Node roles and DB config are in `config/cluster_workers.json`.
 
@@ -74,8 +74,8 @@ Node roles and DB config are in `config/cluster_workers.json`.
 ## 4. Cluster Assumptions
 
 - NFS codebase path: `/cluster/d1/ai-os/` (not `/cluster/ai-os/`)
-- DB: `postgresql+pg8000://aios_user:jdl@192.168.1.172:5432/aios`
-  (192.168.1.172 = Windows host portproxy → WSL2 :5432)
+- DB: `postgresql+pg8000://aios_user:jdl@192.168.1.201:5432/aios`
+  (192.168.1.201 = Windows host portproxy → WSL2 :5432)
 - Python deps on NFS: `PYTHONPATH=/cluster/d1/ai-os/pylib` (pg8000, anthropic, etc.)
 - Never add `bin/` to PYTHONPATH in subprocess calls — `bin/secrets.py` shadows stdlib `secrets`
 - Node identity: env var `AIOS_NODE_NAME` (e.g. `node2`); cluster_worker.py reads this
@@ -159,7 +159,7 @@ Run in order. Files are idempotent (use `IF NOT EXISTS` / `DO $$ … $$`).
 | `agents/reviewer/reviewer_agent.py` | Calls qwen2.5:14b via Ollama API to review diff |
 | `agents/executor/executor_agent.py` | Applies approved diff via `git apply` |
 | `bin/agent_pipeline.py` | Orchestrates engineer → reviewer → executor |
-| `config/local_ai.json` | Model routing config (nodegpu 192.168.1.120:11434) |
+| `config/local_ai.json` | Model routing config (nodegpu 192.168.1.202:11434) |
 | `bin/ai-code` | Interactive Aider wrapper for nodegpu sessions |
 | `bin/validate_local_agent.sh` | Validates Ollama, models, Aider, file structure |
 | `bin/setup_models.sh` | Pulls required models into Ollama |
@@ -177,7 +177,7 @@ Executor ALWAYS_DENY (in `executor_agent.py`):
 
 **Interactive (on nodegpu):**
 ```bash
-ssh jdl@192.168.1.120
+ssh jdl@192.168.1.202
 ai-code ~/ai-os                          # qwen2.5-coder:14b default
 ai-code --model ollama/qwen2.5:14b       # general model
 ```
@@ -215,7 +215,7 @@ INSTALL_OPTIONAL=1 bash bin/setup_models.sh  # also install deepseek-r1:14b + mi
 
 | Risk | Status |
 |---|---|
-| node-nas (192.168.1.118) offline | NAS unreachable — model_sync.sh exits early; no archive |
+| node-nas (192.168.1.203) offline | NAS unreachable — model_sync.sh exits early; no archive |
 | node5/node6 phase-out pending | Both run only `general` role; migrate workload to nodecpu first |
 | NEEDS_REVISION not retried | Pipeline exits on NEEDS_REVISION; manual re-run required |
 | No git commit step in executor | `git apply` succeeds but no commit created automatically |
@@ -227,7 +227,7 @@ INSTALL_OPTIONAL=1 bash bin/setup_models.sh  # also install deepseek-r1:14b + mi
 ## 10. Next 10 Highest-Value Improvements
 
 1. **Phase out node5/node6** — migrate `general` jobs to nodecpu; update `config/cluster_workers.json`
-2. **Restore node-nas** — investigate 192.168.1.118; re-enable model_sync.sh archive path
+2. **Restore node-nas** — investigate 192.168.1.203; re-enable model_sync.sh archive path
 3. **Add git commit step in executor** — after successful `git apply`, run `git commit -m "aios: <goal>"`
 4. **Add engineer retry loop** — when reviewer returns NEEDS_REVISION, re-run engineer with reviewer feedback (max 2 retries)
 5. **Connect agent_pipeline to worker_jobs** — add `llm_engineer` kind to pipeline_scheduler; cluster_worker dispatches to agent_pipeline

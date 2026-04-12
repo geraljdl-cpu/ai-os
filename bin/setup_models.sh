@@ -3,7 +3,7 @@
 # Usage: ./bin/setup_models.sh [ollama_url]
 set -euo pipefail
 
-OLLAMA_URL="${1:-${OLLAMA_URL:-http://192.168.1.120:11434}}"
+OLLAMA_URL="${1:-${OLLAMA_URL:-http://192.168.1.202:11434}}"
 
 # Modelos necessários para o agent pipeline
 declare -A MODELS=(
