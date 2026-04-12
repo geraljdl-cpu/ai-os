@@ -13,7 +13,6 @@ SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 case "$NODE_NAME" in
   node1) ROLE="coordinator" ;;
   node2) ROLE="ai_analysis" ;;
-  node3) ROLE="general" ;;
   nodecpu) ROLE="preprocess" ;;
   nodegpu) ROLE="gpu_inference" ;;
   *)     ROLE="general" ;;

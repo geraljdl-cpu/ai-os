@@ -20,10 +20,9 @@
   │ general    │    │ llm_gpu     │    │  models     │
   └────────────┘    └────────────┘    └─────────────┘
         │
-  ┌─────┴──── Auxiliares ────────────┐
-  │ node2  .211  ai_analysis         │
-  │ node3  .212  general · fallback  │
-  └──────────────────────────────────┘
+  ┌─────┴──── Auxiliares ───┐
+  │ node2  .211  ai_analysis │
+  └─────────────────────────┘
 ```
 
 ---
@@ -37,9 +36,8 @@
 | nodegpu  | 192.168.1.202 | Servidor RTX3090 | gpu_inference, llm_gpu, ai_analysis | ✅ ativo      | ✅  |
 | node-nas | 192.168.1.203 | Mini PC          | nfs, backups, models                | ✅ ativo      | ✅  |
 | node2    | 192.168.1.211 | Mini PC          | ai_analysis                         | ✅ ativo      | ✅  |
-| node3    | 192.168.1.212 | Mini PC          | general, fallback                   | ❌ desligado  | ❌  |
 
-*Nodes 4–7 removidos do cluster.*
+*Nodes 3–7 removidos do cluster.*
 
 ---
 
@@ -59,7 +57,6 @@ nodecpu  → preprocess, general
 nodegpu  → gpu_inference, llm_gpu, ai_analysis
 node1    → coordinator
 node2    → ai_analysis
-node3    → general, fallback
 ```
 
 ---
@@ -98,7 +95,6 @@ node3    → general, fallback
 ## Pendências
 
 ### Próximos passos
-- [ ] Activar node3 (.212) como worker de fallback
 - [ ] Remover alias 192.168.1.126 de node-nas após confirmar todos os nodes montam de .203
 
 ### Descontinuado
@@ -107,6 +103,7 @@ node3    → general, fallback
 - [x] GPU pipeline activo em nodegpu (radar_gpu → llm_gpu)
 - [x] IPs físicos migrados via netplan (2026-04-12): node1→.210, nodecpu→.201, nodegpu→.202, node-nas→.203, node2→.211
 - [x] node-nas identificado (era node8 em .126), renomeado e migrado para .203
+- [x] node3 (.212) removido do cluster
 
 ---
 

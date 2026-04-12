@@ -4,8 +4,7 @@
     "nodecpu":  {"roles": ["preprocess", "general"],          "ip": "192.168.1.201", "agent": "Engineering", "agent_desc": "CPU worker principal — pré-processamento e tarefas gerais"},
     "nodegpu":  {"roles": ["gpu_inference", "llm_gpu", "ai_analysis"], "ip": "192.168.1.202", "agent": "GPU",       "agent_desc": "Inferência GPU RTX3090 — LLM local"},
     "node1":    {"roles": ["coordinator"],                    "ip": "192.168.1.210", "agent": "Coordinator", "agent_desc": "Control plane — DB, UI, scheduler"},
-    "node2":    {"roles": ["ai_analysis"],                    "ip": "192.168.1.211", "agent": "Strategist",  "agent_desc": "Análise de ideias com LLM"},
-    "node3":    {"roles": ["general", "fallback"],            "ip": "192.168.1.212", "agent": "Fallback",    "agent_desc": "Worker geral de reserva"}
+    "node2":    {"roles": ["ai_analysis"],                    "ip": "192.168.1.211", "agent": "Strategist",  "agent_desc": "Análise de ideias com LLM"}
   },
   "db": {
     "host": "192.168.1.201",
