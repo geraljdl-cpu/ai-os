@@ -1,0 +1,11 @@
+[Unit]
+Description=AIOS Postgres Backup — pg_dump local com retenção 30 dias
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/jdl/ai-os
+EnvironmentFile=/home/jdl/.env.db
+ExecStart=/usr/bin/python3 /home/jdl/ai-os/bin/backup_pg.py backup
+StandardOutput=append:/home/jdl/ai-os/runtime/logs/pgbackup.log
+StandardError=append:/home/jdl/ai-os/runtime/logs/pgbackup.log

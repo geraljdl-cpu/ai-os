@@ -1,0 +1,11 @@
+[Unit]
+Description=AIOS Postgres Backup Push — rclone para Google Drive + rsync para node-nas
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/jdl/ai-os
+EnvironmentFile=/home/jdl/.env.db
+ExecStart=/home/jdl/ai-os/bin/pgbackup_push_all.sh
+StandardOutput=append:/home/jdl/ai-os/runtime/logs/pgbackup_push.log
+StandardError=append:/home/jdl/ai-os/runtime/logs/pgbackup_push.log

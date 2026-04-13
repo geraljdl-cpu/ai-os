@@ -1,0 +1,9 @@
+[Unit]
+Description=AIOS Postgres Backup Push — diário às 03:15 UTC (após backup das 03:00)
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

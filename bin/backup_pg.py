@@ -35,7 +35,7 @@ def _load_db_params() -> dict:
                 url = line.split("=", 1)[1].strip()
                 # postgresql://user:pass@host:port/dbname
                 try:
-                    rest = url.replace("postgresql://", "")
+                    rest = url.replace("postgresql+pg8000://", "postgresql://").replace("postgresql://", "")
                     userpass, hostdb = rest.split("@", 1)
                     user, password   = userpass.split(":", 1)
                     hostport, dbname = hostdb.split("/", 1)
