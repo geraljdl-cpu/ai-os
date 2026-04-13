@@ -32,7 +32,7 @@ import psycopg2.extras
 DB_DSN = os.environ.get(
     "DATABASE_URL",
     "postgresql://aios_user:jdl@127.0.0.1:5432/aios",
-)
+).replace("postgresql+pg8000://", "postgresql://")
 TG_TOKEN = os.environ.get("AIOS_TG_TOKEN", "")
 TG_CHAT  = os.environ.get("AIOS_TG_CHAT", "")
 
