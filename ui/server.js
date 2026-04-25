@@ -88,6 +88,8 @@ const AUTH_EXEMPT = new Set([
   '/finance/toconline/health',
   // WhatsApp ponto webhook (Twilio envia sem JWT)
   '/whatsapp/inbound', '/whatsapp/status', '/whatsapp/health',
+  // Local Code Agent — sem JWT (token gerido server-side)
+  '/code',
 ]);
 app.use('/api', (req, res, next) => {
   if (AUTH_EXEMPT.has(req.path)) return next();
@@ -3364,6 +3366,50 @@ app.get('/api/rh/files/:filename', requireRole('operator'), (req, res) => {
 app.get('/api/rh/stats', requireRole('operator'), (req, res) => {
   try { res.json(_rhExec(['get_stats'])); }
   catch(e) { res.status(500).json({ ok: false, error: String(e.message||e).slice(0,300) }); }
+});
+
+
+// Local Code Agent proxy — keeps AIOS_TOKEN server-side
+function _readAiosToken() {
+  if (process.env.AIOS_TOKEN) return process.env.AIOS_TOKEN.trim();
+  try {
+    const envPath = path.join(__dirname, '..', '.env');
+    const env = fs.readFileSync(envPath, 'utf8');
+    const line = env.split(/\r?\n/).find(l => l.startsWith('AIOS_TOKEN='));
+    return line ? line.split('=').slice(1).join('=').trim() : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+app.post('/api/code', async (req, res) => {
+  try {
+    const token = _readAiosToken();
+    console.log('[api/code] token len=', token.length, 'first4=', token.slice(0,4), 'last4=', token.slice(-4));
+    if (!token) return res.status(500).json({ ok:false, error:'AIOS_TOKEN missing' });
+
+    const body = {
+      task: String(req.body?.task || '').trim(),
+      files: Array.isArray(req.body?.files) ? req.body.files : [],
+      dry_run: req.body?.dry_run !== false
+    };
+    if (!body.task) return res.status(400).json({ ok:false, error:'task required' });
+
+    const r = await fetch('http://127.0.0.1:5679/code', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-AIOS-TOKEN': token
+      },
+      body: JSON.stringify(body)
+    });
+
+    const text = await r.text();
+    try { return res.status(r.status).json(JSON.parse(text)); }
+    catch (_) { return res.status(r.status).json({ ok:false, error:text }); }
+  } catch (e) {
+    return res.status(500).json({ ok:false, error:String(e.message || e) });
+  }
 });
 
 app.listen(3000, () => console.log("UI http://localhost:3000"));
