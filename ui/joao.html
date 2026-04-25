@@ -4714,5 +4714,48 @@ async function uploadExpensePhoto(eid, input) {
 }
 </script>
 
+
+<section style="margin:24px 0;padding:16px;border:1px solid rgba(255,255,255,.15);border-radius:12px;">
+  <h2>Local Code Agent</h2>
+  <textarea id="codeTask" rows="4" style="width:100%;" placeholder="Descreve a tarefa de código..."></textarea>
+  <input id="codeFiles" style="width:100%;margin-top:8px;" placeholder="ex: bin/foo.py, ui/joao.html" />
+  <label style="display:block;margin-top:8px;">
+    <input type="checkbox" id="codeDryRun" checked /> dry-run
+  </label>
+  <button id="sendCodeTask" style="margin-top:8px;">Enviar</button>
+  <pre id="codeResult" style="white-space:pre-wrap;margin-top:12px;max-height:420px;overflow:auto;"></pre>
+</section>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('sendCodeTask');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const out = document.getElementById('codeResult');
+    btn.disabled = true;
+    out.textContent = 'A executar...';
+    try {
+      const files = document.getElementById('codeFiles').value
+        .split(',').map(x => x.trim()).filter(Boolean);
+      const payload = {
+        task: document.getElementById('codeTask').value,
+        files,
+        dry_run: document.getElementById('codeDryRun').checked
+      };
+      const r = await fetch('/api/code', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const j = await r.json();
+      out.textContent = JSON.stringify(j, null, 2);
+    } catch (e) {
+      out.textContent = 'Erro: ' + (e.message || e);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+});
+</script>
+
 </body>
 </html>
