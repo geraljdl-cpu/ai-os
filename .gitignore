@@ -73,3 +73,7 @@ bin/autofill.py
 .env
 .env
 .env
+.claude/
+.venv/
+config/aios.env
+runtime/
