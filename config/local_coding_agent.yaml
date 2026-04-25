@@ -1,0 +1,67 @@
+# config/local_coding_agent.yaml
+# AI-OS Local Coding Agent — Central Configuration
+# All model routing, runtime paths, and safety settings are defined here.
+# Do NOT hardcode model names or endpoints in agents/coding/*.py — always read from here.
+
+# ── Inference Backend ──────────────────────────────────────────────────────────
+# nodegpu: RTX 3090, Ollama running at 192.168.1.202:11434
+# This is the only active inference endpoint for the coding subsystem.
+# NAS (/cluster) is NOT an inference endpoint — archive/storage only.
+ollama:
+  endpoint: http://192.168.1.202:11434
+  timeout_generate: 120      # seconds for plan/code generation
+  timeout_review:    90      # seconds for review calls
+  timeout_health:     3      # seconds for healthcheck probe
+
+# ── Model Routing ─────────────────────────────────────────────────────────────
+# Single source of truth — only agents/coding/router.py reads this.
+# Do not duplicate these model names in any other file.
+models:
+  coding:    qwen2.5-coder:7b   # primary coding / plan / patch generation
+  reasoning: deepseek-r1:14b     # reasoning, debug, analysis
+  light:     mistral:7b          # fast / simple / triage tasks
+  review:    qwen2.5-coder:7b   # reviewer (same as coding, explicit for clarity)
+  plan:      qwen2.5-coder:7b   # plan generation
+  debug:     deepseek-r1:14b     # debugging and root-cause analysis
+
+# ── Runtime Paths ─────────────────────────────────────────────────────────────
+# All paths are relative to AIOS_ROOT (/home/jdl/ai-os)
+runtime:
+  agent_memory_dir: runtime/agent_memory    # per-task JSONL memory
+  agent_logs_dir:   runtime/agent_logs      # global coding agent log
+
+# ── Safety Settings ───────────────────────────────────────────────────────────
+safety:
+  # Never bypass review gate — executor refuses unapproved changes
+  require_review: true
+  # Commands outside the repo root are always blocked
+  enforce_repo_boundary: true
+  # Post-validation syntax check after file writes
+  run_post_validation: true
+  post_validation_cmd: "python3 -m py_compile {file}"
+
+# ── Operational Mode ──────────────────────────────────────────────────────────
+operation:
+  # auto_mode: if true, executor applies approved changes without human confirmation
+  # Default OFF — human reviews the ReviewResult before executor.execute() is called
+  auto_mode: false
+  # dry_run: if true, executor shows what it would do without changing files
+  dry_run: false
+  # Max file lines to include as context in engineer prompts
+  context_max_lines: 100
+
+# ── Cloud Fallback ────────────────────────────────────────────────────────────
+# Local-first is always the default. Cloud fallback is DISABLED unless explicitly enabled.
+# When enabled, the coding subsystem falls back to OpenAI if Ollama is unreachable.
+# Requires OPENAI_API_KEY env var and the openai package.
+cloud_fallback:
+  enabled: false              # set true to enable; local-first remains default
+  trigger: ollama_unreachable # only condition that triggers fallback
+  provider: openai            # openai-compatible API
+  model: gpt-4o-mini          # cheap, fast model for fallback; swap to gpt-4o for quality
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  level: info
+  # All events are written to runtime/agent_logs/coding_agent.jsonl (JSONL)
+  format: jsonl

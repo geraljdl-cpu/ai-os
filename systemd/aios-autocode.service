@@ -1,0 +1,12 @@
+[Unit]
+Description=AI-OS Autocode — run one safe coding improvement via /code
+After=network.target
+
+[Service]
+Type=oneshot
+User=jdl
+WorkingDirectory=/home/jdl/ai-os
+Environment=AIOS_ROOT=/home/jdl/ai-os
+ExecStart=/home/jdl/ai-os/.venv/bin/python3 /home/jdl/ai-os/bin/run_autocode_once.py
+StandardOutput=journal
+StandardError=journal

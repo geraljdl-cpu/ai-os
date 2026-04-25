@@ -323,3 +323,42 @@ async def token_auth(request: Request, call_next):
     if token != AIOS_TOKEN:
         return JSONResponse(status_code=401, content={"error": "unauthorized"})
     return await call_next(request)
+
+# --- AI-OS local coding proxy ---
+import os as _aios_os
+import urllib.request as _aios_urllib_request
+import urllib.error as _aios_urllib_error
+import json as _aios_json
+from fastapi import Request as _AIOSRequest
+from fastapi.responses import JSONResponse as _AIOSJSONResponse
+
+@app.post("/code")
+async def aios_code_proxy(request: _AIOSRequest):
+    expected = _aios_os.environ.get("AIOS_TOKEN", "")
+    got = request.headers.get("X-AIOS-TOKEN", "")
+    if not expected:
+        return _AIOSJSONResponse(status_code=403, content={"error": "AIOS_TOKEN not set"})
+    if got != expected:
+        return _AIOSJSONResponse(status_code=401, content={"error": "unauthorized"})
+
+    body = await request.body()
+    req = _aios_urllib_request.Request(
+        "http://172.18.0.1:5680/code",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with _aios_urllib_request.urlopen(req, timeout=180) as resp:
+            data = resp.read().decode("utf-8")
+            return _AIOSJSONResponse(status_code=resp.status, content=_aios_json.loads(data))
+    except _aios_urllib_error.HTTPError as e:
+        data = e.read().decode("utf-8") if e.fp else ""
+        try:
+            content = _aios_json.loads(data)
+        except Exception:
+            content = {"error": data or str(e)}
+        return _AIOSJSONResponse(status_code=e.code, content=content)
+    except Exception as e:
+        return _AIOSJSONResponse(status_code=502, content={"error": str(e)})
+# --- /AI-OS local coding proxy ---

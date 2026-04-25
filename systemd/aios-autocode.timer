@@ -1,0 +1,10 @@
+[Unit]
+Description=AI-OS Autocode Timer (once per day)
+
+[Timer]
+OnBootSec=300
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

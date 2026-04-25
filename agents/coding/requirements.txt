@@ -1,0 +1,2 @@
+pyyaml>=6.0
+openai>=1.0   # optional: only needed when cloud_fallback.enabled=true in config/local_coding_agent.yaml
